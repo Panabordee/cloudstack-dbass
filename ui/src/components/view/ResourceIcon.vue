@@ -16,7 +16,7 @@
 // under the License.
 
 <template>
-  <img :src="computedImage" :height="dimensions" :width="dimensions" :style="{ marginTop: (dimensions === 56 || ['deployVirtualMachine'].includes($route.path.split('/')[2])) ? '' : '-5px' }"/>
+  <img :src="computedImage" :height="dimensions" :width="dimensions" :style="{ marginTop: (dimensions === 56 || ['deployVirtualMachine'].includes($route.path.split('/')[2])) ? '' : '-5px', borderRadius: '50%' }"/>
 </template>
 <script>
 export default {
