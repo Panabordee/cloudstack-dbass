@@ -163,7 +163,7 @@
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }" v-if="'listVirtualMachines' in $store.getters.apis">
-      <chart-card :loading="loading" class="dashboard-compute">
+      <chart-card :loading="loading" class="dashboard-compute dashboard-quota-card">
         <template #title>
           <div class="center">
             <h3>
@@ -199,102 +199,70 @@
           </a-col>
         </a-row>
         <a-divider style="margin: 1px 0px; border-width: 0px;"/>
-        <div
-          v-for="usageType in ['vm', 'cpu', 'memory', 'gpu', 'project']"
-          :key="usageType">
-          <div v-if="usageType + 'total' in entity">
-            <div>
-              <strong>
-                {{ $t(getLabel(usageType)) }}
-              </strong>
-              <span style="float: right">
-              {{ getValue(usageType, entity[usageType + 'total']) }} {{ $t('label.used') }}
-              </span>
-            </div>
-            <a-progress
-            status="active"
-            :percent="parseFloat(getPercentUsed(entity[usageType + 'total'], entity[usageType + 'limit']))"
-            :format="p => entity[usageType + 'limit'] !== '-1' && entity[usageType + 'limit'] !== 'Unlimited' ? p.toFixed(0) + '%' : ''"
-            :stroke-color="getStrokeColor(entity[usageType + 'available'])"
-            size="small"
-            />
-            <br/>
-            <div style="text-align: center">
-              {{ entity[usageType + 'available'] === 'Unlimited' ? $t('label.unlimited') : getValue(usageType, entity[usageType + 'available']) }} {{ $t('label.available') }}
-              {{ entity[usageType + 'limit'] === 'Unlimited' ? '' : (' | ' + getValue(usageType, entity[usageType + 'limit']) + ' ' + $t('label.limit')) }}
+        <div class="quota-grid">
+          <div
+            v-for="usageType in ['vm', 'cpu', 'memory', 'gpu', 'project']"
+            :key="usageType">
+            <div v-if="usageType + 'total' in entity">
+              <quota-pie
+                :title="$t(getLabel(usageType))"
+                :value="getValue(usageType, entity[usageType + 'total']) + ' ' + $t('label.used')"
+                :summary="getQuotaSummary(usageType)"
+                :icon="getUsageIcon(usageType)"
+                :percent="getPercentUsed(entity[usageType + 'total'], entity[usageType + 'limit'])"
+                :unlimited="isUnlimited(entity[usageType + 'limit'])"
+                :color="getStrokeColor(entity[usageType + 'available'])" />
             </div>
           </div>
         </div>
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }">
-      <chart-card :loading="loading" class="dashboard-storage">
+      <chart-card :loading="loading" class="dashboard-storage dashboard-quota-card">
         <template #title>
           <div class="center">
             <h3><hdd-outlined /> {{ $t('label.storage') }}</h3>
           </div>
         </template>
         <a-divider style="margin: 6px 0px; border-width: 0px"/>
-        <div
-          v-for="usageType in ['volume', 'snapshot', 'template', 'primarystorage', 'secondarystorage', 'backup', 'backupstorage', 'bucket', 'objectstorage']"
-          :key="usageType">
-          <div>
-            <div>
-              <strong>
-                {{ $t(getLabel(usageType)) }}
-              </strong>
-              <span style="float: right">
-              {{ getValue(usageType, entity[usageType + 'total']) }} {{ $t('label.used') }}
-              </span>
-            </div>
-            <a-progress
-            status="active"
-            :percent="parseFloat(getPercentUsed(entity[usageType + 'total'], entity[usageType + 'limit']))"
-            :format="p => entity[usageType + 'limit'] !== '-1' && entity[usageType + 'limit'] !== 'Unlimited' ? p.toFixed(0) + '%' : ''"
-            :stroke-color="getStrokeColor(entity[usageType + 'available'])"
-            size="small"
-            />
-            <br/>
-            <div style="text-align: center">
-              {{ entity[usageType + 'available'] === 'Unlimited' ? $t('label.unlimited') : getValue(usageType, entity[usageType + 'available']) }} {{ $t('label.available') }}
-              {{ entity[usageType + 'limit'] === 'Unlimited' ? '' : (' | ' + getValue(usageType, entity[usageType + 'limit']) + ' ' + $t('label.limit')) }}
-            </div>
+        <div class="quota-grid">
+          <div
+            v-for="usageType in ['volume', 'snapshot', 'template', 'primarystorage', 'secondarystorage', 'backup', 'backupstorage', 'bucket', 'objectstorage']"
+            :key="usageType">
+            <quota-pie
+              v-if="usageType + 'total' in entity"
+              :title="$t(getLabel(usageType))"
+              :value="getValue(usageType, entity[usageType + 'total']) + ' ' + $t('label.used')"
+              :summary="getQuotaSummary(usageType)"
+              :icon="getUsageIcon(usageType)"
+              :percent="getPercentUsed(entity[usageType + 'total'], entity[usageType + 'limit'])"
+              :unlimited="isUnlimited(entity[usageType + 'limit'])"
+              :color="getStrokeColor(entity[usageType + 'available'])" />
           </div>
         </div>
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }" class="dashboard-card">
-      <chart-card :loading="loading" class="dashboard-card">
+      <chart-card :loading="loading" class="dashboard-card dashboard-quota-card">
         <template #title>
           <div class="center">
             <h3><apartment-outlined /> {{ $t('label.network') }}</h3>
           </div>
         </template>
         <a-divider style="margin: 6px 0px; border-width: 0px"/>
-        <div
-          v-for="usageType in ['ip', 'network', 'vpc']"
-          :key="usageType">
-          <div>
-            <div>
-              <strong>
-                {{ $t(getLabel(usageType)) }}
-              </strong>
-              <span style="float: right">
-              {{ getValue(usageType, entity[usageType + 'total']) }} {{ $t('label.used') }}
-              </span>
-            </div>
-            <a-progress
-            status="active"
-            :percent="parseFloat(getPercentUsed(entity[usageType + 'total'], entity[usageType + 'limit']))"
-            :format="p => entity[usageType + 'limit'] !== '-1' && entity[usageType + 'limit'] !== 'Unlimited' ? p.toFixed(0) + '%' : ''"
-            :stroke-color="getStrokeColor(entity[usageType + 'available'])"
-            size="small"
-            />
-            <br/>
-            <div style="text-align: center">
-              {{ entity[usageType + 'available'] === 'Unlimited' ? $t('label.unlimited') : getValue(usageType, entity[usageType + 'available']) }} {{ $t('label.available') }}
-              {{ entity[usageType + 'limit'] === 'Unlimited' ? '' : (' | ' + getValue(usageType, entity[usageType + 'limit']) + ' ' + $t('label.limit')) }}
-            </div>
+        <div class="quota-grid">
+          <div
+            v-for="usageType in ['ip', 'network', 'vpc']"
+            :key="usageType">
+            <quota-pie
+              v-if="usageType + 'total' in entity"
+              :title="$t(getLabel(usageType))"
+              :value="getValue(usageType, entity[usageType + 'total']) + ' ' + $t('label.used')"
+              :summary="getQuotaSummary(usageType)"
+              :icon="getUsageIcon(usageType)"
+              :percent="getPercentUsed(entity[usageType + 'total'], entity[usageType + 'limit'])"
+              :unlimited="isUnlimited(entity[usageType + 'limit'])"
+              :color="getStrokeColor(entity[usageType + 'available'])" />
           </div>
         </div>
       </chart-card>
@@ -373,6 +341,7 @@ import ChartCard from '@/components/widgets/ChartCard'
 import UsageDashboardChart from '@/views/dashboard/UsageDashboardChart'
 import ResourceLabel from '@/components/widgets/ResourceLabel'
 import Status from '@/components/widgets/Status'
+import QuotaPie from '@/components/widgets/QuotaPie'
 
 export default {
   name: 'UsageDashboard',
@@ -380,7 +349,8 @@ export default {
     ChartCard,
     UsageDashboardChart,
     ResourceLabel,
-    Status
+    Status,
+    QuotaPie
   },
   props: {
     resource: {
@@ -647,8 +617,44 @@ export default {
       }
       return value
     },
+    getUsageIcon (usageType) {
+      const icons = {
+        vm: 'cloud-server-outlined',
+        cpu: 'dashboard-outlined',
+        memory: 'database-outlined',
+        gpu: 'desktop-outlined',
+        project: 'project-outlined',
+        volume: 'hdd-outlined',
+        snapshot: 'build-outlined',
+        template: 'picture-outlined',
+        primarystorage: 'database-outlined',
+        secondarystorage: 'cloud-outlined',
+        backup: 'safety-outlined',
+        backupstorage: 'save-outlined',
+        bucket: 'inbox-outlined',
+        objectstorage: 'cloud-upload-outlined',
+        ip: 'environment-outlined',
+        network: 'apartment-outlined',
+        vpc: 'deployment-unit-outlined'
+      }
+      return icons[usageType] || 'pie-chart-outlined'
+    },
+    isUnlimited (limit) {
+      return limit === 'Unlimited' || limit === '-1' || limit === -1
+    },
+    getQuotaSummary (usageType) {
+      const available = this.entity[usageType + 'available']
+      const limit = this.entity[usageType + 'limit']
+      if (this.isUnlimited(limit)) {
+        return this.$t('label.unlimited') + ' ' + this.$t('label.available')
+      }
+      return `${this.getValue(usageType, available)} ${this.$t('label.available')} | ${this.getValue(usageType, limit)} ${this.$t('label.limit')}`
+    },
     getPercentUsed (total, limit) {
-      return (limit === 'Unlimited') ? 0 : (total / limit) * 100
+      if (this.isUnlimited(limit) || !Number(limit)) {
+        return 0
+      }
+      return (Number(total) / Number(limit)) * 100
     },
     getEventColour (event) {
       if (event.level === 'ERROR') {
@@ -693,14 +699,14 @@ export default {
   .dashboard-compute {
     width: 100%;
     overflow-x:hidden;
-    overflow-y: scroll;
+    overflow-y: auto;
     max-height: 420px;
   }
 
   .dashboard-storage {
     width: 100%;
     overflow-x:hidden;
-    overflow-y: scroll;
+    overflow-y: auto;
     max-height: 420px;
   }
 
@@ -714,6 +720,18 @@ export default {
   .center {
     display: block;
     text-align: center;
+  }
+
+  .quota-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+    align-content: start;
+  }
+
+  .dashboard-quota-card {
+    height: 100%;
+    min-height: 420px;
   }
 
   @media (max-width: 1200px) {
