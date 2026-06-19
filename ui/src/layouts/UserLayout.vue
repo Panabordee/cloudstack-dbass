@@ -24,22 +24,7 @@
       class="button-clear-notification"
       @click="onClearNotification">{{ $t('label.clear.notification') }}</a-button>
     <div class="user-layout-container">
-      <div class="user-layout-header">
-        <img
-          v-if="$config.banner"
-          :style="{
-            width: $config.theme['@banner-width'],
-            height: $config.theme['@banner-height']
-          }"
-          :src="$config.banner"
-          class="user-layout-logo"
-          alt="logo">
-      </div>
       <route-view></route-view>
-    </div>
-    <div class="user-layout-footer" v-if="$config.loginFooter || $config.resetPasswordFooter">
-      <label v-if="$route.name === 'resetPassword' && $config.resetPasswordFooter" v-html="$config.resetPasswordFooter"></label>
-      <label v-else v-html="$config.loginFooter"></label>
     </div>
   </div>
 </template>
@@ -101,50 +86,10 @@ export default {
 
 <style lang="less" scoped>
 .user-layout {
-  height: 100%;
+  min-height: 100vh;
 
   &-container {
-    padding: 3rem 0;
     width: 100%;
-
-    @media (min-height:600px) {
-      padding: 0;
-      position: relative;
-      top: 50%;
-      transform: translateY(-50%);
-      margin-top: -50px;
-    }
-  }
-
-  &-logo {
-    border-style: none;
-    margin: 0 auto 2rem;
-    display: block;
-
-    .mobile & {
-      max-width: 300px;
-      margin-bottom: 1rem;
-    }
-  }
-
-  &-footer {
-    display: flex;
-    flex-direction: column;
-    position: absolute;
-    bottom: 20px;
-    text-align: center;
-    width: 100%;
-
-    @media (max-height: 600px) {
-      position: relative;
-      margin-top: 50px;
-    }
-
-    label {
-      width: 368px;
-      font-weight: 500;
-      margin: 0 auto;
-    }
   }
 }
 </style>
