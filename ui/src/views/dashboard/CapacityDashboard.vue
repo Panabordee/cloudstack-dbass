@@ -170,7 +170,7 @@
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }">
-      <chart-card :loading="capacityLoading" class="dashboard-card dashboard-quota-card">
+      <chart-card :loading="capacityLoading" class="dashboard-card">
         <template #title>
           <div class="center">
             <h3><cloud-outlined /> {{ $t('label.compute') }}</h3>
@@ -182,13 +182,12 @@
             />
           </div>
         </template>
-        <div class="quota-grid">
+        <div>
           <div v-for="ctype in ['MEMORY', 'CPU', 'CPU_CORE', 'GPU']" :key="ctype" >
             <div v-if="statsMap[ctype]">
               <quota-pie
                 :title="$t(ts[ctype])"
                 :value="getCapacityValue(ctype)"
-                :summary="getCapacitySummary(ctype)"
                 :icon="getCapacityIcon(ctype)"
                 :percent="getCapacityPercent(ctype)"
                 :color="getCapacityColor(getCapacityPercent(ctype))" />
@@ -198,19 +197,18 @@
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }">
-      <chart-card :loading="capacityLoading" class="dashboard-storage dashboard-quota-card">
+      <chart-card :loading="capacityLoading" class="dashboard-storage">
         <template #title>
           <div class="center">
             <h3><hdd-outlined /> {{ $t('label.storage') }}</h3>
           </div>
         </template>
-        <div class="quota-grid">
+        <div>
           <div v-for="ctype in ['STORAGE', 'STORAGE_ALLOCATED', 'LOCAL_STORAGE', 'SECONDARY_STORAGE', 'BACKUP_STORAGE', 'OBJECT_STORAGE']" :key="ctype" >
             <div v-if="statsMap[ctype]">
               <quota-pie
                 :title="$t(ts[ctype])"
                 :value="getCapacityValue(ctype)"
-                :summary="getCapacitySummary(ctype)"
                 :icon="getCapacityIcon(ctype)"
                 :percent="getCapacityPercent(ctype)"
                 :color="getCapacityColor(getCapacityPercent(ctype))" />
@@ -220,19 +218,18 @@
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }">
-      <chart-card :loading="capacityLoading" class="dashboard-card dashboard-quota-card">
+      <chart-card :loading="capacityLoading" class="dashboard-card">
         <template #title>
           <div class="center">
             <h3><apartment-outlined /> {{ $t('label.network') }}</h3>
           </div>
         </template>
-        <div class="quota-grid">
+        <div>
           <div v-for="ctype in ['VLAN', 'VIRTUAL_NETWORK_PUBLIC_IP', 'VIRTUAL_NETWORK_IPV6_SUBNET', 'DIRECT_ATTACHED_PUBLIC_IP', 'PRIVATE_IP']" :key="ctype" >
             <div v-if="statsMap[ctype]">
               <quota-pie
                 :title="$t(ts[ctype])"
                 :value="getCapacityValue(ctype)"
-                :summary="getCapacitySummary(ctype)"
                 :icon="getCapacityIcon(ctype)"
                 :percent="getCapacityPercent(ctype)"
                 :color="getCapacityColor(getCapacityPercent(ctype))" />
@@ -408,11 +405,7 @@ export default {
       const value = computeTypes.includes(dataType) && allocated
         ? capacity?.capacityallocated
         : capacity?.capacityused
-      return `${this.displayData(dataType, value)} ${this.$t(allocated ? 'label.allocated' : 'label.used')}`
-    },
-    getCapacitySummary (dataType) {
-      const capacity = this.statsMap[dataType]
-      return `${this.displayData(dataType, capacity?.capacitytotal)} ${this.$t('label.total')}`
+      return `${this.displayData(dataType, value)} / ${this.displayData(dataType, capacity?.capacitytotal)}`
     },
     getCapacityColor (percent) {
       if (percent > 85) return '#ff4d4f'
@@ -686,7 +679,7 @@ export default {
   width: 100%;
   min-height: 370px;
   overflow-x:hidden;
-  overflow-y: auto;
+  overflow-y: scroll;
   max-height: 370px;
 }
 
@@ -700,18 +693,6 @@ export default {
 .center {
   display: block;
   text-align: center;
-}
-
-.quota-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 16px;
-  align-content: start;
-}
-
-.dashboard-quota-card {
-  height: 100%;
-  min-height: 370px;
 }
 
 </style>
