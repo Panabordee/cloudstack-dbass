@@ -17,11 +17,22 @@
 
 <template>
   <div class="user-menu">
+    <span class="vpn-menu">
+      <a-button type="default" class="vpn-button" href="https://vpn.ce-nacl.com" target="_blank">
+        <DownloadOutlined />
+        <span class="vpn-label">VPN Profile</span>
+      </a-button>
+      <a-button type="text" size="small" class="vpn-info-button" href="#">
+      <a-tooltip title="To enable all functionalities, VPN connection is required. Click here for setup instructions.">
+        <InfoCircleOutlined :style="{ fontSize: '14px' }" />
+      </a-tooltip>
+      </a-button>
+    </span>
     <span class="action">
       <create-menu v-if="device === 'desktop'" />
     </span>
     <external-link class="action"/>
-    <translation-menu class="action"/>
+    <!-- <translation-menu class="action"/> -->
     <header-notice class="action"/>
     <label class="user-menu-server-info action" v-if="$config.multipleServer">
       <database-outlined />
@@ -30,7 +41,7 @@
     <a-dropdown>
       <span class="user-menu-dropdown action">
         <span v-if="image">
-          <resource-icon :image="image" size="4x" style="margin-right: 5px; margin-top: -3px"/>
+          <resource-icon :image="image" size="2x" style="margin-right: 5px; margin-top: -3px"/>
         </span>
         <a-avatar v-else-if="userInitials" class="user-menu-avatar avatar" size="small" :style="{ backgroundColor: $config.theme['@primary-color'], color: 'white' }">
           {{ userInitials }}
@@ -224,5 +235,18 @@ export default {
       margin-right: 5px;
     }
   }
+
+}
+.vpn-menu {
+  display: flex;
+  align-items: center;
+  float: left;
+  height: 100%;
+  padding: 0 10px;
+  cursor: default;
+}
+
+.vpn-button:hover {
+  cursor: pointer !important;
 }
 </style>
