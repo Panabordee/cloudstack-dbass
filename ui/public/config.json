@@ -8,9 +8,9 @@
     }
   ],
   "docBase": "http://docs.cloudstack.apache.org/en/latest",
-  "appTitle": "CloudStack",
-  "footer": "Licensed under the <a href='http://www.apache.org/licenses/' target='_blank'>Apache License</a>, Version 2.0.",
-  "loginTitle": "CloudStack",
+  "appTitle": "NaCl CloudStack",
+  "footer": "Powered by Apache CloudStack | Served with ❤️ by <a href=\"https://ce-nacl.com\" target=\"_blank\">NaCl</a>",
+  "loginTitle": "NaCl CloudStack | Login",
   "loginFavicon": "assets/logo.svg",
   "loginFooter": "",
   "resetPasswordFooter": "",
@@ -71,27 +71,15 @@
     "links": [
       {
         "title": "Documentation",
-        "text": "CloudStack documentation website",
-        "link": "https://docs.cloudstack.apache.org/en/latest/",
+        "text": "NaCl CloudStack Documentation",
+        "link": "https://docs.cs.ce-nacl.com",
         "icon": "read-outlined"
       },
       {
-        "title": "API Documentation",
-        "text": "Refer to API documentation",
-        "link": "https://cloudstack.apache.org/api.html",
-        "icon": "api-outlined"
-      },
-      {
         "title": "Email Support",
-        "text": "Join CloudStack users mailing list to seek and provide support",
-        "link": "mailto:users-subscribe@cloudstack.apache.org",
+        "text": "Feel free to reach out to our support team if you have any questions.",
+        "link": "mailto:nacl@kmitl.ac.th",
         "icon": "mail-outlined"
-      },
-      {
-        "title": "Report Issue",
-        "text": "Submit a bug or improvement request",
-        "link": "https://github.com/apache/cloudstack/issues/new",
-        "icon": "bug-outlined"
       }
     ]
   },
@@ -108,13 +96,13 @@
   "notifyLatestCSVersion": true,
   "showSearchFilters": true,
   "announcementBanner": {
-    "enabled": false,
+    "enabled": true,
     "showIcon": false,
-    "closable": true,
+    "closable": false,
     "persistDismissal": true,
-    "type": "info",
-    "message": "🤔 <strong>Sample Announcement</strong>: New Feature Available: Check out our latest dashboard improvements! <a href='/features'>Learn more</a>",
+    "type": "warning",
+    "message": "🫃 <strong>Warning</strong>: This platform is currently in development. Your instances may be unstable and can be lost at any time.",
     "startDate": "2025-06-01T00:00:00Z",
-    "endDate": "2025-07-16T00:00:00Z"
+    "endDate": "2030-07-16T00:00:00Z"
   }
 }

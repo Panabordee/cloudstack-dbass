@@ -16,194 +16,218 @@
 // under the License.
 
 <template>
-  <a-form
-    id="formLogin"
-    class="user-layout-login"
-    :ref="formRef"
-    :model="form"
-    :rules="rules"
-    @finish="handleSubmit"
-    v-ctrl-enter="handleSubmit"
-  >
-    <a-tabs
-      class="tab-center"
-      :activeKey="customActiveKey"
-      size="large"
-      :tabBarStyle="{ textAlign: 'center', borderBottom: 'unset' }"
-      @change="handleTabClick"
-      :animated="false"
-    >
-      <a-tab-pane key="cs">
-        <template #tab>
-          <span>
-            <safety-outlined />
-            {{ $t('label.login.portal') }}
-          </span>
-        </template>
-        <a-form-item v-if="$config.multipleServer" name="server" ref="server">
-          <a-select
-            size="large"
-            :placeholder="$t('server')"
-            v-model:value="form.server"
-            @change="onChangeServer"
-            showSearch
-            optionFilterProp="label"
-            :filterOption="(input, option) => {
-              return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
-            }">
-            <a-select-option v-for="item in $config.servers" :key="(item.apiHost || '') + item.apiBase" :label="item.name">
-              <template #prefix>
-                <database-outlined />
-              </template>
-              {{ item.name }}
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item ref="username" name="username">
-          <a-input
-            size="large"
-            type="text"
-            v-focus="true"
-            :placeholder="$t('label.username')"
-            v-model:value="form.username"
-          >
-            <template #prefix>
-              <user-outlined />
-            </template>
-          </a-input>
-        </a-form-item>
-        <a-form-item ref="password" name="password">
-          <a-input-password
-            size="large"
-            type="password"
-            autocomplete="false"
-            :placeholder="$t('label.password')"
-            v-model:value="form.password"
-          >
-            <template #prefix>
-              <lock-outlined />
-            </template>
-          </a-input-password>
-        </a-form-item>
-        <a-form-item ref="domain" name="domain">
-          <a-input
-            size="large"
-            type="text"
-            :placeholder="$t('label.domain')"
-            v-model:value="form.domain"
-          >
-            <template #prefix>
-              <project-outlined />
-            </template>
-          </a-input>
-        </a-form-item>
-        <a-form-item ref="project" name="project" v-if="$config.displayProjectFieldOnLogin">
-          <a-input
-            size="large"
-            type="text"
-            :placeholder="$t('label.project')"
-            v-model:value="form.project"
-          >
-            <template #prefix>
-              <block-outlined />
-            </template>
-          </a-input>
-        </a-form-item>
-      </a-tab-pane>
-      <a-tab-pane key="saml" :disabled="idps.length === 0">
-        <template #tab>
-          <span>
-            <audit-outlined />
-            {{ $t('label.login.single.signon') }}
-          </span>
-        </template>
-        <a-form-item v-if="$config.multipleServer" name="server" ref="server">
-          <a-select
-            size="large"
-            :placeholder="$t('server')"
-            v-model:value="form.server"
-            @change="onChangeServer"
-            showSearch
-            optionFilterProp="label"
-            :filterOption="(input, option) => {
-              return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
-            }" >
-            <a-select-option v-for="item in $config.servers" :key="(item.apiHost || '') + item.apiBase" :label="item.name">
-              <template #prefix>
-                <database-outlined />
-              </template>
-              {{ item.name }}
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item name="idp" ref="idp">
-          <a-select
-            v-model:value="form.idp"
-            showSearch
-            optionFilterProp="label"
-            :filterOption="(input, option) => {
-              return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
-            }" >
-            <a-select-option v-for="(idp, idx) in idps" :key="idx" :value="idp.id" :label="idp.orgName">
-              {{ idp.orgName }}
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-      </a-tab-pane>
-    </a-tabs>
+  <div class="login-container">
+    <!-- Left Side - Image Only -->
+    <div class="login-image-container">
+      <div class="image-overlay"></div>
+    </div>
 
-    <a-form-item>
-      <a-button
-        size="large"
-        type="primary"
-        html-type="submit"
-        class="login-button"
-        :loading="state.loginBtn"
-        :disabled="state.loginBtn"
-        ref="submit"
-        @click="handleSubmit"
-      >{{ $t('label.login') }}</a-button>
-    </a-form-item>
-    <a-row justify="space-between">
-      <a-col>
-      <translation-menu/>
-      </a-col>
-      <a-col v-if="forgotPasswordEnabled">
-        <router-link :to="{ name: 'forgotPassword' }">
-          {{ $t('label.forgot.password') }}
-        </router-link>
-      </a-col>
-    </a-row>
-    <div class="content" v-if="socialLogin">
-      <p class="or">or</p>
-    </div>
-    <div class="center">
-      <div class="social-auth" v-if="githubprovider">
-        <a-button
-          @click="handleGithubProviderAndDomain"
-          tag="a"
-          color="primary"
-          :href="getGitHubUrl(from)"
-          class="auth-btn github-auth"
-          style="height: 38px; width: 185px; padding: 0; margin-bottom: 5px;" >
-          <img src="/assets/github.svg" style="width: 32px; padding: 5px" />
-          <a-typography-text>Sign in with Github</a-typography-text>
-        </a-button>
+    <!-- Right Side - Login Form -->
+    <div class="login-form-container">
+      <div class="login-form-wrapper">
+        <div class="login-header">
+          <img :src="logo" alt="Logo" class="brand-logo" />
+          <!-- <p class="login-subtitle">Sign in to your account</p> -->
+        </div>
+
+        <a-form
+          id="formLogin"
+          class="user-layout-login"
+          :ref="formRef"
+          :model="form"
+          :rules="rules"
+          @finish="handleSubmit"
+          v-ctrl-enter="handleSubmit"
+        >
+          <a-tabs
+            class="tab-center"
+            :activeKey="customActiveKey"
+            size="large"
+            :tabBarStyle="{ textAlign: 'center', borderBottom: 'unset' }"
+            @change="handleTabClick"
+            :animated="false"
+          >
+            <a-tab-pane key="cs">
+              <template #tab>
+                <span>
+                  <safety-outlined />
+                  {{ $t('label.login.portal') }}
+                </span>
+              </template>
+              <a-form-item v-if="$config.multipleServer" name="server" ref="server">
+                <a-select
+                  size="large"
+                  :placeholder="$t('server')"
+                  v-model:value="form.server"
+                  @change="onChangeServer"
+                  showSearch
+                  optionFilterProp="label"
+                  :filterOption="(input, option) => {
+                    return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                  }">
+                  <a-select-option v-for="item in $config.servers" :key="(item.apiHost || '') + item.apiBase" :label="item.name">
+                    <template #prefix>
+                      <database-outlined />
+                    </template>
+                    {{ item.name }}
+                  </a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item ref="username" name="username">
+                <a-input
+                  size="large"
+                  type="text"
+                  v-focus="true"
+                  :placeholder="$t('label.username')"
+                  v-model:value="form.username"
+                >
+                  <template #prefix>
+                    <user-outlined />
+                  </template>
+                </a-input>
+              </a-form-item>
+              <a-form-item ref="password" name="password">
+                <a-input-password
+                  size="large"
+                  type="password"
+                  autocomplete="false"
+                  :placeholder="$t('label.password')"
+                  v-model:value="form.password"
+                >
+                  <template #prefix>
+                    <lock-outlined />
+                  </template>
+                </a-input-password>
+              </a-form-item>
+              <a-form-item ref="domain" name="domain">
+                <a-select
+                  size="large"
+                  :placeholder="$t('label.domain')"
+                  v-model:value="form.domain"
+                  showSearch
+                  allowClear
+                >
+                  <template #prefix>
+                    <project-outlined />
+                  </template>
+                  <a-select-option v-for="domain in commonDomains" :key="domain.value" :value="domain.value">
+                    <project-outlined style="margin-right: 8px" />
+                    {{ domain.label }}
+                  </a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item ref="project" name="project" v-if="$config.displayProjectFieldOnLogin">
+                <a-input
+                  size="large"
+                  type="text"
+                  :placeholder="$t('label.project')"
+                  v-model:value="form.project"
+                >
+                  <template #prefix>
+                    <block-outlined />
+                  </template>
+                </a-input>
+              </a-form-item>
+            </a-tab-pane>
+            <a-tab-pane key="saml" :disabled="idps.length === 0">
+              <template #tab>
+                <span>
+                  <audit-outlined />
+                  {{ $t('label.login.single.signon') }}
+                </span>
+              </template>
+              <a-form-item v-if="$config.multipleServer" name="server" ref="server">
+                <a-select
+                  size="large"
+                  :placeholder="$t('server')"
+                  v-model:value="form.server"
+                  @change="onChangeServer"
+                  showSearch
+                  optionFilterProp="label"
+                  :filterOption="(input, option) => {
+                    return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                  }" >
+                  <a-select-option v-for="item in $config.servers" :key="(item.apiHost || '') + item.apiBase" :label="item.name">
+                    <template #prefix>
+                      <database-outlined />
+                    </template>
+                    {{ item.name }}
+                  </a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item name="idp" ref="idp">
+                <a-select
+                  v-model:value="form.idp"
+                  showSearch
+                  optionFilterProp="label"
+                  :filterOption="(input, option) => {
+                    return option.label.toLowerCase().indexOf(input.toLowerCase()) >= 0
+                  }" >
+                  <a-select-option v-for="(idp, idx) in idps" :key="idx" :value="idp.id" :label="idp.orgName">
+                    {{ idp.orgName }}
+                  </a-select-option>
+                </a-select>
+              </a-form-item>
+            </a-tab-pane>
+          </a-tabs>
+
+          <a-form-item>
+            <a-button
+              size="large"
+              type="primary"
+              html-type="submit"
+              class="login-button"
+              :loading="state.loginBtn"
+              :disabled="state.loginBtn"
+              ref="submit"
+              @click="handleSubmit"
+            >{{ $t('label.login') }}</a-button>
+          </a-form-item>
+          <a-row justify="space-between">
+            <!-- <a-col>
+            <translation-menu/>
+            </a-col> -->
+            <a-col v-if="forgotPasswordEnabled">
+              <router-link :to="{ name: 'forgotPassword' }" class="forgot-password-link">
+                {{ $t('label.forgot.password') }}
+              </router-link>
+            </a-col>
+          </a-row>
+          <div class="content" v-if="socialLogin">
+            <p class="or">or</p>
+          </div>
+          <div class="center">
+            <div class="social-auth" v-if="githubprovider">
+              <a-button
+                @click="handleGithubProviderAndDomain"
+                tag="a"
+                color="primary"
+                :href="getGitHubUrl(from)"
+                class="auth-btn github-auth"
+                style="height: 38px; width: 185px; padding: 0; margin-bottom: 5px;" >
+                <img src="/assets/github.svg" style="width: 32px; padding: 5px" />
+                <a-typography-text>Sign in with Github</a-typography-text>
+              </a-button>
+            </div>
+            <div class="social-auth" v-if="googleprovider">
+              <a-button
+                @click="handleGoogleProviderAndDomain"
+                tag="a"
+                color="primary"
+                :href="getGoogleUrl(from)"
+                class="auth-btn google-auth"
+                style="height: 38px; width: 185px; padding: 0" >
+                <img src="/assets/google.svg" style="width: 32px; padding: 5px" />
+                <a-typography-text>Sign in with Google</a-typography-text>
+              </a-button>
+            </div>
+          </div>
+        </a-form>
+
+        <div class="login-footer" v-if="loginFooter" v-html="loginFooter"></div>
       </div>
-      <div class="social-auth" v-if="googleprovider">
-        <a-button
-          @click="handleGoogleProviderAndDomain"
-          tag="a"
-          color="primary"
-          :href="getGoogleUrl(from)"
-          class="auth-btn google-auth"
-          style="height: 38px; width: 185px; padding: 0" >
-          <img src="/assets/google.svg" style="width: 32px; padding: 5px" />
-          <a-typography-text>Sign in with Google</a-typography-text>
-        </a-button>
-      </div>
     </div>
-  </a-form>
+  </div>
 </template>
 
 <script>
@@ -212,7 +236,8 @@ import { getAPI, postAPI } from '@/api'
 import store from '@/store'
 import { mapActions } from 'vuex'
 import { sourceToken } from '@/utils/request'
-import { SERVER_MANAGER } from '@/store/mutation-types'
+import { SERVER_MANAGER, LAST_SELECTED_DOMAIN } from '@/store/mutation-types'
+import { setStore, getStore } from '@/utils/storage'
 import TranslationMenu from '@/components/header/TranslationMenu'
 
 export default {
@@ -243,7 +268,23 @@ export default {
       },
       server: '',
       forgotPasswordEnabled: false,
-      project: null
+      project: null,
+      commonDomains: [
+        { label: 'Network and Cloud Laboratory', value: 'NACL', isDefault: true },
+        { label: 'Guests', value: 'GUEST', isDefault: false },
+        { label: 'ROOT (/)', value: '/', isDefault: false }
+      ]
+    }
+  },
+  computed: {
+    logo () {
+      return this.$config.logo || 'assets/logo.svg'
+    },
+    appTitle () {
+      return this.$config.loginTitle || this.$config.appTitle || 'CloudStack'
+    },
+    loginFooter () {
+      return this.$config.loginFooter || ''
     }
   },
   created () {
@@ -265,10 +306,12 @@ export default {
     ...mapActions(['Login', 'Logout', 'OauthLogin']),
     initForm () {
       this.formRef = ref()
+      const savedDomain = getStore(LAST_SELECTED_DOMAIN)
+      const defaultDomain = this.commonDomains.find(d => d.isDefault)?.value || '/'
       this.form = reactive({
         server: (this.server.apiHost || '') + this.server.apiBase,
         username: this.$route.query?.username || '',
-        domain: this.$route.query?.domain || '',
+        domain: this.$route.query?.domain || savedDomain || defaultDomain,
         project: null
       })
       this.rules = reactive({})
@@ -464,6 +507,11 @@ export default {
     async loginSuccess (res) {
       this.$notification.destroy()
       this.$store.commit('SET_COUNT_NOTIFY', 0)
+      // Save the selected domain to localStorage for next login
+      const values = toRaw(this.form)
+      if (values.domain) {
+        setStore(LAST_SELECTED_DOMAIN, values.domain)
+      }
       if (store.getters.twoFaEnabled === true && store.getters.twoFaProvider !== '' && store.getters.twoFaProvider !== undefined) {
         this.$router.push({ path: '/verify2FA' }).catch(() => {})
       } else if (store.getters.twoFaEnabled === true && (store.getters.twoFaProvider === '' || store.getters.twoFaProvider === undefined)) {
@@ -518,77 +566,282 @@ export default {
 </script>
 
 <style lang="less" scoped>
-.user-layout-login {
-  min-width: 260px;
-  width: 368px;
-  margin: 0 auto;
+html, body {
+  margin: 0;
+  padding: 0;
+}
 
-  .mobile & {
-    max-width: 368px;
-    width: 98%;
+.login-container {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+  }
+}
+
+.login-image-container {
+  flex: 1;
+  position: relative;
+  background-image: url('/assets/login-banner.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: #1890ff;
+  min-height: 100vh;
+
+  @media (max-width: 768px) {
+    display: none;
+    min-height: 200px;
+    flex: none;
   }
 
-  label {
-    font-size: 14px;
+  .image-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    // background: linear-gradient(135deg, rgba(24, 144, 255, 0.85) 0%, rgba(9, 109, 217, 0.9) 100%);
+  }
+}
+
+.login-form-container {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: #ffffff;
+  min-height: 100vh;
+
+  @media (max-width: 768px) {
+    min-height: auto;
+    padding: 40px 24px;
+  }
+}
+
+.login-form-wrapper {
+  width: 100%;
+  max-width: 420px;
+}
+
+.login-header {
+  margin-bottom: 32px;
+  text-align: center;
+
+  .brand-logo {
+    max-width: 450px;
+    height: 100px;
+    margin: 0 auto 24px;
+    display: block;
+
+    @media (max-width: 768px) {
+      max-width: 240px;
+    }
+  }
+
+  .login-subtitle {
+    font-size: 18px;
+    color: #8c8c8c;
+    margin: 0;
+  }
+}
+
+.login-footer {
+  margin-top: 40px;
+  padding-top: 24px;
+  border-top: 1px solid #f0f0f0;
+  text-align: center;
+  font-size: 14px;
+  color: #8c8c8c;
+
+  :deep(a) {
+    color: #1890ff;
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+}
+
+.user-layout-login {
+  width: 100%;
+
+  :deep(.ant-tabs-nav) {
+    margin-bottom: 32px;
+  }
+
+  :deep(.ant-tabs-tab) {
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 500;
+
+    &.ant-tabs-tab-active {
+      .ant-tabs-tab-btn {
+        color: #1890ff;
+      }
+    }
+  }
+
+  :deep(.ant-tabs-ink-bar) {
+    background: #1890ff;
+    height: 3px;
+  }
+
+  :deep(.ant-form-item) {
+    margin-bottom: 20px;
+  }
+
+  :deep(.ant-input-affix-wrapper) {
+    padding: 10px 15px;
+    border-radius: 6px;
+    border: 1px solid #d9d9d9;
+
+    &:hover {
+      border-color: #40a9ff;
+    }
+
+    &:focus,
+    &.ant-input-affix-wrapper-focused {
+      border-color: #40a9ff;
+      box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+    }
+
+    .ant-input {
+      border: none !important;
+      box-shadow: none !important;
+
+      &:focus {
+        border: none !important;
+        box-shadow: none !important;
+      }
+    }
+
+    .ant-input-prefix {
+      margin-right: 12px;
+      color: #8c8c8c;
+    }
+  }
+
+  :deep(.ant-input:not(.ant-input-affix-wrapper .ant-input)) {
+    padding: 10px 15px;
+    border-radius: 6px;
+    border: 1px solid #d9d9d9;
+
+    &:hover {
+      border-color: #40a9ff;
+    }
+
+    &:focus {
+      border-color: #40a9ff;
+      box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+    }
+  }
+
+  :deep(.ant-select) {
+    .ant-select-selector {
+      padding: 6px 15px !important;
+      border-radius: 6px !important;
+      border: 1px solid #d9d9d9 !important;
+      height: auto !important;
+      min-height: 46px;
+    }
+
+    &:hover .ant-select-selector {
+      border-color: #40a9ff !important;
+    }
+
+    &.ant-select-focused .ant-select-selector {
+      border-color: #40a9ff !important;
+      box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1) !important;
+    }
+
+    .ant-select-selection-item {
+      line-height: 32px;
+    }
+
+    .ant-select-arrow {
+      color: #8c8c8c;
+    }
   }
 
   button.login-button {
     margin-top: 8px;
     padding: 0 15px;
     font-size: 16px;
-    height: 40px;
+    font-weight: 600;
+    height: 46px;
+    width: 100%;
+    border-radius: 6px;
+    background: #1890ff;
+    border: none;
+    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.3);
+    transition: all 0.3s ease;
+
+    &:hover:not(:disabled) {
+      background: #40a9ff;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(24, 144, 255, 0.4);
+    }
+
+    &:active:not(:disabled) {
+      transform: translateY(0);
+      background: #096dd9;
+    }
+  }
+
+  .forgot-password-link {
+    color: #1890ff;
+    font-weight: 500;
+    transition: color 0.3s ease;
+
+    &:hover {
+      color: #40a9ff;
+      text-decoration: underline;
+    }
+  }
+
+  .center {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    margin-top: 20px;
+  }
+
+  .content {
+    margin: 20px auto;
     width: 100%;
   }
 
-  .user-login-other {
-    text-align: left;
-    margin-top: 24px;
-    line-height: 22px;
+  .or {
+    text-align: center;
+    font-size: 14px;
+    color: #8c8c8c;
+    background:
+      linear-gradient(#d9d9d9 0 0) left,
+      linear-gradient(#d9d9d9 0 0) right;
+    background-size: 45% 1px;
+    background-repeat: no-repeat;
+  }
 
-    .item-icon {
-      font-size: 24px;
-      color: rgba(0, 0, 0, 0.2);
-      margin-left: 16px;
-      vertical-align: middle;
-      cursor: pointer;
-      transition: color 0.3s;
+  .auth-btn {
+    border-radius: 6px;
+    border: 1px solid #d9d9d9;
+    background: #ffffff;
+    transition: all 0.3s ease;
 
-      &:hover {
-        color: #1890ff;
-      }
-    }
-
-    .register {
-      float: right;
-    }
-
-    .g-btn-wrapper {
-      background-color: rgb(221, 75, 57);
-      height: 40px;
-      width: 80px;
+    &:hover {
+      border-color: #1890ff;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
     }
   }
-    .center {
-     display: flex;
-     flex-direction: column;
-     justify-content: center;
-     align-items: center;
-     height: 100px;
-    }
-
-    .content {
-      margin: 10px auto;
-      width: 300px;
-    }
-
-    .or {
-      text-align: center;
-      font-size: 16px;
-      background:
-        linear-gradient(#CCC 0 0) left,
-        linear-gradient(#CCC 0 0) right;
-      background-size: 40% 1px;
-      background-repeat: no-repeat;
-    }
 }
 </style>
