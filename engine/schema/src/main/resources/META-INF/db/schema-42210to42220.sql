@@ -67,3 +67,7 @@ UPDATE `cloud`.`reverse_proxy_host` h
   JOIN `cloud`.`reverse_proxy_domain` d ON h.fqdn LIKE CONCAT('%.', d.domain)
   SET h.reverse_proxy_domain_id = d.id
   WHERE h.reverse_proxy_domain_id IS NULL;
+
+-- Add URLs for OAuth provider
+CALL `cloud`.`IDEMPOTENT_ADD_COLUMN`('cloud.oauth_provider','authorize_url', 'VARCHAR(255) DEFAULT NULL COMMENT ''Authorize URL for OAuth initialization'' ');
+CALL `cloud`.`IDEMPOTENT_ADD_COLUMN`('cloud.oauth_provider','token_url', 'VARCHAR(255) DEFAULT NULL COMMENT ''Token URL for OAuth finalization'' ');
