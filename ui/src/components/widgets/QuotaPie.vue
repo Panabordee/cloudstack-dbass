@@ -23,6 +23,7 @@
     <div class="quota-pie-details">
       <strong class="quota-pie-title">{{ title }}</strong>
       <span class="quota-pie-value">{{ value }}</span>
+      <small class="quota-pie-summary">{{ summary }}</small>
     </div>
     <a-progress
       class="quota-pie-chart"
@@ -44,6 +45,10 @@ export default {
       required: true
     },
     value: {
+      type: String,
+      default: ''
+    },
+    summary: {
       type: String,
       default: ''
     },
@@ -115,7 +120,8 @@ export default {
 }
 
 .quota-pie-title,
-.quota-pie-value {
+.quota-pie-value,
+.quota-pie-summary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -123,6 +129,12 @@ export default {
 
 .quota-pie-value {
   margin-top: 1px;
+}
+
+.quota-pie-summary {
+  margin-top: 1px;
+  font-size: 10px;
+  opacity: 0.6;
 }
 
 .quota-pie-chart {
