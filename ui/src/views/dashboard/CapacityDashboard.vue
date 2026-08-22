@@ -170,7 +170,7 @@
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }">
-      <chart-card :loading="capacityLoading" class="dashboard-card dashboard-quota-card">
+      <chart-card :loading="capacityLoading" class="dashboard-card">
         <template #title>
           <div class="center">
             <h3><cloud-outlined /> {{ $t('label.compute') }}</h3>
@@ -182,60 +182,88 @@
             />
           </div>
         </template>
-        <div class="quota-grid">
+        <div>
           <div v-for="ctype in ['MEMORY', 'CPU', 'CPU_CORE', 'GPU']" :key="ctype" >
             <div v-if="statsMap[ctype]">
-              <quota-pie
-                :title="$t(ts[ctype])"
-                :value="getCapacityValue(ctype)"
-                :summary="getCapacitySummary(ctype)"
-                :icon="getCapacityIcon(ctype)"
-                :percent="getCapacityPercent(ctype)"
-                :color="getCapacityColor(getCapacityPercent(ctype))" />
+              <div>
+                <strong>{{ $t(ts[ctype]) }}</strong>
+              </div>
+              <a-progress
+              status="active"
+              :percent="statsMap[ctype]?.capacitytotal > 0 ?
+                displayPercentUsedOrAllocated(statsMap[ctype]?.capacityused, statsMap[ctype]?.capacityallocated, statsMap[ctype]?.capacitytotal)
+                : 0"
+              :format="p => statsMap[ctype]?.capacitytotal > 0 ?
+                displayPercentFormatUsedOrAllocated(statsMap[ctype]?.capacityused, statsMap[ctype]?.capacityallocated, statsMap[ctype]?.capacitytotal)
+                : '0%'"
+              stroke-color="#52c41a"
+              size="small"
+              style="width:95%; float: left"
+              />
+              <br/>
+              <div style="text-align: center">
+                {{ displayDataUsedOrAllocated(ctype, statsMap[ctype]?.capacityused, statsMap[ctype]?.capacityallocated) }} {{ this.displayAllocatedCompute ? $t('label.allocated') : $t('label.used') }} | {{ displayData(ctype, statsMap[ctype]?.capacitytotal) }} {{ $t('label.total') }}
+              </div>
             </div>
           </div>
         </div>
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }">
-      <chart-card :loading="capacityLoading" class="dashboard-storage dashboard-quota-card">
+      <chart-card :loading="capacityLoading" class="dashboard-storage">
         <template #title>
           <div class="center">
             <h3><hdd-outlined /> {{ $t('label.storage') }}</h3>
           </div>
         </template>
-        <div class="quota-grid">
+        <div>
           <div v-for="ctype in ['STORAGE', 'STORAGE_ALLOCATED', 'LOCAL_STORAGE', 'SECONDARY_STORAGE', 'BACKUP_STORAGE', 'OBJECT_STORAGE']" :key="ctype" >
             <div v-if="statsMap[ctype]">
-              <quota-pie
-                :title="$t(ts[ctype])"
-                :value="getCapacityValue(ctype)"
-                :summary="getCapacitySummary(ctype)"
-                :icon="getCapacityIcon(ctype)"
-                :percent="getCapacityPercent(ctype)"
-                :color="getCapacityColor(getCapacityPercent(ctype))" />
+              <div>
+                <strong>{{ $t(ts[ctype]) }}</strong>
+              </div>
+              <a-progress
+              status="active"
+              :percent="statsMap[ctype]?.capacitytotal > 0 ? parseFloat(100.0 * statsMap[ctype]?.capacityused / statsMap[ctype]?.capacitytotal) : 0"
+              :format="p => statsMap[ctype]?.capacitytotal > 0 ? parseFloat(100.0 * statsMap[ctype]?.capacityused / statsMap[ctype]?.capacitytotal).toFixed(2) + '%' : '0%'"
+              stroke-color="#52c41a"
+              size="small"
+              style="width:95%; float: left"
+              />
+              <br/>
+              <div style="text-align: center">
+                {{ displayData(ctype, statsMap[ctype]?.capacityused) }} <span v-if="ctype !== 'STORAGE'">{{ $t('label.allocated') }}</span><span v-else>{{ $t('label.used') }}</span> | {{ displayData(ctype, statsMap[ctype]?.capacitytotal) }} {{ $t('label.total') }}
+              </div>
             </div>
           </div>
         </div>
       </chart-card>
     </a-col>
     <a-col :xs="{ span: 24 }" :lg="{ span: 12 }" :xl="{ span: 8 }" :xxl="{ span: 8 }">
-      <chart-card :loading="capacityLoading" class="dashboard-card dashboard-quota-card">
+      <chart-card :loading="capacityLoading" class="dashboard-card">
         <template #title>
           <div class="center">
             <h3><apartment-outlined /> {{ $t('label.network') }}</h3>
           </div>
         </template>
-        <div class="quota-grid">
+        <div>
           <div v-for="ctype in ['VLAN', 'VIRTUAL_NETWORK_PUBLIC_IP', 'VIRTUAL_NETWORK_IPV6_SUBNET', 'DIRECT_ATTACHED_PUBLIC_IP', 'PRIVATE_IP']" :key="ctype" >
             <div v-if="statsMap[ctype]">
-              <quota-pie
-                :title="$t(ts[ctype])"
-                :value="getCapacityValue(ctype)"
-                :summary="getCapacitySummary(ctype)"
-                :icon="getCapacityIcon(ctype)"
-                :percent="getCapacityPercent(ctype)"
-                :color="getCapacityColor(getCapacityPercent(ctype))" />
+              <div>
+                <strong>{{ $t(ts[ctype]) }}</strong>
+              </div>
+              <a-progress
+              status="active"
+              :percent="statsMap[ctype]?.capacitytotal > 0 ? parseFloat(100.0 * statsMap[ctype]?.capacityused / statsMap[ctype]?.capacitytotal) : 0"
+              :format="p => statsMap[ctype]?.capacitytotal > 0 ? parseFloat(100.0 * statsMap[ctype]?.capacityused / statsMap[ctype]?.capacitytotal).toFixed(2) + '%' : '0%'"
+              stroke-color="#52c41a"
+              size="small"
+              style="width:95%; float: left"
+              />
+              <br/>
+              <div style="text-align: center">
+                {{ displayData(ctype, statsMap[ctype]?.capacityused) }} {{ $t('label.allocated') }} | {{ displayData(ctype, statsMap[ctype]?.capacitytotal) }} {{ $t('label.total') }}
+              </div>
             </div>
           </div>
         </div>
@@ -310,7 +338,6 @@ import ChartCard from '@/components/widgets/ChartCard'
 import ResourceIcon from '@/components/view/ResourceIcon'
 import ResourceLabel from '@/components/widgets/ResourceLabel'
 import Status from '@/components/widgets/Status'
-import QuotaPie from '@/components/widgets/QuotaPie'
 
 export default {
   name: 'CapacityDashboard',
@@ -318,8 +345,7 @@ export default {
     ChartCard,
     ResourceIcon,
     ResourceLabel,
-    Status,
-    QuotaPie
+    Status
   },
   data () {
     return {
@@ -390,54 +416,17 @@ export default {
       }
       return 'normal'
     },
-    getCapacityPercent (dataType) {
-      const capacity = this.statsMap[dataType]
-      if (!capacity || !Number(capacity.capacitytotal)) {
-        return 0
-      }
-      const computeTypes = ['MEMORY', 'CPU', 'CPU_CORE', 'GPU']
-      const value = computeTypes.includes(dataType) && this.displayAllocatedCompute
-        ? capacity.capacityallocated
-        : capacity.capacityused
-      return 100.0 * Number(value || 0) / Number(capacity.capacitytotal)
+    displayPercentUsedOrAllocated (used, allocated, total) {
+      var value = this.displayAllocatedCompute ? allocated : used
+      return parseFloat(100.0 * value / total)
     },
-    getCapacityValue (dataType) {
-      const capacity = this.statsMap[dataType]
-      const computeTypes = ['MEMORY', 'CPU', 'CPU_CORE', 'GPU']
-      const allocated = computeTypes.includes(dataType) ? this.displayAllocatedCompute : dataType !== 'STORAGE'
-      const value = computeTypes.includes(dataType) && allocated
-        ? capacity?.capacityallocated
-        : capacity?.capacityused
-      return `${this.displayData(dataType, value)} ${this.$t(allocated ? 'label.allocated' : 'label.used')}`
+    displayPercentFormatUsedOrAllocated (used, allocated, total) {
+      var value = this.displayAllocatedCompute ? allocated : used
+      return parseFloat(100.0 * value / total).toFixed(2) + '%'
     },
-    getCapacitySummary (dataType) {
-      const capacity = this.statsMap[dataType]
-      return `${this.displayData(dataType, capacity?.capacitytotal)} ${this.$t('label.total')}`
-    },
-    getCapacityColor (percent) {
-      if (percent > 85) return '#ff4d4f'
-      if (percent > 75) return '#faad14'
-      return '#52c41a'
-    },
-    getCapacityIcon (dataType) {
-      const icons = {
-        MEMORY: 'database-outlined',
-        CPU: 'dashboard-outlined',
-        CPU_CORE: 'cluster-outlined',
-        GPU: 'desktop-outlined',
-        STORAGE: 'hdd-outlined',
-        STORAGE_ALLOCATED: 'database-outlined',
-        LOCAL_STORAGE: 'save-outlined',
-        SECONDARY_STORAGE: 'cloud-outlined',
-        BACKUP_STORAGE: 'safety-outlined',
-        OBJECT_STORAGE: 'cloud-upload-outlined',
-        VLAN: 'apartment-outlined',
-        VIRTUAL_NETWORK_PUBLIC_IP: 'environment-outlined',
-        VIRTUAL_NETWORK_IPV6_SUBNET: 'global-outlined',
-        DIRECT_ATTACHED_PUBLIC_IP: 'link-outlined',
-        PRIVATE_IP: 'lock-outlined'
-      }
-      return icons[dataType] || 'pie-chart-outlined'
+    displayDataUsedOrAllocated (dataType, used, allocated) {
+      var value = this.displayAllocatedCompute ? allocated : used
+      return this.displayData(dataType, value)
     },
     displayData (dataType, value) {
       if (!value) {
@@ -686,7 +675,7 @@ export default {
   width: 100%;
   min-height: 370px;
   overflow-x:hidden;
-  overflow-y: auto;
+  overflow-y: scroll;
   max-height: 370px;
 }
 
@@ -700,18 +689,6 @@ export default {
 .center {
   display: block;
   text-align: center;
-}
-
-.quota-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 16px;
-  align-content: start;
-}
-
-.dashboard-quota-card {
-  height: 100%;
-  min-height: 370px;
 }
 
 </style>
