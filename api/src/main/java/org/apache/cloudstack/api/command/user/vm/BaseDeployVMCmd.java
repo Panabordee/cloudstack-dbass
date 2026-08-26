@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 import javax.annotation.Nonnull;
 
@@ -227,6 +228,10 @@ public abstract class BaseDeployVMCmd extends BaseAsyncCreateCustomIdCmd impleme
     @Parameter(name = ApiConstants.EXTRA_CONFIG, type = CommandType.STRING, since = "4.12", description = "an optional URL encoded string that can be passed to the virtual machine upon successful deployment", length = 5120)
     private String extraConfig;
 
+    @Parameter(name = ApiConstants.PCI_BUS_ADDRESSES, type = CommandType.STRING, since = "4.22",
+            description = "comma-separated PCI bus addresses (BDFs) to attach to the instance; supported only for KVM")
+    private String pciBusAddresses;
+
     @Parameter(name = ApiConstants.COPY_IMAGE_TAGS, type = CommandType.BOOLEAN, since = "4.13", description = "if true the image tags (if any) will be copied to the VM, default value is false")
     private Boolean copyImageTags;
 
@@ -333,6 +338,11 @@ public abstract class BaseDeployVMCmd extends BaseAsyncCreateCustomIdCmd impleme
     public Map<String, String> getDetails() {
         Map<String, String> customparameterMap = convertDetailsToMap(details);
 
+        List<String> pciAddressList = getPciBusAddressList();
+        if (!pciAddressList.isEmpty()) {
+            customparameterMap.put(VmDetailConstants.KVM_PCI_BUS_ADDRESSES, String.join(",", pciAddressList));
+        }
+
         if (getBootType() != null) {
             customparameterMap.put(getBootType().toString(), getBootMode().toString());
         }
@@ -362,6 +372,34 @@ public abstract class BaseDeployVMCmd extends BaseAsyncCreateCustomIdCmd impleme
             customparameterMap.putAll(getExternalDetails());
         }
         return customparameterMap;
+    }
+
+    public String getPciBusAddresses() {
+        return pciBusAddresses;
+    }
+
+    /**
+     * Returns the requested PCI addresses after validating their BDF syntax.
+     * Both the canonical dddd:bb:ss.f form and the legacy bb:ss.f form are
+     * accepted (the latter implies PCI domain 0000).
+     */
+    public List<String> getPciBusAddressList() {
+        if (StringUtils.isBlank(pciBusAddresses)) {
+            return List.of();
+        }
+        Pattern bdfPattern = Pattern.compile("(?i)(?:[0-9a-f]{1,4}:)?[0-9a-f]{1,2}:[0-9a-f]{1,2}\\.[0-7]");
+        List<String> addresses = new ArrayList<>();
+        for (String address : pciBusAddresses.split(",", -1)) {
+            String value = address.trim();
+            if (!bdfPattern.matcher(value).matches()) {
+                throw new InvalidParameterValueException("Invalid PCI bus address '" + value + "'. Expected dddd:bb:ss.f (for example 0000:01:00.0).");
+            }
+            if (addresses.stream().anyMatch(existing -> existing.equalsIgnoreCase(value))) {
+                throw new InvalidParameterValueException("PCI bus address '" + value + "' was specified more than once");
+            }
+            addresses.add(value);
+        }
+        return addresses;
     }
 
     public Map<String, String> getExternalDetails() {

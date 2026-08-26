@@ -155,6 +155,28 @@ public class DeployVMCmdTest {
     }
 
     @Test
+    public void testGetDetailsWithPciBusAddresses() {
+        ReflectionTestUtils.setField(cmd, "pciBusAddresses", " 0000:af:00.3, 0000:af:00.4 ");
+
+        assertEquals(Arrays.asList("0000:af:00.3", "0000:af:00.4"), cmd.getPciBusAddressList());
+        assertEquals("0000:af:00.3,0000:af:00.4", cmd.getDetails().get(VmDetailConstants.KVM_PCI_BUS_ADDRESSES));
+    }
+
+    @Test
+    public void testGetPciBusAddressListRejectsInvalidAddress() {
+        ReflectionTestUtils.setField(cmd, "pciBusAddresses", "0000:af:00.8");
+
+        assertThrows(InvalidParameterValueException.class, () -> cmd.getPciBusAddressList());
+    }
+
+    @Test
+    public void testGetPciBusAddressListRejectsDuplicateAddress() {
+        ReflectionTestUtils.setField(cmd, "pciBusAddresses", "0000:af:00.3,0000:AF:00.3");
+
+        assertThrows(InvalidParameterValueException.class, () -> cmd.getPciBusAddressList());
+    }
+
+    @Test
     public void testGetLeaseExpiryActionValidStop() {
         ReflectionTestUtils.setField(cmd, "leaseExpiryAction", "STOP");
 

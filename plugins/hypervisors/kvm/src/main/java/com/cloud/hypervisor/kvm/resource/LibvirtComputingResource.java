@@ -3103,6 +3103,9 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
         if (vmTO.getGpuDevice() != null && CollectionUtils.isNotEmpty(vmTO.getGpuDevice().getGpuDevices())) {
             attachGpuDevices(vmTO, devices);
         }
+        if (CollectionUtils.isNotEmpty(vmTO.getPciBusAddresses())) {
+            attachPciDevices(vmTO, devices);
+        }
 
         if (!isGuestS390x()) {
             devices.addDevice(createTabletInputDef());
@@ -3141,6 +3144,15 @@ public class LibvirtComputingResource extends ServerResourceBase implements Serv
 
             devicesDef.addDevice(gpu);
             LOGGER.info("Attached GPU device " + gpuDevice.getDeviceName() + " to VM " + vmTO.getName());
+        }
+    }
+
+    protected void attachPciDevices(final VirtualMachineTO vmTO, final DevicesDef devicesDef) {
+        for (String pciBusAddress : vmTO.getPciBusAddresses()) {
+            LibvirtGpuDef pci = new LibvirtGpuDef();
+            pci.defPci(pciBusAddress);
+            devicesDef.addDevice(pci);
+            LOGGER.info("Attached PCI device " + pciBusAddress + " to VM " + vmTO.getName());
         }
     }
 

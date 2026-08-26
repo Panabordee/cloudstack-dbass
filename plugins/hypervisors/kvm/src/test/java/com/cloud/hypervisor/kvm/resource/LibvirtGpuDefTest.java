@@ -25,6 +25,17 @@ import org.junit.Test;
 public class LibvirtGpuDefTest extends TestCase {
 
     @Test
+    public void testGpuDef_withUserRequestedPciDevice() {
+        LibvirtGpuDef gpuDef = new LibvirtGpuDef();
+        gpuDef.defPci("0000:af:00.3");
+
+        String gpuXml = gpuDef.toString();
+
+        assertTrue(gpuXml.contains("<hostdev mode='subsystem' type='pci' managed='yes' display='off'>"));
+        assertTrue(gpuXml.contains("<address domain='0x0000' bus='0xaf' slot='0x00' function='0x3'/>"));
+    }
+
+    @Test
     public void testGpuDef_withPciPassthrough() {
         LibvirtGpuDef gpuDef = new LibvirtGpuDef();
         VgpuTypesInfo pciGpuInfo = new VgpuTypesInfo(

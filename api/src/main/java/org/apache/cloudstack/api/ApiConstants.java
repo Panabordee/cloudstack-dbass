@@ -228,6 +228,8 @@ public class ApiConstants {
     public static final String EVENT_TYPE = "eventtype";
     public static final String EXPIRES = "expires";
     public static final String EXTRA_CONFIG = "extraconfig";
+    /** Comma-separated PCI bus addresses to pass through to a KVM instance. */
+    public static final String PCI_BUS_ADDRESSES = "pcibusaddresses";
     public static final String EXTRA_PARAMS = "extraparams";
     public static final String EXTRA_DHCP_OPTION = "extradhcpoption";
     public static final String EXTRA_DHCP_OPTION_NAME = "extradhcpoptionname";

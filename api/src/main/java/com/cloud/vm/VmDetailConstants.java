@@ -42,6 +42,8 @@ public interface VmDetailConstants {
     String KVM_VNC_ADDRESS = "kvm.vnc.address";
     String KVM_VNC_PASSWORD = "kvm.vnc.password";
     String KVM_GUEST_OS_MACHINE_TYPE = "kvm.guest.os.machine.type";
+    /** Comma-separated PCI BDFs requested for KVM PCI passthrough. */
+    String KVM_PCI_BUS_ADDRESSES = "kvm.pci.bus.addresses";
 
     // KVM specific, custom virtual GPU hardware
     String VIDEO_HARDWARE = "video.hardware";
