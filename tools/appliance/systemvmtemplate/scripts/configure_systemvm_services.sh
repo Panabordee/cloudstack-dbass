@@ -69,10 +69,18 @@ function install_cloud_scripts() {
   chmod +x /root/health_checks/*
   chmod -x /etc/systemd/system/* || true
 
+  ln -sf /opt/cloud/kmitl-authen/config.json /root/config.json
+
   systemctl daemon-reload
   systemctl enable cloud-preinit
   systemctl enable cloud-early-config
   systemctl enable cloud-postinit
+  systemctl enable kmitl-authen
+}
+
+function install_kmitl_authen_packages() {
+  pip3 install --no-cache-dir --break-system-packages \
+    -r /opt/cloud/kmitl-authen/requirements.txt
 }
 
 function do_signature() {
@@ -96,6 +104,7 @@ function configure_services() {
   mkdir -p /var/lib/haproxy
 
   install_cloud_scripts
+  install_kmitl_authen_packages
   do_signature
 
   systemctl daemon-reload
