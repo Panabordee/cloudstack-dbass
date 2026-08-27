@@ -1,0 +1,13 @@
+[Unit]
+Description=KMITL network auto authentication service
+After=cloud-early-config.service cloud-postinit.service network.target
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/cloud/kmitl-authen
+ExecStart=/usr/bin/python3 /opt/cloud/kmitl-authen/authen.py
+Restart=always
+RestartSec=30
