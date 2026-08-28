@@ -52,6 +52,9 @@ export default {
       },
       columns: () => {
         const fields = ['name', 'state', 'ipaddress']
+        if ('listInstanceProxies' in store.getters.apis) {
+          fields.push('exposeddomain')
+        }
         const metricsFields = ['cpunumber', 'cputotal', 'cpuused', 'memorytotal',
           {
             memoryused: (record) => {
@@ -421,6 +424,15 @@ export default {
           message: 'message.recover.vm',
           dataView: true,
           show: (record, store) => { return record.hypervisor !== 'External' && ['Destroyed'].includes(record.state) && store.features.allowuserexpungerecovervm && record.vmtype !== 'sharedfsvm' }
+        },
+        {
+          api: 'addInstanceProxy',
+          icon: 'global-outlined',
+          label: 'label.action.add.instance.proxy',
+          dataView: true,
+          popup: true,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/AddInstanceProxy'))),
+          show: (record) => { return record.hypervisor !== 'External' && ['Running', 'Stopped'].includes(record.state) && record.vmtype !== 'sharedfsvm' }
         },
         {
           api: 'runCustomAction',

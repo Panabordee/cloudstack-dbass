@@ -1203,6 +1203,32 @@ export default {
           })
         }
 
+        if (['listVirtualMachines', 'listVirtualMachinesMetrics'].includes(this.apiName) &&
+          'listInstanceProxies' in this.$store.getters.apis && this.items.length > 0) {
+          getAPI('listInstanceProxies', { listall: true, pagesize: -1 }).then(response => {
+            const proxies = response?.listinstanceproxiesresponse?.instanceproxy || []
+            const exposedByVm = {}
+            for (const proxy of proxies) {
+              if (!proxy.virtualmachineid || !proxy.fqdn) {
+                continue
+              }
+              if (!exposedByVm[proxy.virtualmachineid]) {
+                exposedByVm[proxy.virtualmachineid] = { domains: [], url: proxy.url }
+              }
+              exposedByVm[proxy.virtualmachineid].domains.push(proxy.fqdn)
+            }
+            for (const item of this.items) {
+              const exposed = exposedByVm[item.id]
+              if (exposed) {
+                item.exposeddomain = exposed.domains.join(', ')
+                item.exposeddomainurl = exposed.url
+              }
+            }
+          }).catch(error => {
+            console.log('Failed to fetch instance proxies for the list view ', error)
+          })
+        }
+
         if (['listTemplates', 'listIsos'].includes(this.apiName) && this.items.length > 1) {
           this.items = [...new Map(this.items.map(x => [x.id, x])).values()]
         }
