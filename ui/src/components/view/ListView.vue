@@ -354,6 +354,14 @@
       >
         <span>{{ ipV6Address(text, record) }}</span>
       </template>
+      <template v-if="column.key === 'exposeddomain'">
+        <a
+          v-if="text"
+          :href="record.exposeddomainurl || ('https://' + String(text).split(',')[0].trim())"
+          target="_blank">
+          {{ text }}
+        </a>
+      </template>
       <template v-if="column.key === 'publicip'">
         <router-link
           v-if="['/autoscalevmgroup'].includes($route.path)"

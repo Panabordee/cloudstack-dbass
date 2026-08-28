@@ -56,6 +56,9 @@
       <a-tab-pane :tab="$t('label.nics')" key="nics" v-if="'listNics' in $store.getters.apis">
         <NicsTab :resource="vm"/>
       </a-tab-pane>
+      <a-tab-pane :tab="$t('label.reverseproxy')" key="reverseproxy" v-if="'listInstanceProxies' in $store.getters.apis">
+        <InstanceProxyTab :resource="vm" :loading="loading"/>
+      </a-tab-pane>
       <a-tab-pane :tab="$t('label.vm.snapshots')" key="vmsnapshots" v-if="'listVMSnapshot' in $store.getters.apis">
         <ListResourceTable
           apiName="listVMSnapshot"
@@ -153,6 +156,7 @@ import AnnotationsTab from '@/components/view/AnnotationsTab'
 import VolumesTab from '@/components/view/VolumesTab.vue'
 import SecurityGroupSelection from '@views/compute/wizard/SecurityGroupSelection'
 import GPUTab from '@/components/view/GPUTab.vue'
+import InstanceProxyTab from '@/views/compute/InstanceProxyTab.vue'
 
 export default {
   name: 'InstanceTab',
@@ -171,7 +175,8 @@ export default {
     TooltipButton,
     ResourceIcon,
     AnnotationsTab,
-    VolumesTab
+    VolumesTab,
+    InstanceProxyTab
   },
   mixins: [mixinDevice],
   props: {
