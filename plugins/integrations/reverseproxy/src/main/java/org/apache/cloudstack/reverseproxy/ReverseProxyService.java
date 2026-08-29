@@ -17,6 +17,7 @@
 
 package org.apache.cloudstack.reverseproxy;
 
+import org.apache.cloudstack.api.command.admin.reverseproxy.ListReverseProxyHostsCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.CheckInstanceProxyNameCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.ListInstanceProxiesCmd;
 import org.apache.cloudstack.api.response.InstanceProxyResponse;
@@ -96,6 +97,13 @@ public interface ReverseProxyService extends PluggableService {
      * @return list of proxy host responses
      */
     ListResponse<InstanceProxyResponse> listInstanceProxies(ListInstanceProxiesCmd cmd);
+
+    /**
+     * Lists all proxy hosts of all accounts according to the given list command (admin only)
+     * @param cmd the list command
+     * @return list of proxy host responses
+     */
+    ListResponse<InstanceProxyResponse> listReverseProxyHosts(ListReverseProxyHostsCmd cmd);
 
     /**
      * Checks whether the given name is available for use as a reverse proxy host

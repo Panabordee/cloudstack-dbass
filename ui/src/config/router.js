@@ -43,6 +43,7 @@ import customaction from '@/config/section/extension/customaction'
 import tools from '@/config/section/tools'
 import quota from '@/config/section/plugin/quota'
 import cloudian from '@/config/section/plugin/cloudian'
+import reverseproxy from '@/config/section/plugin/reverseproxy'
 
 function generateRouterMap (section) {
   var map = {
@@ -228,6 +229,7 @@ export function asyncRouterMap () {
       generateRouterMap(tools),
       generateRouterMap(quota),
       generateRouterMap(cloudian),
+      generateRouterMap(reverseproxy),
       {
         path: '/exception',
         name: 'exception',

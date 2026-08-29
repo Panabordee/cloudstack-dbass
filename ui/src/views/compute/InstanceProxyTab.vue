@@ -64,6 +64,7 @@
     <a-modal
       :visible="showAddProxyModalVisible"
       :title="$t('label.action.add.instance.proxy')"
+      :width="600"
       :maskClosable="false"
       :closable="true"
       :footer="null"
@@ -132,6 +133,13 @@ export default {
   watch: {
     resource (newItem, oldItem) {
       if (newItem && newItem.id !== oldItem?.id) {
+        this.fetchProxies()
+      }
+    },
+    '$route.query.tab' (newTab) {
+      // Refresh the proxies when the tab is opened, the VM data could have been
+      // changed through the action modal on another tab (e.g. Expose to Internet)
+      if (newTab === 'reverseproxy') {
         this.fetchProxies()
       }
     }

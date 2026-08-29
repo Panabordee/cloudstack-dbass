@@ -35,6 +35,8 @@ import org.apache.cloudstack.reverseproxy.ReverseProxyService;
 
 import com.cloud.exception.InvalidParameterValueException;
 import com.cloud.user.Account;
+import com.cloud.vm.UserVmVO;
+import com.cloud.vm.dao.UserVmDao;
 
 @APICommand(name = "addInstanceProxy",
         description = "Exposes an instance through the reverse proxy integration (Nginx Proxy Manager). The instance is exposed "
@@ -48,6 +50,9 @@ public class AddInstanceProxyCmd extends BaseCmd {
 
     @Inject
     public ReverseProxyService reverseProxyService;
+
+    @Inject
+    protected UserVmDao userVmDao;
 
     /////////////////////////////////////////////////////
     //////////////// API parameters /////////////////////
@@ -96,7 +101,9 @@ public class AddInstanceProxyCmd extends BaseCmd {
 
     @Override
     public long getEntityOwnerId() {
-        return Account.ACCOUNT_ID_SYSTEM;
+        final UserVmVO vm = virtualMachineId != null ? userVmDao.findById(virtualMachineId) : null;
+        // bad id given, parent this command to SYSTEM so ERROR events are tracked
+        return vm != null ? vm.getAccountId() : Account.ACCOUNT_ID_SYSTEM;
     }
 
     @Override

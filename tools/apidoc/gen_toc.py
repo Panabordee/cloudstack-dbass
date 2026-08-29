@@ -275,7 +275,8 @@ known_categories = {
     'CustomActions' : 'Extension',
     'ImportVmTask': 'Import VM Task',
     'InstanceProxy': 'Reverse Proxy',
-    'InstanceProxies': 'Reverse Proxy'
+    'InstanceProxies': 'Reverse Proxy',
+    'ReverseProxyHosts': 'Reverse Proxy'
 }
 
 
