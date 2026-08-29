@@ -355,12 +355,25 @@
         <span>{{ ipV6Address(text, record) }}</span>
       </template>
       <template v-if="column.key === 'exposeddomain'">
+        <a-tag v-if="!text" color="default">{{ $t('label.not.exposed') }}</a-tag>
         <a
-          v-if="text"
+          v-else
           :href="record.exposeddomainurl || ('https://' + String(text).split(',')[0].trim())"
           target="_blank">
           {{ text }}
         </a>
+      </template>
+      <template v-if="column.key === 'fqdn'">
+        <a v-if="record.url" :href="record.url" target="_blank">{{ text }}</a>
+        <span v-else>{{ text }}</span>
+        <a-tooltip :title="$t('label.copy')" placement="top">
+          <a
+            href="javascript:;"
+            v-clipboard:copy="record.url || text"
+            @click="$message.success($t('label.copied.clipboard'))">
+            <copy-outlined />
+          </a>
+        </a-tooltip>
       </template>
       <template v-if="column.key === 'publicip'">
         <router-link

@@ -111,10 +111,22 @@ export default {
       nameAvailable: false,
       nameCheckMessage: '',
       checkTimer: null,
-      loading: false
+      loading: false,
+      firstActivated: true
     }
   },
   mounted () {
+    this.fetchProxyDomain()
+  },
+  activated () {
+    if (this.firstActivated) {
+      // The initial activation, mounted() has already fetched the proxy domain
+      this.firstActivated = false
+      return
+    }
+    // The action modal keeps this component alive (keep-alive), reset the form
+    // so that a stale name or availability check is not shown when reopened
+    this.resetForm()
     this.fetchProxyDomain()
   },
   beforeUnmount () {
@@ -123,6 +135,20 @@ export default {
     }
   },
   methods: {
+    resetForm () {
+      if (this.checkTimer) {
+        clearTimeout(this.checkTimer)
+      }
+      this.checkTimer = null
+      this.name = ''
+      this.protocol = 'http'
+      this.port = 80
+      this.checkingName = false
+      this.nameChecked = false
+      this.nameAvailable = false
+      this.nameCheckMessage = ''
+      this.loading = false
+    },
     fetchProxyDomain () {
       if (!('checkInstanceProxyName' in this.$store.getters.apis)) {
         return

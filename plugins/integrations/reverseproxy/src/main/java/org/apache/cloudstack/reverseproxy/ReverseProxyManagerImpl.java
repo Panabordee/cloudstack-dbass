@@ -31,6 +31,7 @@ import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 
 import org.apache.cloudstack.acl.SecurityChecker;
+import org.apache.cloudstack.api.command.admin.reverseproxy.ListReverseProxyHostsCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.AddInstanceProxyCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.CheckInstanceProxyNameCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.DeleteInstanceProxyCmd;
@@ -497,6 +498,57 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
     }
 
     @Override
+    public ListResponse<InstanceProxyResponse> listReverseProxyHosts(final ListReverseProxyHostsCmd cmd) {
+        if (!isEnabled()) {
+            throw new CloudRuntimeException("The reverse proxy integration is disabled");
+        }
+        final Long domainId = cmd.getDomainId();
+        final Long vmId = cmd.getVirtualMachineId();
+        final String keyword = cmd.getKeyword();
+
+        final Filter searchFilter = new Filter(ReverseProxyHostVO.class, "id", true, cmd.getStartIndex(), cmd.getPageSizeVal());
+        final SearchBuilder<ReverseProxyHostVO> sb = reverseProxyHostDao.createSearchBuilder();
+        sb.and("vmInstanceId", sb.entity().getVmInstanceId(), SearchCriteria.Op.EQ);
+        sb.and("fqdn", sb.entity().getFqdn(), SearchCriteria.Op.LIKE);
+        sb.and("domainId", sb.entity().getDomainId(), SearchCriteria.Op.IN);
+
+        final SearchCriteria<ReverseProxyHostVO> sc = sb.create();
+        if (vmId != null) {
+            sc.setParameters("vmInstanceId", vmId);
+        }
+        if (StringUtils.isNotBlank(keyword)) {
+            sc.setParameters("fqdn", "%" + keyword.trim() + "%");
+        }
+        final List<Long> domainIds = resolveDomainIds(domainId, cmd.isRecursive());
+        if (!domainIds.isEmpty()) {
+            sc.setParameters("domainId", domainIds.toArray(new Long[0]));
+        }
+
+        final Pair<List<ReverseProxyHostVO>, Integer> result = reverseProxyHostDao.searchAndCount(sc, searchFilter);
+        final List<InstanceProxyResponse> responses = new ArrayList<>();
+        for (final ReverseProxyHostVO proxy : result.first()) {
+            responses.add(createInstanceProxyResponse(proxy));
+        }
+        final ListResponse<InstanceProxyResponse> response = new ListResponse<>();
+        response.setResponses(responses, result.second());
+        return response;
+    }
+
+    /**
+     * Resolves the domain ids to filter on: when no domain id is given all domains are returned,
+     * when recursive is set the sub-domains of the given domain are included as well
+     */
+    protected List<Long> resolveDomainIds(final Long domainId, final Boolean recursive) {
+        if (domainId == null) {
+            return new ArrayList<>();
+        }
+        if (recursive != null && recursive) {
+            return domainDao.getDomainAndChildrenIds(domainId);
+        }
+        return List.of(domainId);
+    }
+
+    @Override
     public InstanceProxyResponse createInstanceProxyResponse(final ReverseProxyHost proxy) {
         final InstanceProxyResponse response = new InstanceProxyResponse();
         response.setObjectName("instanceproxy");
@@ -542,6 +594,7 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         cmdList.add(ListInstanceProxiesCmd.class);
         cmdList.add(DeleteInstanceProxyCmd.class);
         cmdList.add(CheckInstanceProxyNameCmd.class);
+        cmdList.add(ListReverseProxyHostsCmd.class);
         return cmdList;
     }
 
