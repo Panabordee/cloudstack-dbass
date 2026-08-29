@@ -369,34 +369,34 @@ public class DomainManagerImplTest {
 
     @Test
     public void createDomainVoTestCreateValidUuidIfEmptyString(){
-        DomainVO domainVo = domainManager.createDomainVo("test",1L,2L,"NetworkTest","");
+        DomainVO domainVo = domainManager.createDomainVo("test", null, 1L, 2L, "NetworkTest","");
         Assert.assertTrue(UuidUtils.isUuid(domainVo.getUuid()));
     }
 
     @Test
     public void createDomainVoTestCreateValidUuidIfWhiteSpace(){
-        DomainVO domainVo = domainManager.createDomainVo("test",1L,2L,"NetworkTest","  ");
+        DomainVO domainVo = domainManager.createDomainVo("test", null, 1L, 2L, "NetworkTest","  ");
         Assert.assertTrue(UuidUtils.isUuid(domainVo.getUuid()));
     }
 
     @Test
     public void createDomainVoTestCreateValidUuidIfNull(){
-        DomainVO domainVo = domainManager.createDomainVo("test",1L,2L,"NetworkTest",null);
+        DomainVO domainVo = domainManager.createDomainVo("test", null, 1L, 2L, "NetworkTest",null);
         Assert.assertTrue(UuidUtils.isUuid(domainVo.getUuid()));
     }
 
     @Test
     public void createDomainVoTestValidInformedUuid(){
-        DomainVO domainVo = domainManager.createDomainVo("test",1L,2L,"NetworkTest","testUuid");
+        DomainVO domainVo = domainManager.createDomainVo("test", null, 1L, 2L, "NetworkTest","testUuid");
         Assert.assertEquals("testUuid", domainVo.getUuid());
     }
 
     @Test
     public void createDomainTest(){
-        Mockito.doNothing().when(domainManager).validateDomainNameAndNetworkDomain(Mockito.any(String.class), Mockito.any(Long.class), Mockito.any(String.class));
+        Mockito.doNothing().when(domainManager).validateDomainNameAndNetworkDomain(Mockito.anyString(), Mockito.isNull(), Mockito.anyLong(), Mockito.anyString());
 
         DomainVO domainVoMock = Mockito.mock(DomainVO.class);
-        Mockito.doReturn(domainVoMock).when(domainManager).createDomainVo("test",1L,2L,"netTest","uuidTest");
+        Mockito.doReturn(domainVoMock).when(domainManager).createDomainVo("test", null, 1L, 2L, "netTest", "uuidTest");
         Mockito.doReturn(domainVoMock).when(domainDaoMock).create(domainVoMock);
         try (MockedStatic<CallContext> ignored = Mockito.mockStatic(CallContext.class)) {
             CallContext callContextMock = Mockito.mock(CallContext.class);
@@ -404,8 +404,8 @@ public class DomainManagerImplTest {
 
             Domain actualDomain = domainManager.createDomain("test", 1L, 2L, "netTest", "uuidTest");
 
-            Mockito.verify(domainManager).validateDomainNameAndNetworkDomain("test", 1L, "netTest");
-            Mockito.verify(domainManager).createDomainVo("test", 1L, 2L, "netTest", "uuidTest");
+            Mockito.verify(domainManager).validateDomainNameAndNetworkDomain("test", null, 1L, "netTest");
+            Mockito.verify(domainManager).createDomainVo("test", null, 1L, 2L, "netTest", "uuidTest");
 
             Mockito.verify(domainDaoMock).create(domainVoMock);
             Mockito.verify(_resourceCountDao).createResourceCounts(domainVoMock.getId(), ResourceLimit.ResourceOwnerType.Domain);

@@ -75,6 +75,15 @@ public class DomainVO implements Domain {
     @Column(name = "network_domain")
     private String networkDomain;
 
+    @Column(name = "display_name")
+    private String displayName = null;
+
+    @Column(name = "sort_key")
+    private long sortKey = 0L;
+
+    @Column(name = "show_on_login")
+    private boolean showOnLogin = true;
+
     @Column(name = "uuid")
     private String uuid;
 
@@ -209,7 +218,7 @@ public class DomainVO implements Domain {
     public String toString() {
         return String.format("Domain %s",
                 ReflectionToStringBuilderUtils.reflectOnlySelectedFields(
-                        this, "id", "uuid", "name", "path"));
+                        this, "id", "uuid", "name", "displayName", "path"));
     }
 
     @Override
@@ -219,6 +228,31 @@ public class DomainVO implements Domain {
 
     public void setNetworkDomain(String domainSuffix) {
         this.networkDomain = domainSuffix;
+    }
+
+    @Override
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public long getSortKey() {
+        return sortKey;
+    }
+
+    public void setSortKey(long sortKey) {
+        this.sortKey = sortKey;
+    }
+
+    public boolean isShowOnLogin() {
+        return showOnLogin;
+    }
+
+    public void setShowOnLogin(boolean showOnLogin) {
+        this.showOnLogin = showOnLogin;
     }
 
     @Override

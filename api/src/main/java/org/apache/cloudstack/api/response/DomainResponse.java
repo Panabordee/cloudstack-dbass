@@ -59,6 +59,18 @@ public class DomainResponse extends BaseResponseWithAnnotations implements Resou
     @Param(description = "The Network domain")
     private String networkDomain;
 
+    @SerializedName(ApiConstants.DISPLAY_NAME)
+    @Param(description = "The display name of the domain shown on the UI, falls back to the domain name when not set", since = "4.22.2.0")
+    private String displayName;
+
+    @SerializedName(ApiConstants.SORT_KEY)
+    @Param(description = "The sort key of the domain used for ordering the domains on the login page", since = "4.22.2.0")
+    private Long sortKey;
+
+    @SerializedName(ApiConstants.SHOW_ON_LOGIN)
+    @Param(description = "Whether the domain is listed on the login page domain selector", since = "4.22.2.0")
+    private Boolean showOnLogin;
+
     @SerializedName(ApiConstants.PATH)
     @Param(description = "The path of the domain")
     private String path;
@@ -296,6 +308,30 @@ public class DomainResponse extends BaseResponseWithAnnotations implements Resou
 
     public void setNetworkDomain(String networkDomain) {
         this.networkDomain = networkDomain;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public Long getSortKey() {
+        return sortKey;
+    }
+
+    public void setSortKey(Long sortKey) {
+        this.sortKey = sortKey;
+    }
+
+    public Boolean getShowOnLogin() {
+        return showOnLogin;
+    }
+
+    public void setShowOnLogin(Boolean showOnLogin) {
+        this.showOnLogin = showOnLogin;
     }
 
     public String getPath() {

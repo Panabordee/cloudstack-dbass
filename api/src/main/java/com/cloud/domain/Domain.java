@@ -42,6 +42,11 @@ public interface Domain extends OwnedBy, Identity, InternalIdentity {
 
     void setName(String name);
 
+    /**
+     * Returns the display name of the domain, may be null in which case the name should be used
+     */
+    String getDisplayName();
+
     Date getCreated();
 
     Date getRemoved();

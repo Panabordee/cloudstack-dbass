@@ -38,6 +38,10 @@
       <database-outlined />
       {{ server.name || server.apiBase || 'Local-Server' }}
     </label>
+    <label class="user-menu-domain-info action" v-if="domainDisplayname">
+      <project-outlined />
+      {{ domainDisplayname }}
+    </label>
     <a-dropdown>
       <span class="user-menu-dropdown action">
         <span v-if="image">
@@ -53,6 +57,10 @@
       </span>
       <template #overlay>
         <a-menu class="user-menu-wrapper" @click="handleClickMenu">
+          <a-menu-item v-if="domainDisplayname" class="user-menu-item" key="domain" disabled>
+            <ProjectOutlined class="user-menu-item-icon" />
+            <span class="user-menu-item-name">{{ $t('label.domain') }}: {{ domainDisplayname }}</span>
+          </a-menu-item>
           <a-menu-item class="user-menu-item" key="profile">
             <UserOutlined class="user-menu-item-icon" />
             <span class="user-menu-item-name">{{ $t('label.profilename') }}</span>
@@ -139,7 +147,8 @@ export default {
   computed: {
     server () {
       return this.$localStorage.get(SERVER_MANAGER) || this.$config.servers[0]
-    }
+    },
+    ...mapGetters(['domainDisplayname'])
   },
   methods: {
     ...mapActions(['Logout']),
@@ -234,6 +243,14 @@ export default {
     .anticon {
       margin-right: 5px;
     }
+  }
+
+  &-domain-info {
+    .anticon {
+      margin-right: 5px;
+    }
+    color: inherit;
+    cursor: default;
   }
 
 }

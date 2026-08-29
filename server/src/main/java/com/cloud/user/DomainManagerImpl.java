@@ -233,6 +233,12 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
     @Override
     @ActionEvent(eventType = EventTypes.EVENT_DOMAIN_CREATE, eventDescription = "creating Domain")
     public Domain createDomain(String name, Long parentId, String networkDomain, String domainUUID) {
+        return createDomain(name, (String)null, parentId, networkDomain, domainUUID);
+    }
+
+    @Override
+    @ActionEvent(eventType = EventTypes.EVENT_DOMAIN_CREATE, eventDescription = "creating Domain")
+    public Domain createDomain(String name, String displayName, Long parentId, String networkDomain, String domainUUID) {
         Account caller = getCaller();
 
         if (parentId == null) {
@@ -250,16 +256,22 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
 
         _accountMgr.checkAccess(caller, parentDomain);
 
-        return createDomain(name, parentId, caller.getId(), networkDomain, domainUUID);
+        return createDomain(name, displayName, parentId, caller.getId(), networkDomain, domainUUID);
 
     }
 
     @Override
     @DB
     public Domain createDomain(final String name, final Long parentId, final Long ownerId, final String networkDomain, String domainUuid) {
-        validateDomainNameAndNetworkDomain(name, parentId, networkDomain);
+        return createDomain(name, (String)null, parentId, ownerId, networkDomain, domainUuid);
+    }
 
-        DomainVO domainVO = createDomainVo(name, parentId, ownerId, networkDomain, domainUuid);
+    @Override
+    @DB
+    public Domain createDomain(final String name, final String displayName, final Long parentId, final Long ownerId, final String networkDomain, String domainUuid) {
+        validateDomainNameAndNetworkDomain(name, displayName, parentId, networkDomain);
+
+        DomainVO domainVO = createDomainVo(name, displayName, parentId, ownerId, networkDomain, domainUuid);
 
         DomainVO domain = Transaction.execute(new TransactionCallback<DomainVO>() {
             @Override
@@ -278,19 +290,52 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
         return domain;
     }
 
-    protected DomainVO createDomainVo(String name, Long parentId, Long ownerId, String networkDomain, String domainUuid) {
+    protected DomainVO createDomainVo(String name, String displayName, Long parentId, Long ownerId, String networkDomain, String domainUuid) {
         if (StringUtils.isBlank(domainUuid)) {
             domainUuid = UUID.randomUUID().toString();
             logger.info(String.format("Domain UUID [%s] generated for domain name [%s].", domainUuid, name));
         }
 
         DomainVO domainVO = new DomainVO(name, ownerId, parentId, networkDomain, domainUuid);
+        domainVO.setDisplayName(displayName);
         return domainVO;
     }
 
-    protected void validateDomainNameAndNetworkDomain(String name, Long parentId, String networkDomain) {
+    protected void validateDomainNameAndNetworkDomain(String name, String displayName, Long parentId, String networkDomain) {
         validateNetworkDomain(networkDomain);
         validateUniqueDomainName(name, parentId);
+        validateDisplayName(displayName);
+    }
+
+    /**
+     * Validates the display name of a domain. A display name must not be blank, must not be the ROOT domain
+     * (which can not have a display name) and must be unique across all domains (names as well as display names).
+     */
+    protected void validateDisplayName(String displayName) {
+        if (StringUtils.isBlank(displayName)) {
+            return;
+        }
+        if (displayName.length() > 255) {
+            throw new InvalidParameterValueException("Display name is too long, it should not exceed 255 characters");
+        }
+        validateUniqueDisplayName(displayName, null);
+    }
+
+    protected void validateUniqueDisplayName(String displayName, Long domainIdToExclude) {
+        SearchCriteria<DomainVO> sc = _domainDao.createSearchCriteria();
+        SearchCriteria<DomainVO> nameOrDisplayNameSc = _domainDao.createSearchCriteria();
+        nameOrDisplayNameSc.addOr("name", SearchCriteria.Op.EQ, displayName);
+        nameOrDisplayNameSc.addOr("displayName", SearchCriteria.Op.EQ, displayName);
+        sc.addAnd("name", SearchCriteria.Op.SC, nameOrDisplayNameSc);
+        List<DomainVO> domains = _domainDao.search(sc, null);
+        domains = domains.stream()
+                .filter(d -> domainIdToExclude == null || d.getId() != domainIdToExclude)
+                .collect(Collectors.toList());
+        if (!domains.isEmpty()) {
+            DomainVO conflictingDomain = domains.get(0);
+            throw new InvalidParameterValueException(String.format("The domain display name [%s] is already used by the domain with name [%s]. Display names must be unique.",
+                    displayName, conflictingDomain.getName()));
+        }
     }
 
     protected void validateUniqueDomainName(String name, Long parentId) {
@@ -875,6 +920,9 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
         final Long domainId = cmd.getId();
         final String domainName = cmd.getDomainName();
         final String networkDomain = cmd.getNetworkDomain();
+        final String displayName = cmd.getDisplayName();
+        final Long sortKey = cmd.getSortKey();
+        final Boolean showOnLogin = cmd.getShowOnLogin();
 
         // check if domain exists in the system
         final DomainVO domain = _domainDao.findById(domainId);
@@ -885,6 +933,9 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
         } else if (domain.getParent() == null && domainName != null) {
             // check if domain is ROOT domain - and deny to edit it with the new name
             throw new InvalidParameterValueException("ROOT domain can not be edited with a new name");
+        } else if (domain.getParent() == null && displayName != null) {
+            // check if domain is ROOT domain - and deny to set a display name on it
+            throw new InvalidParameterValueException("ROOT domain can not be edited with a display name");
         }
 
         // check permissions
@@ -915,6 +966,27 @@ public class DomainManagerImpl extends ManagerBase implements DomainManager, Dom
                         "Invalid network domain. Total length shouldn't exceed 190 chars. Each domain label must be between 1 and 63 characters long, can contain ASCII letters 'a' through 'z', the digits '0' through '9', "
                                 + "and the hyphen ('-'); can't start or end with \"-\"");
             }
+        }
+
+        // validate the display name, an empty display name clears it (falls back to the domain name)
+        if (displayName != null) {
+            if (displayName.isEmpty()) {
+                domain.setDisplayName(null);
+            } else {
+                if (displayName.length() > 255) {
+                    throw new InvalidParameterValueException("Display name is too long, it should not exceed 255 characters");
+                }
+                validateUniqueDisplayName(displayName, domainId);
+                domain.setDisplayName(displayName);
+            }
+        }
+
+        if (sortKey != null) {
+            domain.setSortKey(sortKey);
+        }
+
+        if (showOnLogin != null) {
+            domain.setShowOnLogin(showOnLogin);
         }
 
         Transaction.execute(new TransactionCallbackNoReturn() {

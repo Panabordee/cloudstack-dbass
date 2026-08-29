@@ -52,6 +52,24 @@ public class UpdateDomainCmd extends BaseCmd {
                description = "Network domain for the domain's networks; empty string will update domainName with NULL value")
     private String networkDomain;
 
+    @Parameter(name = ApiConstants.DISPLAY_NAME,
+               type = CommandType.STRING,
+               description = "Display name of the domain shown on the UI; falls back to the domain name when not set; empty string will remove the display name",
+               since = "4.22.2.0")
+    private String displayName;
+
+    @Parameter(name = ApiConstants.SORT_KEY,
+               type = CommandType.LONG,
+               description = "Sort key of the domain, used for ordering the domains on the login page",
+               since = "4.22.2.0")
+    private Long sortKey;
+
+    @Parameter(name = ApiConstants.SHOW_ON_LOGIN,
+               type = CommandType.BOOLEAN,
+               description = "Whether the domain should be listed on the login page domain selector",
+               since = "4.22.2.0")
+    private Boolean showOnLogin;
+
     @Inject
     RegionService _regionService;
 
@@ -69,6 +87,18 @@ public class UpdateDomainCmd extends BaseCmd {
 
     public String getNetworkDomain() {
         return networkDomain;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public Long getSortKey() {
+        return sortKey;
+    }
+
+    public Boolean getShowOnLogin() {
+        return showOnLogin;
     }
 
     /////////////////////////////////////////////////////

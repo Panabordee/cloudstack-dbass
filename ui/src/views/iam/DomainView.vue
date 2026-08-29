@@ -68,7 +68,31 @@
         @change-tree-store="changeDomainStore"/>
     </div>
 
-    <div v-if="showAction">
+    <div v-if="showAction && action && action.component">
+      <a-modal
+        :visible="showAction"
+        :closable="true"
+        :maskClosable="false"
+        :cancelText="$t('label.cancel')"
+        :footer="null"
+        centered
+        width="auto"
+        style="top: 20px;"
+        @cancel="closeAction"
+      >
+        <template #title>
+          {{ $t(action.label) }}
+        </template>
+        <component
+          :is="action.component"
+          :resource="resource"
+          :action="action"
+          @close-action="closeAction"
+          @refresh-data="fetchData"
+        />
+      </a-modal>
+    </div>
+    <div v-if="showAction && !(action && action.component)">
       <domain-action-form
         :showAction="showAction"
         :resource="resource"
@@ -222,7 +246,7 @@ export default {
       this.treeDeletedKey = null
       this.actionData = []
       this.action = action
-      this.action.params = store.getters.apis[this.action.api].params
+      this.action.params = store.getters.apis[this.action.api]?.params || []
       const paramFields = this.action.params
       paramFields.sort(function (a, b) {
         if (a.name === 'name' && b.name !== 'name') { return -1 }

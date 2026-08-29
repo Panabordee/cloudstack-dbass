@@ -77,6 +77,9 @@ public class DomainJoinDaoImpl extends GenericDaoBase<DomainJoinVO, Long> implem
         domainResponse.setId(domain.getUuid());
         domainResponse.setLevel(domain.getLevel());
         domainResponse.setNetworkDomain(domain.getNetworkDomain());
+        domainResponse.setDisplayName(domain.getDisplayName());
+        domainResponse.setSortKey(domain.getSortKey());
+        domainResponse.setShowOnLogin(domain.isShowOnLogin());
         if (domain.getParentUuid() != null) {
             domainResponse.setParentDomainId(domain.getParentUuid());
         }

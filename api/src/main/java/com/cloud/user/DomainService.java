@@ -31,6 +31,8 @@ public interface DomainService {
 
     Domain createDomain(String name, Long parentId, String networkDomain, String domainUUID);
 
+    Domain createDomain(String name, String displayName, Long parentId, String networkDomain, String domainUUID);
+
     Domain getDomain(long id);
 
     Domain getDomain(String uuid);

@@ -534,7 +534,7 @@ export default {
           resource.value = '-1'
         }
       })
-      resource.title = resource.name
+      resource.title = resource.displayname || resource.name
       resource.key = resource.id
       if (resource?.icon) {
         resource.resourceIcon = resource.icon

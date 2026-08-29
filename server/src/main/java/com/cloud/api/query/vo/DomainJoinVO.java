@@ -71,6 +71,15 @@ public class DomainJoinVO extends BaseViewVO implements InternalIdentity, Identi
     @Column(name="network_domain")
     private String networkDomain;
 
+    @Column(name="display_name")
+    private String displayName;
+
+    @Column(name="sort_key")
+    private long sortKey;
+
+    @Column(name="show_on_login")
+    private boolean showOnLogin = true;
+
     @Column(name="uuid")
     private String uuid;
 
@@ -298,6 +307,30 @@ public class DomainJoinVO extends BaseViewVO implements InternalIdentity, Identi
 
     public void setNetworkDomain(String domainSuffix) {
         this.networkDomain = domainSuffix;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public void setDisplayName(String displayName) {
+        this.displayName = displayName;
+    }
+
+    public long getSortKey() {
+        return sortKey;
+    }
+
+    public void setSortKey(long sortKey) {
+        this.sortKey = sortKey;
+    }
+
+    public boolean isShowOnLogin() {
+        return showOnLogin;
+    }
+
+    public void setShowOnLogin(boolean showOnLogin) {
+        this.showOnLogin = showOnLogin;
     }
 
 

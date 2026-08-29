@@ -78,6 +78,7 @@ const user = {
     shutdownTriggered: false,
     twoFaEnabled: false,
     twoFaProvider: '',
+    domainDisplayname: '',
     twoFaIssuer: '',
     customHypervisorName: 'Custom',
     readyForShutdownPollingJob: ''
@@ -121,6 +122,9 @@ const user = {
     },
     SET_LDAP: (state, isLdapEnabled) => {
       state.isLdapEnabled = isLdapEnabled
+    },
+    SET_DOMAIN_DISPLAY_NAME: (state, displayName) => {
+      state.domainDisplayname = displayName || ''
     },
     SET_CLOUDIAN: (state, cloudian) => {
       state.cloudian = cloudian
@@ -413,6 +417,19 @@ const user = {
           commit('SET_NAME', result.firstname + ' ' + result.lastname)
           commit('SET_AVATAR', result.icon?.base64image || '')
           store.dispatch('SetCsLatestVersion', result.rolename)
+          getAPI('listDomains', { id: result.domainid, listall: true }).then(domainResponse => {
+            const domain = domainResponse.listdomainsresponse.domain?.[0]
+            commit('SET_DOMAIN_DISPLAY_NAME', domain?.displayname || domain?.name || '')
+          }).catch(ignored => {
+            // normal users may not be permitted to call listDomains, fall back to the public login domains
+            getAPI('listLoginDomains').then(loginResponse => {
+              const domains = loginResponse.listlogindomainsresponse.logindomain || []
+              const domain = domains.find(d => d.id === result.domainid)
+              commit('SET_DOMAIN_DISPLAY_NAME', domain?.displayname || '')
+            }).catch(ignoredError => {
+              commit('SET_DOMAIN_DISPLAY_NAME', '')
+            })
+          })
         }).catch(error => {
           reject(error)
         })
@@ -481,6 +498,7 @@ const user = {
         commit('SET_2FA_ISSUER', '')
         commit('SET_LOGIN_FLAG', false)
         commit('SET_MS_ID', '')
+        commit('SET_DOMAIN_DISPLAY_NAME', '')
         vueProps.$localStorage.remove(CURRENT_PROJECT)
         vueProps.$localStorage.remove(ACCESS_TOKEN)
         vueProps.$localStorage.remove(HEADER_NOTICES)

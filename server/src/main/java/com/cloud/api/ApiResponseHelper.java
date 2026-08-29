@@ -578,6 +578,7 @@ public class ApiResponseHelper implements ResponseGenerator, ResourceIdSupport {
         domainResponse.setLevel(domain.getLevel());
         domainResponse.setCreated(domain.getCreated());
         domainResponse.setNetworkDomain(domain.getNetworkDomain());
+        domainResponse.setDisplayName(domain.getDisplayName());
         Domain parentDomain = ApiDBUtils.findDomainById(domain.getParent());
         if (parentDomain != null) {
             domainResponse.setParentDomainId(parentDomain.getUuid());

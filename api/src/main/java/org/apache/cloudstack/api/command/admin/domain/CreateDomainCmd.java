@@ -43,6 +43,12 @@ public class CreateDomainCmd extends BaseCmd {
     @Parameter(name = ApiConstants.NAME, type = CommandType.STRING, required = true, description = "Creates domain with this name")
     private String domainName;
 
+    @Parameter(name = ApiConstants.DISPLAY_NAME,
+            type = CommandType.STRING,
+            description = "Display name of the domain shown on the UI (e.g. on the login page domain selector); falls back to the domain name when not set",
+            since = "4.22.2.0")
+    private String displayName;
+
     @Parameter(name = ApiConstants.PARENT_DOMAIN_ID,
             type = CommandType.UUID,
             entityType = DomainResponse.class,
@@ -61,6 +67,10 @@ public class CreateDomainCmd extends BaseCmd {
 
     public String getDomainName() {
         return domainName;
+    }
+
+    public String getDisplayName() {
+        return displayName;
     }
 
     public Long getParentDomainId() {
@@ -87,7 +97,7 @@ public class CreateDomainCmd extends BaseCmd {
     @Override
     public void execute() {
         CallContext.current().setEventDetails("Domain Name: " + getDomainName() + ((getParentDomainId() != null) ? ", Parent DomainId :" + getParentDomainId() : ""));
-        Domain domain = _domainService.createDomain(getDomainName(), getParentDomainId(), getNetworkDomain(), getDomainUUID());
+        Domain domain = _domainService.createDomain(getDomainName(), getDisplayName(), getParentDomainId(), getNetworkDomain(), getDomainUUID());
         if (domain != null) {
             DomainResponse response = _responseGenerator.createDomainResponse(domain);
             response.setResponseName(getCommandName());

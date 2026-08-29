@@ -25,3 +25,12 @@ CREATE TABLE IF NOT EXISTS `cloud`.`reverse_proxy_host` (
   KEY `i_reverse_proxy_host_vm_instance_id` (`vm_instance_id`),
   KEY `i_reverse_proxy_host_account_id` (`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Domain display name shown on the UI (falls back to the domain name when not set)
+ALTER TABLE `cloud`.`domain` ADD COLUMN `display_name` varchar(255) COMMENT 'display name of the domain shown on the UI, falls back to name when not set';
+
+-- Ordering of domains on the login page domain selector
+ALTER TABLE `cloud`.`domain` ADD COLUMN `sort_key` int unsigned NOT NULL DEFAULT 0 COMMENT 'sort order of the domain on the login page';
+
+-- Whether the domain is listed on the login page domain selector
+ALTER TABLE `cloud`.`domain` ADD COLUMN `show_on_login` boolean NOT NULL DEFAULT true COMMENT 'whether the domain is listed on the login page domain selector';

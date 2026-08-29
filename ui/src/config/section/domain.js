@@ -25,8 +25,8 @@ export default {
   docHelp: 'adminguide/accounts.html#domains',
   permission: ['listDomains', 'listDomainChildren'],
   resourceType: 'Domain',
-  columns: ['name', 'state', 'path', 'parentdomainname', 'level'],
-  details: ['name', 'id', 'path', 'parentdomainname', 'level', 'networkdomain', 'created'],
+  columns: ['name', 'displayname', 'state', 'path', 'parentdomainname', 'level'],
+  details: ['name', 'displayname', 'id', 'path', 'parentdomainname', 'level', 'networkdomain', 'sortkey', 'showonlogin', 'created'],
   component: shallowRef(() => import('@/views/iam/DomainView.vue')),
   related: [{
     name: 'account',
@@ -98,7 +98,7 @@ export default {
       label: 'label.add.domain',
       listView: true,
       dataView: false,
-      args: ['parentdomainid', 'name', 'networkdomain', 'domainid'],
+      args: ['parentdomainid', 'name', 'displayname', 'networkdomain', 'domainid'],
       mapping: {
         parentdomainid: {
           value: (record) => { return record.id }
@@ -112,7 +112,7 @@ export default {
       listView: true,
       dataView: true,
       args: (record) => {
-        var fields = ['networkdomain']
+        var fields = ['displayname', 'showonlogin', 'networkdomain']
         if (record.name !== 'ROOT') {
           fields.unshift('name')
         }
@@ -122,6 +122,18 @@ export default {
         return ['Admin'].includes(store.userInfo.roletype) ||
           ['DomainAdmin'].includes(store.userInfo.roletype) && record.domainid !== store.userInfo.domainid
       }
+    },
+    {
+      api: 'updateDomain',
+      icon: 'ordered-list-outlined',
+      label: 'label.arrange.login.domains',
+      listView: true,
+      dataView: false,
+      popup: true,
+      show: (record, store) => {
+        return ['Admin'].includes(store.userInfo.roletype)
+      },
+      component: shallowRef(defineAsyncComponent(() => import('@/views/iam/ArrangeLoginDomains.vue')))
     },
     {
       api: 'updateResourceCount',

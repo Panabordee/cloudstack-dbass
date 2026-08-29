@@ -100,21 +100,25 @@
                 </a-input-password>
               </a-form-item>
               <a-form-item ref="domain" name="domain">
-                <a-select
-                  size="large"
-                  :placeholder="$t('label.domain')"
+                <a-auto-complete
+                  class="domain-select"
                   v-model:value="form.domain"
-                  showSearch
-                  allowClear
+                  :options="domainOptions"
+                  :filter-option="false"
+                  backfill
+                  @search="onDomainSearch"
+                  @select="onDomainSelect"
+                  @dropdown-visible-change="onDomainDropdownVisible"
                 >
-                  <template #prefix>
-                    <project-outlined />
-                  </template>
-                  <a-select-option v-for="domain in commonDomains" :key="domain.value" :value="domain.value">
-                    <project-outlined style="margin-right: 8px" />
-                    {{ domain.label }}
-                  </a-select-option>
-                </a-select>
+                  <a-input
+                    size="large"
+                    :placeholder="$t('label.domain')"
+                  >
+                    <template #prefix>
+                      <project-outlined />
+                    </template>
+                  </a-input>
+                </a-auto-complete>
               </a-form-item>
               <a-form-item ref="project" name="project" v-if="$config.displayProjectFieldOnLogin">
                 <a-input
@@ -269,11 +273,8 @@ export default {
       server: '',
       forgotPasswordEnabled: false,
       project: null,
-      commonDomains: [
-        { label: 'Network and Cloud Laboratory', value: 'NACL', isDefault: true },
-        { label: 'Guests', value: 'GUEST', isDefault: false },
-        { label: 'ROOT (/)', value: '/', isDefault: false }
-      ]
+      loginDomains: [],
+      domainKeyword: ''
     }
   },
   computed: {
@@ -285,6 +286,22 @@ export default {
     },
     loginFooter () {
       return this.$config.loginFooter || ''
+    },
+    domainOptions () {
+      const all = this.loginDomains.map(d => {
+        const label = d.displayname || d.name
+        return { value: label, label: label }
+      })
+      const keyword = (this.domainKeyword || '').toLowerCase()
+      if (!keyword) {
+        return all
+      }
+      return all.filter(option => option.label.toLowerCase().indexOf(keyword) >= 0)
+    }
+  },
+  watch: {
+    'form.username' (val) {
+      this.applyLastSelectedDomain(val)
     }
   },
   created () {
@@ -307,15 +324,49 @@ export default {
     initForm () {
       this.formRef = ref()
       const savedDomain = getStore(LAST_SELECTED_DOMAIN)
-      const defaultDomain = this.commonDomains.find(d => d.isDefault)?.value || '/'
       this.form = reactive({
         server: (this.server.apiHost || '') + this.server.apiBase,
         username: this.$route.query?.username || '',
-        domain: this.$route.query?.domain || savedDomain || defaultDomain,
+        domain: this.$route.query?.domain || savedDomain || '',
         project: null
       })
       this.rules = reactive({})
       this.setRules()
+      this.applyLastSelectedDomain(this.form.username)
+    },
+    applyLastSelectedDomain (username) {
+      if (!username || this.$route.query?.domain) {
+        return
+      }
+      const savedDomain = getStore(LAST_SELECTED_DOMAIN + '_' + username) || getStore(LAST_SELECTED_DOMAIN)
+      if (savedDomain) {
+        this.form.domain = savedDomain
+      }
+    },
+    onDomainSearch (text) {
+      this.domainKeyword = text || ''
+    },
+    onDomainSelect () {
+      this.domainKeyword = ''
+    },
+    onDomainDropdownVisible (open) {
+      if (open) {
+        // always show the full list of domains when the dropdown opens
+        this.domainKeyword = ''
+      }
+    },
+    preselectFirstDomain () {
+      if (!this.form.domain && this.loginDomains.length > 0) {
+        const first = this.loginDomains[0]
+        this.form.domain = first.displayname || first.name
+      }
+    },
+    resolveDomain (domain) {
+      if (!domain) {
+        return domain
+      }
+      const match = this.loginDomains.find(d => (d.displayname || d.name) === domain)
+      return match ? match.path : domain
     },
     setRules () {
       if (this.customActiveKey === 'cs' && this.customActiveKeyOauth === false) {
@@ -343,6 +394,14 @@ export default {
       }
     },
     fetchData () {
+      getAPI('listLoginDomains').then(response => {
+        if (response) {
+          this.loginDomains = response.listlogindomainsresponse.logindomain || []
+          this.preselectFirstDomain()
+        }
+      }).catch(() => {
+        this.loginDomains = []
+      })
       getAPI('listIdps').then(response => {
         if (response) {
           this.idps = response.listidpsresponse.idp || []
@@ -410,7 +469,7 @@ export default {
       if (!values.domain) {
         this.$store.commit('SET_DOMAIN_USED_TO_LOGIN', '/')
       } else {
-        this.$store.commit('SET_DOMAIN_USED_TO_LOGIN', values.domain)
+        this.$store.commit('SET_DOMAIN_USED_TO_LOGIN', this.resolveDomain(values.domain))
       }
     },
     getGitHubUrl (from) {
@@ -460,7 +519,7 @@ export default {
           delete loginParams.username
           loginParams[!this.state.loginType ? 'email' : 'username'] = values.username
           loginParams.password = values.password
-          loginParams.domain = values.domain
+          loginParams.domain = this.resolveDomain(values.domain)
           if (!loginParams.domain) {
             loginParams.domain = '/'
           }
@@ -492,7 +551,7 @@ export default {
         loginParams.email = this.email
         loginParams.provider = provider
         loginParams.secretcode = this.secretcode
-        loginParams.domain = values.domain
+        loginParams.domain = this.resolveDomain(values.domain)
         if (!loginParams.domain) {
           loginParams.domain = '/'
         }
@@ -507,10 +566,13 @@ export default {
     async loginSuccess (res) {
       this.$notification.destroy()
       this.$store.commit('SET_COUNT_NOTIFY', 0)
-      // Save the selected domain to localStorage for next login
+      // Save the selected domain to localStorage for next login (per user and globally)
       const values = toRaw(this.form)
       if (values.domain) {
         setStore(LAST_SELECTED_DOMAIN, values.domain)
+        if (values.username) {
+          setStore(LAST_SELECTED_DOMAIN + '_' + values.username, values.domain)
+        }
       }
       if (store.getters.twoFaEnabled === true && store.getters.twoFaProvider !== '' && store.getters.twoFaProvider !== undefined) {
         this.$router.push({ path: '/verify2FA' }).catch(() => {})
@@ -768,6 +830,29 @@ html, body {
 
     .ant-select-arrow {
       color: #8c8c8c;
+    }
+  }
+
+  :deep(.domain-select .ant-input-affix-wrapper) {
+    border: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    box-shadow: none !important;
+
+    .ant-input {
+      border: none !important;
+      background: transparent !important;
+      padding: 0 !important;
+      height: auto !important;
+      min-height: 0 !important;
+      box-shadow: none !important;
+    }
+
+    .ant-input-prefix {
+      margin: 0 12px 0 0 !important;
     }
   }
 

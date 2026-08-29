@@ -29,6 +29,8 @@ public interface DomainManager extends DomainService {
 
     Domain createDomain(String name, Long parentId, Long ownerId, String networkDomain, String domainUUID);
 
+    Domain createDomain(String name, String displayName, Long parentId, Long ownerId, String networkDomain, String domainUUID);
+
     Set<Long> getDomainParentIds(long domainId);
 
     boolean removeDomain(long domainId);
