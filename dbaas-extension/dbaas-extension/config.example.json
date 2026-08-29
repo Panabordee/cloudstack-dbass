@@ -1,0 +1,9 @@
+{
+  "cloudstack_api_url": "https://YOUR-CLOUDSTACK-HOST/client/api",
+  "cloudstack_api_key": "REPLACE_ME",
+  "cloudstack_secret_key": "REPLACE_ME",
+  "ssh_private_key_path": "/etc/dbaas-extension/dbaas_provisioner_id_ed25519",
+  "ssh_user": "dbaas-provisioner",
+  "ssh_connect_timeout_seconds": 15,
+  "log_file": "/var/log/cloudstack/management/dbaas-extension.log"
+}
