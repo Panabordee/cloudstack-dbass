@@ -1,0 +1,4 @@
+# Copy to /etc/default/dbaas-block-rogue-dhcp and set the MAC of the DHCP
+# server that must not answer CloudStack guests. Find it with:
+#   ip neigh show <gateway-ip>
+GW_MAC="aa:bb:cc:dd:ee:ff"

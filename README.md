@@ -43,15 +43,27 @@ the normal CloudStack "Deploy VM" wizard.
 ## Setup order
 
 1. Build the three templates (`dbaas-mysql`, `dbaas-postgresql`,
-   `dbaas-mongodb`): install the engine, disable/stop it, drop the matching
-   `provisioning/*.sh` at `/opt/dbaas/provision.sh` on the image, and add an
+   `dbaas-mongodb`): install the engine and **leave it enabled and running** —
+   a VM deployed from the template has to come up with a working database
+   server. Drop `provisioning/provision.sh` and the matching
+   `provisioning/<engine>.sh` into `/opt/dbaas/` on the image, and add an
    `authorized_keys` entry for a dedicated `dbaas-provisioner` user that is
    **forced** to only run that script:
    ```
-   command="/opt/dbaas/provision.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding ssh-ed25519 AAAA... dbaas-extension
+   command="sudo -n /opt/dbaas/provision.sh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... dbaas-extension
    ```
    This means even if the extension's private key ever leaks, it can only
    ever run that one provisioning script — it cannot get a shell.
+
+   The forced command goes through `sudo` because all three engine scripts
+   need root. Pair it with `provisioning/sudoers.d-dbaas-provisioner`, which
+   pins the command to that exact path with no arguments and keeps
+   `SSH_ORIGINAL_COMMAND` across the `sudo` env reset. `provision.sh` reads the
+   engine script name from `$SSH_ORIGINAL_COMMAND` and validates it against its
+   own allowlist — sshd never passes it as `$1`.
+
+   See `TEMPLATES.md` for the full per-image contents, the generalize steps
+   before `createTemplate`, and how to patch a template offline.
 
 2. Copy this whole folder to every management server at
    `/usr/share/cloudstack-management/extensions/dbaas/`, owned by
@@ -65,7 +77,9 @@ the normal CloudStack "Deploy VM" wizard.
 
 5. Deploy a test VM from `dbaas-mysql`, wait for `Running`, then trigger
    **Create Database** from the VM's action menu and confirm you get a
-   password back.
+   password back. Confirm it by actually logging in with the returned
+   credentials — two of the three engine scripts have historically exited 0
+   while silently failing to create the user.
 
 ## Security notes baked into this skeleton (don't remove them)
 
