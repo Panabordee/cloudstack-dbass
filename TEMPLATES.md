@@ -144,6 +144,24 @@ deploy re-copies from secondary. This cost one full debugging cycle.
   connections of tenants already on that VM. Guard the rewrite on the value
   actually needing a change.
 
+- **`Small Instance` is too small for these templates — use `Medium Instance`
+  or larger (1 vCPU @ 1 GHz+, 1 GB+ RAM).** On `Small Instance`
+  (1 vCPU capped at 500 MHz, 512 MB RAM) MySQL 8.0 on Ubuntu 24.04 pins the
+  vCPU at **87-97% continuously**, which starves `sshd` badly enough that it
+  cannot answer the SSH protocol banner in time. The failure looks like a
+  network problem but is not: a raw TCP socket still reads the banner in ~2 s
+  while both the OpenSSH client and paramiko time out during banner exchange,
+  and `create_database` fails intermittently with `No existing session`.
+  Measured handshake latency, same template and same host:
+
+  | Offering | vCPU during idle | SSH handshake |
+  | --- | --- | --- |
+  | Small Instance (500 MHz / 512 MB) | 87-97% sustained | 5-15 s, often timing out |
+  | Medium Instance (1 GHz / 1 GB) | settles under 40% | 0.15-0.26 s |
+
+  Raising `ssh_connect_timeout_seconds` masks it at best; size the offering
+  properly instead.
+
 ## Fixed
 
 All three engines shared one bug: a repeat `create_database` for a name that

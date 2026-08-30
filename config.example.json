@@ -4,6 +4,7 @@
   "cloudstack_secret_key": "REPLACE_ME",
   "ssh_private_key_path": "/etc/dbaas-extension/dbaas_provisioner_id_ed25519",
   "ssh_user": "dbaas-provisioner",
-  "ssh_connect_timeout_seconds": 15,
+  "_comment_ssh_connect_timeout_seconds": "Applied to paramiko's timeout, banner_timeout AND auth_timeout together. Setting only timeout is not enough: banner_timeout and auth_timeout keep their own 15s defaults, so a slow-to-answer sshd still fails at 15s no matter how large this is. See TEMPLATES.md for the offering sizing that makes those timeouts matter.",
+  "ssh_connect_timeout_seconds": 30,
   "log_file": "/var/log/cloudstack/management/dbaas-extension.log"
 }

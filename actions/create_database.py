@@ -121,11 +121,18 @@ def _run_provisioning_script(vm_ip, script_name, config, db_payload):
     # ephemeral template VMs, but if that's not acceptable in your environment
     # pin known_hosts per template image instead.
     try:
+        # paramiko caps the banner read and the auth exchange with their own
+        # 15s defaults, so passing only `timeout` leaves both untouched — a VM
+        # whose sshd is slow to answer still fails at 15s no matter how large
+        # ssh_connect_timeout_seconds is. Give all three the same budget.
+        connect_timeout = config.get("ssh_connect_timeout_seconds", 15)
         client.connect(
             hostname=vm_ip,
             username=config["ssh_user"],
             key_filename=config["ssh_private_key_path"],
-            timeout=config.get("ssh_connect_timeout_seconds", 15),
+            timeout=connect_timeout,
+            banner_timeout=connect_timeout,
+            auth_timeout=connect_timeout,
         )
         # authorized_keys on the VM forces this connection straight into
         # /opt/dbaas/provision.sh regardless of what command we "request" here,
