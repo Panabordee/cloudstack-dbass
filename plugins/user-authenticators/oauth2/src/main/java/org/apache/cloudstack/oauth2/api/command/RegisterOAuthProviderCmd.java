@@ -56,13 +56,13 @@ public class RegisterOAuthProviderCmd extends BaseCmd {
     @Parameter(name = ApiConstants.OAUTH_SECRET_KEY, type = CommandType.STRING, description = "Secret Key pre-registered in the specific OAuth provider", required = true)
     private String secretKey;
 
-    @Parameter(name = ApiConstants.REDIRECT_URI, type = CommandType.STRING, description = "Redirect URI pre-registered in the specific OAuth provider", required = true)
+    @Parameter(name = ApiConstants.REDIRECT_URI, type = CommandType.STRING, required = true, description = "Redirect URI pre-registered in the specific OAuth provider; use the CloudStack UI URL with no query parameters, for example https://cloud.example.com/client/ (some providers such as Authentik strip query parameters from redirect URIs)")
     private String redirectUri;
 
-    @Parameter(name = ApiConstants.AUTHORIZE_URL, type = CommandType.STRING, description = "Authorize URL for OAuth initialization (only required for keycloak provider)")
+    @Parameter(name = ApiConstants.AUTHORIZE_URL, type = CommandType.STRING, description = "Authorize URL for OAuth initialization, for example https://idp.example.com/application/o/authorize/ (only required for keycloak provider)")
     private String authorizeUrl;
 
-    @Parameter(name = ApiConstants.TOKEN_URL, type = CommandType.STRING, description = "Token URL for OAuth finalization (only required for keycloak provider)")
+    @Parameter(name = ApiConstants.TOKEN_URL, type = CommandType.STRING, description = "Token URL for OAuth finalization, for example https://idp.example.com/application/o/token/ (only required for keycloak provider)")
     private String tokenUrl;
 
     @Parameter(name = ApiConstants.DETAILS, type = CommandType.MAP,
