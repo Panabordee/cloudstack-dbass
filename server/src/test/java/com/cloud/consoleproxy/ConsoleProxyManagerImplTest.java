@@ -17,17 +17,26 @@
 package com.cloud.consoleproxy;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.apache.cloudstack.framework.config.ConfigKey;
+import org.apache.cloudstack.framework.config.impl.ConfigDepotImpl;
+import org.apache.cloudstack.framework.security.keystore.KeystoreDao;
+import org.apache.cloudstack.framework.security.keystore.KeystoreVO;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnitRunner;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import com.cloud.hypervisor.Hypervisor;
 import com.cloud.offering.ServiceOffering;
@@ -50,6 +59,9 @@ public class ConsoleProxyManagerImplTest {
     private AccountManager accountManager;
 
     @Mock
+    private KeystoreDao keystoreDao;
+
+    @Mock
     private ServiceOffering serviceOffering;
     @Mock
     private VMTemplateVO template;
@@ -58,9 +70,25 @@ public class ConsoleProxyManagerImplTest {
     @Mock
     private User systemUser;
 
+    private ConfigDepotImpl configDepot;
+    private ConfigDepotImpl originalConfigDepot;
+
     @Before
     public void setUp() {
         when(accountManager.getSystemUser()).thenReturn(systemUser);
+        configDepot = Mockito.mock(ConfigDepotImpl.class);
+        originalConfigDepot = (ConfigDepotImpl)ReflectionTestUtils.getField(ConsoleProxyManager.ConsoleProxyWebSocketPort, "s_depot");
+        ReflectionTestUtils.setField(ConsoleProxyManager.ConsoleProxyWebSocketPort, "s_depot", configDepot);
+    }
+
+    @After
+    public void tearDown() {
+        ReflectionTestUtils.setField(ConsoleProxyManager.ConsoleProxyWebSocketPort, "s_depot", originalConfigDepot);
+    }
+
+    private void mockConfigValue(ConfigKey<?> key, String value) {
+        Mockito.when(configDepot.getConfigStringValue(Mockito.eq(key.key()), Mockito.eq(ConfigKey.Scope.Zone), Mockito.eq(1L))).thenReturn(value);
+        Mockito.lenient().when(configDepot.getConfigStringValue(Mockito.eq(key.key()), Mockito.eq(ConfigKey.Scope.Global), Mockito.isNull())).thenReturn(value);
     }
 
     @Test
@@ -103,5 +131,61 @@ public class ConsoleProxyManagerImplTest {
         assertEquals(template.getHypervisorType(), result.getHypervisorType());
         assertEquals(template.getGuestOSId(), result.getGuestOSId());
         assertEquals(template.isDynamicallyScalable(), result.isDynamicallyScalable());
+    }
+
+    @Test
+    public void testGetVncPort_CustomPort() {
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyWebSocketPort, "9000");
+        assertEquals(9000, consoleProxyManager.getVncPort(1L));
+    }
+
+    @Test
+    public void testGetVncPort_CustomPortWithSsl() {
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyWebSocketPort, "9000");
+        assertEquals(9000, consoleProxyManager.getVncPort(1L));
+    }
+
+    @Test
+    public void testGetVncPort_InvalidCustomPortFallsBackToDefault() {
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyWebSocketPort, "80");
+        assertEquals(8080, consoleProxyManager.getVncPort(1L));
+    }
+
+    @Test
+    public void testGetVncPort_DefaultWithoutSsl() {
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyWebSocketPort, null);
+        assertEquals(8080, consoleProxyManager.getVncPort(1L));
+    }
+
+    @Test
+    public void testGetVncPort_DefaultWithSsl() {
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyWebSocketPort, null);
+        mockConfigValue(ConsoleProxyManager.ConsoleProxySslEnabled, "true");
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyUrlDomain, "example.com");
+        Mockito.when(keystoreDao.findByName(ConsoleProxyManager.CERTIFICATE_NAME)).thenReturn(Mockito.mock(KeystoreVO.class));
+        assertEquals(8443, consoleProxyManager.getVncPort(1L));
+    }
+
+    @Test
+    public void testGetVncPort_SslWithoutCertificate() {
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyWebSocketPort, null);
+        mockConfigValue(ConsoleProxyManager.ConsoleProxySslEnabled, "true");
+        mockConfigValue(ConsoleProxyManager.ConsoleProxyUrlDomain, "example.com");
+        Mockito.when(keystoreDao.findByName(ConsoleProxyManager.CERTIFICATE_NAME)).thenReturn(null);
+        assertEquals(8080, consoleProxyManager.getVncPort(1L));
+    }
+
+    @Test
+    public void testIsValidWebSocketPort() {
+        assertTrue(consoleProxyManager.isValidWebSocketPort(8080));
+        assertTrue(consoleProxyManager.isValidWebSocketPort(8443));
+        assertTrue(consoleProxyManager.isValidWebSocketPort(9000));
+        assertTrue(consoleProxyManager.isValidWebSocketPort(1024));
+        assertTrue(consoleProxyManager.isValidWebSocketPort(65535));
+        assertFalse(consoleProxyManager.isValidWebSocketPort(0));
+        assertFalse(consoleProxyManager.isValidWebSocketPort(80));
+        assertFalse(consoleProxyManager.isValidWebSocketPort(443));
+        assertFalse(consoleProxyManager.isValidWebSocketPort(1023));
+        assertFalse(consoleProxyManager.isValidWebSocketPort(65536));
     }
 }

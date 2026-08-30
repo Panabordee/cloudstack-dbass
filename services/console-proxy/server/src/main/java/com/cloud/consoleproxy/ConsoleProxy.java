@@ -412,9 +412,9 @@ public class ConsoleProxy {
 
     private static ConsoleProxyNoVNCServer getNoVNCServer() {
         int vncPort = ConsoleProxyNoVNCServer.getVNCPort();
-        return vncPort == ConsoleProxyNoVNCServer.WSS_PORT ?
-                new ConsoleProxyNoVNCServer(ksBits, ksPassword) :
-                new ConsoleProxyNoVNCServer();
+        return ConsoleProxyNoVNCServer.isVncSslEnabled() ?
+                new ConsoleProxyNoVNCServer(vncPort, ksBits, ksPassword) :
+                new ConsoleProxyNoVNCServer(vncPort);
     }
 
     private static void startupHttpCmdPort() {

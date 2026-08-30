@@ -50,6 +50,11 @@ public interface ConsoleProxyManager extends Manager, ConsoleProxyService {
     ConfigKey<Boolean> ConsoleProxySslEnabled = new ConfigKey<>(Boolean.class, "consoleproxy.sslEnabled",  ConfigKey.CATEGORY_ADVANCED, "false",
             "Enable SSL for console proxy", false, ConfigKey.Scope.Zone, null);
 
+    ConfigKey<Integer> ConsoleProxyWebSocketPort = new ConfigKey<>(Integer.class, "consoleproxy.websocket.port", "Console Proxy", String.valueOf(DEFAULT_PROXY_VNC_PORT),
+            "Port used by console proxy VMs for the websocket (noVNC) connection. If set to 0 (default), the port is chosen automatically: 8443 when consoleproxy.sslEnabled is enabled, otherwise 8080. "
+                    + "When set to a custom port, it must be within the range 1024-65535 and must not be 80 or 443 (reserved by the console proxy HTTP server). "
+                    + "Requires reconnecting CPVMs to management server when this changes (via restart CPVM, or management server)", false, ConfigKey.Scope.Zone, null);
+
     ConfigKey<Boolean> NoVncConsoleDefault = new ConfigKey<>(Boolean.class, "novnc.console.default", ConfigKey.CATEGORY_ADVANCED, "true",
         "If true, noVNC console will be default console for virtual machines", false, ConfigKey.Scope.Zone, null);
 

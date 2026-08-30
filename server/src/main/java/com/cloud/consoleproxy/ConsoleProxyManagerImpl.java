@@ -1120,7 +1120,23 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
 
     @Override
     public int getVncPort(Long dataCenterId) {
-        return isSslEnabled(dataCenterId) && _ksDao.findByName(ConsoleProxyManager.CERTIFICATE_NAME) != null ? 8443 : 8080;
+        int customPort = ConsoleProxyWebSocketPort.valueIn(dataCenterId) != null ? ConsoleProxyWebSocketPort.valueIn(dataCenterId) : 0;
+        if (customPort > 0) {
+            if (isValidWebSocketPort(customPort)) {
+                return customPort;
+            }
+            logger.warn(String.format("Invalid websocket port [%s] configured in consoleproxy.websocket.port, must be in range 1024-65535 excluding 80 and 443, " +
+                    "falling back to automatic port selection for zone [%s]", customPort, dataCenterId));
+        }
+        return isWebSocketSslEnabled(dataCenterId) ? 8443 : 8080;
+    }
+
+    protected boolean isValidWebSocketPort(int port) {
+        return port >= 1024 && port <= 65535 && port != 80 && port != 443;
+    }
+
+    protected boolean isWebSocketSslEnabled(Long dataCenterId) {
+        return isSslEnabled(dataCenterId) && _ksDao.findByName(ConsoleProxyManager.CERTIFICATE_NAME) != null;
     }
 
     private String getAllocProxyLockName() {
@@ -1268,6 +1284,7 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
         }
         if (VirtualMachine.Type.ConsoleProxy == profile.getVirtualMachine().getType()) {
             buf.append(" vncport=").append(getVncPort(datacenterId));
+            buf.append(" vncssl=").append(isWebSocketSslEnabled(datacenterId));
         }
         buf.append(" keystore_password=").append(VirtualMachineGuru.getEncodedString(PasswordGenerator.generateRandomPassword(16)));
 
@@ -1585,7 +1602,7 @@ public class ConsoleProxyManagerImpl extends ManagerBase implements ConsoleProxy
 
     @Override
     public ConfigKey<?>[] getConfigKeys() {
-        return new ConfigKey<?>[] {ConsoleProxySslEnabled, NoVncConsoleDefault, NoVncConsoleSourceIpCheckEnabled, ConsoleProxyServiceOffering,
+        return new ConfigKey<?>[] {ConsoleProxySslEnabled, ConsoleProxyWebSocketPort, NoVncConsoleDefault, NoVncConsoleSourceIpCheckEnabled, ConsoleProxyServiceOffering,
                                    ConsoleProxyCapacityStandby, ConsoleProxyCapacityScanInterval, ConsoleProxyRestart, ConsoleProxyUrlDomain, ConsoleProxySessionMax, ConsoleProxySessionTimeout, ConsoleProxyDisableRpFilter, ConsoleProxyLaunchMax,
                                    ConsoleProxyManagementLastState, ConsoleProxyServiceManagementState, NoVncConsoleShowDot,
                                    ConsoleProxyVmUserData};

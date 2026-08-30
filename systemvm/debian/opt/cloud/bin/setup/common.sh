@@ -927,6 +927,9 @@ parse_cmd_line() {
         vncport)
           export VNCPORT=$VALUE
           ;;
+        vncssl)
+          export VNCSSL=$VALUE
+          ;;
       esac
   done
   echo -e "\n\t}\n}" >> ${CHEF_TMP_FILE}

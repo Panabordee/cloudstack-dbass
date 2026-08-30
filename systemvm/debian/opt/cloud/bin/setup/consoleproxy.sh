@@ -37,6 +37,10 @@ setup_console_proxy() {
   echo "${VNCPORT}" > /root/vncport
   log_it "Creating VNC port ${VNCPORT} file for VNC server configuration"
 
+  VNCSSL=${VNCSSL:-false}
+  echo "${VNCSSL}" > /root/vncssl
+  log_it "Creating VNC SSL flag file (vncssl=${VNCSSL}) for VNC server configuration"
+
   disable_rpfilter
   enable_fwding 0
   enable_irqbalance 0
