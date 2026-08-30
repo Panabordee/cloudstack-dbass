@@ -823,6 +823,12 @@
                         </a-select-option>
                       </a-select>
                     </a-form-item>
+                    <a-form-item name="pcibusaddresses" ref="pcibusaddresses" v-if="['KVM'].includes(hypervisor)">
+                      <template #label>
+                        <tooltip-label :title="$t('label.pcibusaddresses')" :tooltip="$t('label.pcibusaddresses.tooltip')"/>
+                      </template>
+                      <a-input v-model:value="form.pcibusaddresses" :placeholder="$t('label.pcibusaddresses.placeholder')" />
+                    </a-form-item>
                   </div>
                 </template>
               </a-step>
@@ -1929,7 +1935,7 @@ export default {
       this.fetchInstaceGroups()
       this.fetchIoPolicyTypes()
       nextTick().then(() => {
-        ['name', 'keyboard', 'boottype', 'bootmode', 'userdata', 'iothreadsenabled', 'iodriverpolicy', 'nicmultiqueuenumber', 'nicpackedvirtqueues'].forEach(this.fillValue)
+        ['name', 'keyboard', 'boottype', 'bootmode', 'userdata', 'iothreadsenabled', 'iodriverpolicy', 'nicmultiqueuenumber', 'nicpackedvirtqueues', 'pcibusaddresses'].forEach(this.fillValue)
         this.form.boottype = this.defaultBootType ? this.defaultBootType : this.options.bootTypes && this.options.bootTypes.length > 0 ? this.options.bootTypes[0].id : undefined
         this.form.bootmode = this.defaultBootMode ? this.defaultBootMode : this.options.bootModes && this.options.bootModes.length > 0 ? this.options.bootModes[0].id : undefined
         this.instanceConfig = toRaw(this.form)
@@ -2342,6 +2348,9 @@ export default {
         deployVmData.iodriverpolicy = values.iodriverpolicy
         deployVmData.nicmultiqueuenumber = values.nicmultiqueuenumber
         deployVmData.nicpackedvirtqueuesenabled = values.nicpackedvirtqueuesenabled
+        if (this.hypervisor === 'KVM' && values.pcibusaddresses) {
+          deployVmData.pcibusaddresses = values.pcibusaddresses
+        }
         const isUserdataAllowed = !this.userdataDefaultOverridePolicy || (this.userdataDefaultOverridePolicy === 'ALLOWOVERRIDE' && this.doUserdataOverride) || (this.userdataDefaultOverridePolicy === 'APPEND' && this.doUserdataAppend)
         if (isUserdataAllowed && values.userdata && values.userdata.length > 0) {
           deployVmData.userdata = this.$toBase64AndURIEncoded(values.userdata)

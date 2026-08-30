@@ -26,11 +26,44 @@ CREATE TABLE IF NOT EXISTS `cloud`.`reverse_proxy_host` (
   KEY `i_reverse_proxy_host_account_id` (`account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Domain display name shown on the UI (falls back to the domain name when not set)
-ALTER TABLE `cloud`.`domain` ADD COLUMN `display_name` varchar(255) COMMENT 'display name of the domain shown on the UI, falls back to name when not set';
+-- Reverse Proxy integration: configurable domain suffixes and per-account/per-network grants
+CREATE TABLE IF NOT EXISTS `cloud`.`reverse_proxy_domain` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT 'id',
+  `uuid` varchar(40) DEFAULT NULL COMMENT 'uuid',
+  `domain` varchar(255) NOT NULL COMMENT 'the domain suffix exposed to users, for example cloud.company.com',
+  `description` varchar(255) DEFAULT NULL COMMENT 'description of the domain suffix',
+  `is_public` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'true if the domain suffix can be used by all accounts, false if only granted accounts or shared networks can use it',
+  `npm_certificate_id` bigint unsigned DEFAULT NULL COMMENT 'id of the Nginx Proxy Manager certificate used for TLS termination of this domain suffix',
+  `created` datetime DEFAULT NULL COMMENT 'date the domain suffix was created',
+  `removed` datetime DEFAULT NULL COMMENT 'date the domain suffix was removed',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_reverse_proxy_domain_uuid` (`uuid`),
+  UNIQUE KEY `uk_reverse_proxy_domain_domain` (`domain`, `removed`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Ordering of domains on the login page domain selector
-ALTER TABLE `cloud`.`domain` ADD COLUMN `sort_key` int unsigned NOT NULL DEFAULT 0 COMMENT 'sort order of the domain on the login page';
+CREATE TABLE IF NOT EXISTS `cloud`.`reverse_proxy_domain_map` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT 'id',
+  `domain_id` bigint unsigned NOT NULL COMMENT 'id of the reverse proxy domain suffix',
+  `account_id` bigint unsigned DEFAULT NULL COMMENT 'id of the granted account, null if granted to a network',
+  `network_id` bigint unsigned DEFAULT NULL COMMENT 'id of the granted shared network, null if granted to an account',
+  `created` datetime DEFAULT NULL COMMENT 'date the grant was created',
+  `removed` datetime DEFAULT NULL COMMENT 'date the grant was removed',
+  PRIMARY KEY (`id`),
+  KEY `i_reverse_proxy_domain_map_domain_id` (`domain_id`),
+  KEY `i_reverse_proxy_domain_map_account_id` (`account_id`),
+  KEY `i_reverse_proxy_domain_map_network_id` (`network_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Whether the domain is listed on the login page domain selector
-ALTER TABLE `cloud`.`domain` ADD COLUMN `show_on_login` boolean NOT NULL DEFAULT true COMMENT 'whether the domain is listed on the login page domain selector';
+-- Seed the domain suffix table from the legacy single-domain setting, the seeded domain stays public to all users
+INSERT INTO `cloud`.`reverse_proxy_domain` (uuid, domain, is_public, created)
+  SELECT UUID(), TRIM(`value`), 1, utc_timestamp()
+  FROM `cloud`.`configuration`
+  WHERE `name` = 'reverseproxy.domain' AND `value` IS NOT NULL AND TRIM(`value`) != '';
+
+-- Track the domain suffix of existing proxy hosts
+CALL `cloud`.`IDEMPOTENT_ADD_COLUMN`('cloud.reverse_proxy_host', 'reverse_proxy_domain_id',
+  'bigint unsigned DEFAULT NULL COMMENT ''id of the reverse proxy domain suffix''');
+UPDATE `cloud`.`reverse_proxy_host` h
+  JOIN `cloud`.`reverse_proxy_domain` d ON h.fqdn LIKE CONCAT('%.', d.domain)
+  SET h.reverse_proxy_domain_id = d.id
+  WHERE h.reverse_proxy_domain_id IS NULL;

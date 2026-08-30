@@ -29,6 +29,20 @@
     </a-alert>
 
     <div class="form__item">
+      <p class="form__label">{{ $t('label.proxy.domain') }}</p>
+      <a-select
+        v-model:value="proxyDomainId"
+        :options="proxyDomainOptions"
+        :loading="loadingDomains"
+        style="width: 100%"
+        @change="handleDomainChange"
+        :placeholder="$t('label.proxy.domain')" />
+      <div class="form__hint" v-if="proxyDomains.length === 0 && !loadingDomains">
+        {{ $t('message.proxy.domain.none.available') }}
+      </div>
+    </div>
+
+    <div class="form__item">
       <p class="form__label">{{ $t('label.proxy.name') }}</p>
       <a-input
         v-model:value="name"
@@ -75,7 +89,7 @@
       <a-button @click="closeAction">
         {{ $t('label.cancel') }}
       </a-button>
-      <a-button type="primary" @click="submitData" ref="submit" :disabled="checkingName || (nameChecked && !nameAvailable)">
+      <a-button type="primary" @click="submitData" ref="submit" :disabled="checkingName || (nameChecked && !nameAvailable) || !proxyDomainId">
         {{ $t('label.ok') }}
       </a-button>
     </div>
@@ -84,7 +98,7 @@
 </template>
 
 <script>
-import { postAPI } from '@/api'
+import { getAPI, postAPI } from '@/api'
 
 const RANDOM_ADJECTIVES = ['swift', 'bright', 'calm', 'brave', 'clever', 'eager', 'gentle', 'happy',
   'jolly', 'kind', 'lively', 'mellow', 'noble', 'quiet', 'rapid', 'sunny', 'tidy', 'vivid', 'wise', 'bold']
@@ -105,7 +119,10 @@ export default {
       name: '',
       protocol: 'http',
       port: 80,
+      proxyDomains: [],
+      proxyDomainId: undefined,
       proxyDomain: '',
+      loadingDomains: false,
       checkingName: false,
       nameChecked: false,
       nameAvailable: false,
@@ -115,19 +132,26 @@ export default {
       firstActivated: true
     }
   },
+  computed: {
+    proxyDomainOptions () {
+      return this.proxyDomains.map(domain => {
+        return { label: domain.domain, value: domain.id }
+      })
+    }
+  },
   mounted () {
-    this.fetchProxyDomain()
+    this.fetchProxyDomains()
   },
   activated () {
     if (this.firstActivated) {
-      // The initial activation, mounted() has already fetched the proxy domain
+      // The initial activation, mounted() has already fetched the proxy domains
       this.firstActivated = false
       return
     }
     // The action modal keeps this component alive (keep-alive), reset the form
     // so that a stale name or availability check is not shown when reopened
     this.resetForm()
-    this.fetchProxyDomain()
+    this.fetchProxyDomains()
   },
   beforeUnmount () {
     if (this.checkTimer) {
@@ -149,23 +173,34 @@ export default {
       this.nameCheckMessage = ''
       this.loading = false
     },
-    fetchProxyDomain () {
-      if (!('checkInstanceProxyName' in this.$store.getters.apis)) {
+    fetchProxyDomains () {
+      if (!('listReverseProxyDomains' in this.$store.getters.apis)) {
         return
       }
-      // Do a probe availability check with a throwaway name to learn the configured
-      // domain suffix and show it right next to the name input
-      const probeName = 'probe-' + Math.random().toString(36).substring(2, 8)
-      postAPI('checkInstanceProxyName', {
-        name: probeName
+      this.loadingDomains = true
+      getAPI('listReverseProxyDomains', {
+        virtualmachineid: this.resource.id
       }).then(response => {
-        const result = response.checkinstanceproxynameresponse?.instanceproxyname || {}
-        this.updateProxyDomain(result)
-      }).catch(() => {})
+        this.proxyDomains = response.listreverseproxydomainsresponse.reverseproxydomain || []
+        if (this.proxyDomains.length > 0) {
+          this.proxyDomainId = this.proxyDomains[0].id
+          this.proxyDomain = this.proxyDomains[0].domain
+        } else {
+          this.proxyDomainId = undefined
+          this.proxyDomain = ''
+        }
+      }).catch(() => {}).finally(() => {
+        this.loadingDomains = false
+      })
     },
-    updateProxyDomain (result) {
-      if (result.fqdn && result.fqdn.includes('.')) {
-        this.proxyDomain = result.fqdn.substring(result.fqdn.indexOf('.') + 1)
+    handleDomainChange () {
+      const selected = this.proxyDomains.find(domain => domain.id === this.proxyDomainId)
+      this.proxyDomain = selected ? selected.domain : ''
+      this.nameChecked = false
+      this.nameAvailable = false
+      this.nameCheckMessage = ''
+      if (this.name && this.name.trim()) {
+        this.handleNameInput()
       }
     },
     randomizeName () {
@@ -193,10 +228,10 @@ export default {
     checkName () {
       this.checkingName = true
       postAPI('checkInstanceProxyName', {
-        name: this.name.trim()
+        name: this.name.trim(),
+        domainid: this.proxyDomainId
       }).then(response => {
         const result = response.checkinstanceproxynameresponse?.instanceproxyname || {}
-        this.updateProxyDomain(result)
         this.nameChecked = true
         this.nameAvailable = !!result.available
         this.nameCheckMessage = result.message || ''
@@ -212,6 +247,13 @@ export default {
     },
     submitData () {
       if (this.loading) return
+      if (!this.proxyDomainId) {
+        this.$notification.error({
+          message: this.$t('label.proxy.domain'),
+          description: this.$t('message.proxy.domain.none.available')
+        })
+        return
+      }
       if (!this.name || !this.name.trim()) {
         this.$notification.error({
           message: this.$t('label.proxy.name'),
@@ -230,6 +272,7 @@ export default {
       postAPI('addInstanceProxy', {
         virtualmachineid: this.resource.id,
         name: this.name.trim(),
+        domainid: this.proxyDomainId,
         protocol: this.protocol,
         port: this.port
       }).then(response => {

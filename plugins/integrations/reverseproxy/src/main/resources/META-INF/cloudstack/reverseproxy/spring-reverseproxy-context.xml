@@ -21,5 +21,7 @@
        xsi:schemaLocation="http://www.springframework.org/schema/beans
                       http://www.springframework.org/schema/beans/spring-beans.xsd">
     <bean id="reverseProxyHostDaoImpl" class="org.apache.cloudstack.reverseproxy.dao.ReverseProxyHostDaoImpl" />
+    <bean id="reverseProxyDomainDaoImpl" class="org.apache.cloudstack.reverseproxy.dao.ReverseProxyDomainDaoImpl" />
+    <bean id="reverseProxyDomainMapDaoImpl" class="org.apache.cloudstack.reverseproxy.dao.ReverseProxyDomainMapDaoImpl" />
     <bean id="reverseProxyManagerImpl" class="org.apache.cloudstack.reverseproxy.ReverseProxyManagerImpl" />
 </beans>

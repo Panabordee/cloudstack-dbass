@@ -19,24 +19,34 @@ package org.apache.cloudstack.reverseproxy.dao;
 
 import java.util.List;
 
-import org.apache.cloudstack.reverseproxy.ReverseProxyHostVO;
+import org.apache.cloudstack.reverseproxy.ReverseProxyDomainMapVO;
 
 import com.cloud.utils.db.GenericDao;
 
-public interface ReverseProxyHostDao extends GenericDao<ReverseProxyHostVO, Long> {
+public interface ReverseProxyDomainMapDao extends GenericDao<ReverseProxyDomainMapVO, Long> {
 
     /**
-     * Finds the active (not removed) proxy host with the given fully qualified domain name
+     * Lists all active grants for the given domain suffix
      */
-    ReverseProxyHostVO findByFqdn(String fqdn);
+    List<ReverseProxyDomainMapVO> listByDomainId(long domainId);
 
     /**
-     * Lists all active (not removed) proxy hosts for the given VM
+     * Finds the active grant of the given account on the given domain suffix
      */
-    List<ReverseProxyHostVO> listByVmId(long vmInstanceId);
+    ReverseProxyDomainMapVO findByDomainAndAccount(long domainId, long accountId);
 
     /**
-     * Counts the active (not removed) proxy hosts on the given reverse proxy domain suffix
+     * Finds the active grant of the given network on the given domain suffix
      */
-    long countByDomainId(long domainId);
+    ReverseProxyDomainMapVO findByDomainAndNetwork(long domainId, long networkId);
+
+    /**
+     * Lists all active grants of the given account
+     */
+    List<ReverseProxyDomainMapVO> listByAccountId(long accountId);
+
+    /**
+     * Lists all active grants of the given network
+     */
+    List<ReverseProxyDomainMapVO> listByNetworkId(long networkId);
 }

@@ -17,32 +17,23 @@
 
 package org.apache.cloudstack.reverseproxy;
 
-import org.apache.cloudstack.acl.ControlledEntity;
+import java.util.Date;
+
 import org.apache.cloudstack.api.Identity;
 import org.apache.cloudstack.api.InternalIdentity;
 
-public interface ReverseProxyHost extends ControlledEntity, Identity, InternalIdentity {
-    enum State {
-        Active, Error;
-    }
+/**
+ * A domain suffix that instances can be exposed on through the reverse proxy integration
+ */
+public interface ReverseProxyDomain extends Identity, InternalIdentity {
 
-    String getFqdn();
+    String getDomain();
 
-    long getVmInstanceId();
+    String getDescription();
 
-    long getNetworkId();
+    boolean isPublic();
 
-    String getIpAddress();
+    Long getNpmCertificateId();
 
-    String getForwardScheme();
-
-    int getForwardPort();
-
-    long getNpmProxyHostId();
-
-    Long getReverseProxyDomainId();
-
-    State getState();
-
-    java.util.Date getCreated();
+    Date getCreated();
 }

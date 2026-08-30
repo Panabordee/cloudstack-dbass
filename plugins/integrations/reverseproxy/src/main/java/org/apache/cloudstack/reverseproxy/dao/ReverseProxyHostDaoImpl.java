@@ -31,6 +31,7 @@ public class ReverseProxyHostDaoImpl extends GenericDaoBase<ReverseProxyHostVO, 
 
     private final SearchBuilder<ReverseProxyHostVO> FqdnSearch;
     private final SearchBuilder<ReverseProxyHostVO> VmIdSearch;
+    private final SearchBuilder<ReverseProxyHostVO> DomainIdSearch;
 
     public ReverseProxyHostDaoImpl() {
         FqdnSearch = createSearchBuilder();
@@ -40,6 +41,10 @@ public class ReverseProxyHostDaoImpl extends GenericDaoBase<ReverseProxyHostVO, 
         VmIdSearch = createSearchBuilder();
         VmIdSearch.and("vm_instance_id", VmIdSearch.entity().getVmInstanceId(), SearchCriteria.Op.EQ);
         VmIdSearch.done();
+
+        DomainIdSearch = createSearchBuilder();
+        DomainIdSearch.and("reverse_proxy_domain_id", DomainIdSearch.entity().getReverseProxyDomainId(), SearchCriteria.Op.EQ);
+        DomainIdSearch.done();
     }
 
     @Override
@@ -54,5 +59,13 @@ public class ReverseProxyHostDaoImpl extends GenericDaoBase<ReverseProxyHostVO, 
         final SearchCriteria<ReverseProxyHostVO> sc = VmIdSearch.create();
         sc.setParameters("vm_instance_id", vmInstanceId);
         return listBy(sc);
+    }
+
+    @Override
+    public long countByDomainId(final long domainId) {
+        final SearchCriteria<ReverseProxyHostVO> sc = DomainIdSearch.create();
+        sc.setParameters("reverse_proxy_domain_id", domainId);
+        final Integer count = getCount(sc);
+        return count != null ? count : 0;
     }
 }

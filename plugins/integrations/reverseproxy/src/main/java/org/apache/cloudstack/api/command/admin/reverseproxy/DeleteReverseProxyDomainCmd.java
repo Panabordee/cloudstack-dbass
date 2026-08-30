@@ -15,30 +15,33 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.cloudstack.api.command.user.reverseproxy;
+package org.apache.cloudstack.api.command.admin.reverseproxy;
 
 import javax.inject.Inject;
 
 import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.api.ApiErrorCode;
 import org.apache.cloudstack.api.BaseCmd;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.ServerApiException;
-import org.apache.cloudstack.api.response.CheckInstanceProxyNameResponse;
 import org.apache.cloudstack.api.response.ReverseProxyDomainResponse;
+import org.apache.cloudstack.api.response.SuccessResponse;
 import org.apache.cloudstack.reverseproxy.ReverseProxyService;
 
+import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.user.Account;
 
-@APICommand(name = "checkInstanceProxyName",
-        description = "Checks whether a name is available for use as an instance reverse proxy host",
-        responseObject = CheckInstanceProxyNameResponse.class,
+@APICommand(name = "deleteReverseProxyDomain",
+        description = "Deletes a reverse proxy domain suffix. The domain suffix can only be deleted when no proxy hosts "
+                + "exist on it anymore.",
+        responseObject = SuccessResponse.class,
         requestHasSensitiveInfo = false,
         responseHasSensitiveInfo = false,
-        since = "4.22.0.0",
-        authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User})
-public class CheckInstanceProxyNameCmd extends BaseCmd {
+        since = "4.22.2.0",
+        authorized = {RoleType.Admin})
+public class DeleteReverseProxyDomainCmd extends BaseCmd {
 
     @Inject
     public ReverseProxyService reverseProxyService;
@@ -47,24 +50,16 @@ public class CheckInstanceProxyNameCmd extends BaseCmd {
     //////////////// API parameters /////////////////////
     /////////////////////////////////////////////////////
 
-    @Parameter(name = ApiConstants.NAME, type = CommandType.STRING, required = true,
-            description = "The desired name (prefix of the proxy host name) to check")
-    private String name;
-
-    @Parameter(name = ApiConstants.DOMAIN_ID, type = CommandType.UUID, entityType = ReverseProxyDomainResponse.class, required = false,
-            description = "The ID of the reverse proxy domain suffix to check the name on")
-    private Long domainId;
+    @Parameter(name = ApiConstants.ID, type = CommandType.UUID, required = true, entityType = ReverseProxyDomainResponse.class,
+            description = "The ID of the reverse proxy domain suffix to delete")
+    private Long id;
 
     /////////////////////////////////////////////////////
     /////////////////// Accessors ///////////////////////
     /////////////////////////////////////////////////////
 
-    public String getName() {
-        return name;
-    }
-
-    public Long getDomainId() {
-        return domainId;
+    public Long getId() {
+        return id;
     }
 
     /////////////////////////////////////////////////////
@@ -78,9 +73,13 @@ public class CheckInstanceProxyNameCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
-        final CheckInstanceProxyNameResponse response = reverseProxyService.checkInstanceProxyName(name, domainId, this);
-        response.setResponseName(getCommandName());
-        response.setObjectName("instanceproxyname");
-        setResponseObject(response);
+        try {
+            reverseProxyService.deleteReverseProxyDomain(id);
+            final SuccessResponse response = new SuccessResponse(getCommandName());
+            response.setObjectName("reverseproxydomain");
+            setResponseObject(response);
+        } catch (final CloudRuntimeException e) {
+            throw new ServerApiException(ApiErrorCode.INTERNAL_ERROR, e.getMessage());
+        }
     }
 }

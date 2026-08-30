@@ -17,11 +17,15 @@
 
 package org.apache.cloudstack.reverseproxy;
 
+import java.util.List;
+
 import org.apache.cloudstack.api.command.admin.reverseproxy.ListReverseProxyHostsCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.CheckInstanceProxyNameCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.ListInstanceProxiesCmd;
+import org.apache.cloudstack.api.command.user.reverseproxy.ListReverseProxyDomainsCmd;
 import org.apache.cloudstack.api.response.InstanceProxyResponse;
 import org.apache.cloudstack.api.response.ListResponse;
+import org.apache.cloudstack.api.response.ReverseProxyDomainResponse;
 import org.apache.cloudstack.framework.config.ConfigKey;
 
 import com.cloud.utils.component.PluggableService;
@@ -32,9 +36,10 @@ public interface ReverseProxyService extends PluggableService {
                     + "through an external Nginx Proxy Manager server.", true);
 
     ConfigKey<String> ReverseProxyDomain = new ConfigKey<>("Advanced", String.class, "reverseproxy.domain", "",
-            "The base domain exposed by the reverse proxy integration, for example 'cloud.company.com'. Users can expose their "
-                    + "instances as '<name>.<domain>'. A wildcard DNS record for '*.<domain>' pointing to the Nginx Proxy Manager "
-                    + "server is expected to be configured.", true);
+            "Deprecated, the configured value is migrated to a public reverse proxy domain suffix on upgrade. Use the "
+                    + "reverse proxy domain suffix management APIs instead. The domain suffix exposed by the reverse proxy "
+                    + "integration, for example 'cloud.company.com'. A wildcard DNS record for '*.<domain>' pointing to the "
+                    + "Nginx Proxy Manager server is expected to be configured.", true);
 
     ConfigKey<String> ReverseProxyNetworkId = new ConfigKey<>("Advanced", String.class, "reverseproxy.network.id", "",
             "The UUID of the shared network that instances must be attached to in order to be proxied and that the Nginx Proxy "
@@ -57,8 +62,7 @@ public interface ReverseProxyService extends PluggableService {
             "The Nginx Proxy Manager API request timeout in seconds.", true);
 
     ConfigKey<Integer> ReverseProxyNpmCertificateId = new ConfigKey<>("Advanced", Integer.class, "reverseproxy.npm.certificate.id", "0",
-            "The id of the Nginx Proxy Manager certificate to use for TLS termination of proxy hosts. When set to 0 (default), "
-                    + "the certificate is auto-discovered by looking for a certificate covering '*.<reverseproxy.domain>'.", true);
+            "Deprecated, configure the certificate on the reverse proxy domain suffixes instead.", true);
 
     ConfigKey<Boolean> ReverseProxyForceHttps = new ConfigKey<>("Advanced", Boolean.class, "reverseproxy.npm.force.https", "false",
             "When set to true, proxy hosts created in Nginx Proxy Manager redirect HTTP traffic to HTTPS.", true);
@@ -81,9 +85,10 @@ public interface ReverseProxyService extends PluggableService {
      * @param name the user chosen name (prefix of the FQDN)
      * @param protocol the backend protocol (http or https) used by Nginx Proxy Manager to forward to the instance
      * @param port the port to expose on the instance
+     * @param domainId the id of the reverse proxy domain suffix to expose the instance on, null when only one suffix exists
      * @return the created proxy host
      */
-    ReverseProxyHost createInstanceProxy(Long vmId, String name, String protocol, Integer port);
+    ReverseProxyHost createInstanceProxy(Long vmId, String name, String protocol, Integer port, Long domainId);
 
     /**
      * Removes the reverse proxy host from the Nginx Proxy Manager server and deletes the mapping
@@ -106,12 +111,54 @@ public interface ReverseProxyService extends PluggableService {
     ListResponse<InstanceProxyResponse> listReverseProxyHosts(ListReverseProxyHostsCmd cmd);
 
     /**
-     * Checks whether the given name is available for use as a reverse proxy host
+     * Checks whether the given name is available for use as a reverse proxy host on the given domain suffix
      * @param name the user chosen name (prefix of the FQDN)
+     * @param domainId the id of the reverse proxy domain suffix, null when only one suffix exists
      * @param cmd the check command
      * @return availability information
      */
-    org.apache.cloudstack.api.response.CheckInstanceProxyNameResponse checkInstanceProxyName(String name, CheckInstanceProxyNameCmd cmd);
+    org.apache.cloudstack.api.response.CheckInstanceProxyNameResponse checkInstanceProxyName(String name, Long domainId, CheckInstanceProxyNameCmd cmd);
+
+    /**
+     * Adds a reverse proxy domain suffix with the given grants
+     * @param domain the domain suffix, for example 'cloud.company.com'
+     * @param description an optional description
+     * @param isPublic when true the suffix can be used by all accounts, otherwise only by granted accounts and networks
+     * @param npmCertificateId the optional Nginx Proxy Manager certificate id used for TLS termination
+     * @param accountIds the accounts granted access to the suffix
+     * @param networkIds the shared networks granted access to the suffix
+     * @return the created domain suffix
+     */
+    ReverseProxyDomainVO addReverseProxyDomain(String domain, String description, Boolean isPublic, Long npmCertificateId,
+            List<Long> accountIds, List<Long> networkIds);
+
+    /**
+     * Updates a reverse proxy domain suffix. Null parameters leave the values unchanged; the grants are replaced
+     * when accounts or networks are given.
+     */
+    ReverseProxyDomainVO updateReverseProxyDomain(Long id, String description, Boolean isPublic, Long npmCertificateId,
+            List<Long> accountIds, List<Long> networkIds);
+
+    /**
+     * Deletes a reverse proxy domain suffix, only possible when no proxy hosts exist on the suffix anymore
+     * @param id the id of the domain suffix
+     */
+    void deleteReverseProxyDomain(Long id);
+
+    /**
+     * Lists the reverse proxy domain suffixes available to the caller (with ACL scoping), all suffixes for admins
+     * @param cmd the list command
+     * @return list of domain suffix responses
+     */
+    ListResponse<ReverseProxyDomainResponse> listReverseProxyDomains(ListReverseProxyDomainsCmd cmd);
+
+    /**
+     * Builds the API response for a reverse proxy domain suffix
+     * @param domain the domain suffix
+     * @param showDetails when true grants and proxy counts are included
+     * @return the response object
+     */
+    ReverseProxyDomainResponse createReverseProxyDomainResponse(ReverseProxyDomainVO domain, boolean showDetails);
 
     /**
      * Deletes proxy hosts mapped to the given VM (called when the VM is expunged)

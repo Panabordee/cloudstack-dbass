@@ -6464,6 +6464,15 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
         if (template == null) {
             throw new InvalidParameterValueException("Unable to use template " + templateId);
         }
+        if (!cmd.getPciBusAddressList().isEmpty()) {
+            HypervisorType effectiveHypervisor = template.getHypervisorType();
+            if (effectiveHypervisor == null || effectiveHypervisor == HypervisorType.None) {
+                effectiveHypervisor = cmd.getHypervisor();
+            }
+            if (effectiveHypervisor != HypervisorType.KVM) {
+                throw new InvalidParameterValueException("PCI bus address passthrough is supported only for KVM instances");
+            }
+        }
         verifyTemplate(cmd, template, serviceOfferingId);
 
         Long diskOfferingId = cmd.getDiskOfferingId();
@@ -6505,6 +6514,14 @@ public class UserVmManagerImpl extends ManagerBase implements UserVmManager, Vir
     private UserVm createVirtualMachine(BaseDeployVMCmd cmd, DataCenter zone, Account owner, ServiceOffering serviceOffering, VirtualMachineTemplate template,
                                         HypervisorType hypervisor, Long diskOfferingId, Long size, Long overrideDiskOfferingId, List<VmDiskInfo> dataDiskInfoList,
                                         List<Long> networkIds, Map<Long, IpAddresses> ipToNetworkMap, Volume volume, Snapshot snapshot) throws InsufficientCapacityException, ResourceUnavailableException, ConcurrentOperationException, ResourceAllocationException {
+
+        HypervisorType effectiveHypervisor = template.getHypervisorType();
+        if (effectiveHypervisor == null || effectiveHypervisor == HypervisorType.None) {
+            effectiveHypervisor = hypervisor;
+        }
+        if (!cmd.getPciBusAddressList().isEmpty() && effectiveHypervisor != HypervisorType.KVM) {
+            throw new InvalidParameterValueException("PCI bus address passthrough is supported only for KVM instances");
+        }
 
         ServiceOfferingJoinVO svcOffering = serviceOfferingJoinDao.findById(serviceOffering.getId());
         boolean isLeaseFeatureEnabled = VMLeaseManager.InstanceLeaseEnabled.value();

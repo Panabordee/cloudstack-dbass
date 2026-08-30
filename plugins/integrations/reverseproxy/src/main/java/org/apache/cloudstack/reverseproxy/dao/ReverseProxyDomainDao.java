@@ -15,34 +15,16 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.cloudstack.reverseproxy;
+package org.apache.cloudstack.reverseproxy.dao;
 
-import org.apache.cloudstack.acl.ControlledEntity;
-import org.apache.cloudstack.api.Identity;
-import org.apache.cloudstack.api.InternalIdentity;
+import org.apache.cloudstack.reverseproxy.ReverseProxyDomainVO;
 
-public interface ReverseProxyHost extends ControlledEntity, Identity, InternalIdentity {
-    enum State {
-        Active, Error;
-    }
+import com.cloud.utils.db.GenericDao;
 
-    String getFqdn();
+public interface ReverseProxyDomainDao extends GenericDao<ReverseProxyDomainVO, Long> {
 
-    long getVmInstanceId();
-
-    long getNetworkId();
-
-    String getIpAddress();
-
-    String getForwardScheme();
-
-    int getForwardPort();
-
-    long getNpmProxyHostId();
-
-    Long getReverseProxyDomainId();
-
-    State getState();
-
-    java.util.Date getCreated();
+    /**
+     * Finds the active (not removed) domain suffix with the given name (lowercase)
+     */
+    ReverseProxyDomainVO findByName(String domain);
 }

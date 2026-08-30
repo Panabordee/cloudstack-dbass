@@ -493,6 +493,21 @@ public class LibvirtComputingResourceTest {
     }
 
     @Test
+    public void testCreateDevicesDefWithPciPassthrough() {
+        VirtualMachineTO to = createDefaultVM(false);
+        to.setPciBusAddresses(Arrays.asList("0000:af:00.3", "0000:af:00.4"));
+
+        GuestDef guest = new GuestDef();
+        guest.setGuestType(GuestType.KVM);
+
+        DevicesDef devicesDef = libvirtComputingResourceSpy.createDevicesDef(to, guest, to.getCpus() + 1, false);
+        Document domainDoc = parse(devicesDef.toString());
+
+        assertNodeExists(domainDoc, "/devices/hostdev[@type='pci' and @managed='yes']/source/address[@domain='0x0000' and @bus='0xaf' and @slot='0x00' and @function='0x3']");
+        assertNodeExists(domainDoc, "/devices/hostdev[@type='pci' and @managed='yes']/source/address[@domain='0x0000' and @bus='0xaf' and @slot='0x00' and @function='0x4']");
+    }
+
+    @Test
     public void testCreateDevicesWithSCSIDisk() {
         VirtualMachineTO to = createDefaultVM(false);
         to.setDetails(new HashMap<>());

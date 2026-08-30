@@ -65,6 +65,9 @@ public class ReverseProxyHostVO implements ReverseProxyHost {
     @Column(name = "npm_proxy_host_id", nullable = false)
     private long npmProxyHostId;
 
+    @Column(name = "reverse_proxy_domain_id")
+    private Long reverseProxyDomainId;
+
     @Column(name = "account_id", nullable = false)
     private long accountId;
 
@@ -170,6 +173,15 @@ public class ReverseProxyHostVO implements ReverseProxyHost {
 
     public void setNpmProxyHostId(long npmProxyHostId) {
         this.npmProxyHostId = npmProxyHostId;
+    }
+
+    @Override
+    public Long getReverseProxyDomainId() {
+        return reverseProxyDomainId;
+    }
+
+    public void setReverseProxyDomainId(Long reverseProxyDomainId) {
+        this.reverseProxyDomainId = reverseProxyDomainId;
     }
 
     @Override
