@@ -406,6 +406,20 @@ export default {
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetUserData')))
         },
         {
+          api: 'createDatabase',
+          icon: 'database-outlined',
+          label: 'label.create.database',
+          message: 'message.desc.create.database',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running'].includes(record.state) &&
+              (record.templatename || '').startsWith('dbaas-')
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabase.vue')))
+        },
+        {
           api: 'assignVirtualMachine',
           icon: 'user-add-outlined',
           label: 'label.assign.instance.another',
