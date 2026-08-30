@@ -81,6 +81,49 @@ the normal CloudStack "Deploy VM" wizard.
    credentials — two of the three engine scripts have historically exited 0
    while silently failing to create the user.
 
+## Status of the UI action on 4.22.1.1
+
+Step 5 does not work on a normal KVM cluster, and the limitation is in
+CloudStack, not in this code.
+
+`Extension.Type` defines only `Orchestrator`, and CloudStack resolves the
+extension for a VM through the VM's **cluster**
+(`ExtensionResourceMap.ResourceType` is `Cluster` only,
+`ExtensionHelper.getExtensionForCluster`). `registerExtension` refuses a
+CloudManaged KVM cluster:
+
+    Cluster ID: 1 is not of KVM hypervisor type
+
+and with no cluster registered, `runCustomAction` against a KVM VM fails:
+
+    ERROR [o.a.c.f.e.m.ExtensionsManagerImpl] Invalid VM {...} specified as
+    VM resource for running Extension Custom Action {...}
+
+So the **Create Database** button only appears for VMs on a cluster of
+hypervisor type `External` — VMs whose entire lifecycle the extension itself
+orchestrates. Wiring it up would mean implementing prepare/create/start/stop/
+delete in `extension.py` and running the database VMs on an External cluster
+rather than as ordinary KVM instances.
+
+What does work today, tested end to end: invoking the action on the management
+server as the `cloud` user, exactly the way CloudStack would.
+
+    sudo -u cloud python3 \
+      /usr/share/cloudstack-management/extensions/dbaas/extension.py \
+      create_database /path/to/payload.json 120
+
+with a payload of the shape CloudStack sends:
+
+    {
+      "virtualmachineid": "<vm uuid>",
+      "externaldetails": {"virtualmachine": {"templatename": "dbaas-mysql"}},
+      "parameters": {"db_name": "shop", "db_username": "shopuser"}
+    }
+
+`register_extension.sh` still registers the extension and the enabled
+`create_database` action — both show up under **Extensions** in the UI — it just
+stops short at the cluster registration step.
+
 ## Security notes baked into this skeleton (don't remove them)
 
 - Password is generated **server-side** with `secrets.token_urlsafe`, never

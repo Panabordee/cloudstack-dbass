@@ -36,7 +36,12 @@ SQL
 # Make sure mysqld is listening on the private interface, not left on
 # 127.0.0.1-only (perimeter access control stays with CloudStack Security
 # Groups / Network ACLs, not with this script).
-if grep -q '^bind-address' /etc/mysql/mysql.conf.d/mysqld.cnf 2>/dev/null; then
+#
+# Only touch bind-address (and restart) the first time — repeat provisioning
+# calls on a VM that already has other tenants' databases must not disrupt
+# their live connections with an unnecessary mysqld restart.
+CURRENT_BIND=$(grep '^bind-address' /etc/mysql/mysql.conf.d/mysqld.cnf 2>/dev/null || true)
+if [[ -n "$CURRENT_BIND" && "$CURRENT_BIND" != *"0.0.0.0"* ]]; then
   sed -i 's/^bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mysql.conf.d/mysqld.cnf
   systemctl restart mysql
   for i in $(seq 1 10); do
