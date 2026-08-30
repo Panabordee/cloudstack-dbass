@@ -154,7 +154,9 @@ router.beforeEach((to, from, next) => {
     // Some OAuth2 providers (e.g. Authentik) strip query parameters from the
     // registered redirect URI, so the callback may arrive without the
     // 'verifyOauth' marker. Detect the callback by the code + state params instead.
-    const isOAuthCallback = urlParams.has('code') && urlParams.get('state') === 'cloudstack'
+    const oauthState = urlParams.get('state')
+    const isOAuthCallback = urlParams.has('code') &&
+      (oauthState === 'cloudstack' || oauthState === null || oauthState === 'undefined')
     if ((window.location.href.includes('verifyOauth') || isOAuthCallback) && to.name === undefined) {
       currentURL = new URL(window.location.href)
       urlParams = new URLSearchParams(currentURL.search)

@@ -314,7 +314,7 @@ export default {
           key: 'google',
           label: this.$t('label.login.with.name', { name: 'Google' }),
           img: this.googlelogo || '/assets/google.svg',
-          url: this.getGoogleUrl(this.from),
+          url: this.getGoogleUrl(),
           click: this.handleGoogleProviderAndDomain
         })
       }
@@ -541,7 +541,7 @@ export default {
           'https://www.googleapis.com/auth/userinfo.profile',
           'https://www.googleapis.com/auth/userinfo.email'
         ].join(' '),
-        state: from
+        state: 'cloudstack'
       }
 
       const qs = new URLSearchParams(options)
