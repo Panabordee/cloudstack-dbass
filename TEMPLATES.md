@@ -130,20 +130,38 @@ deploy re-copies from secondary. This cost one full debugging cycle.
 
 ## Known issues
 
+- **`mysql.sh` reports success on a duplicate request.** Its
+  `CREATE USER IF NOT EXISTS` skips creation when the user already exists, so
+  the freshly generated password is never applied, yet the script exits 0 and
+  the extension hands the caller a password that fails to authenticate
+  (`ERROR 1045 Access denied`). This is the last engine still carrying the bug;
+  fix it the way `postgresql.sh` and `mongodb.sh` were fixed — refuse outright
+  when the user already exists, and verify the new credential logs in before
+  printing `ok`. MySQL's per-database GRANT isolation itself is correct: a
+  tenant cannot reach another tenant's database.
 - **A 10 GB template needs noticeably more headroom than a 6 GB one.** A deploy
   reserves the template spool *and* the root volume, so `dbaas-mysql` asks for
   20 GiB against `pool.storage.allocated.capacity.disablethreshold` while the
   6 GB templates ask for 12 GiB. On a small pool that already carries the system
   VM volumes, MySQL can cross the 0.85 default while the other two stay well
-  under it. Fix by enlarging primary storage, raising the threshold, or
-  rebuilding `dbaas-mysql` with a 6 GB root disk to match the others.
-- **`postgresql.sh` reports success on a duplicate request.** Its
-  `DO $$ ... IF NOT EXISTS ... CREATE ROLE` block skips role creation when the
-  role already exists, so the freshly generated password is never applied, yet
-  the script exits 0 and the extension hands the caller a password that fails to
-  authenticate. `mongodb.sh` had the same class of bug and was fixed by
-  verifying the new credential before printing `ok`.
-- **PostgreSQL tenants are not isolated at the database level.** Any tenant role
-  can `CONNECT` to another tenant's database and list its table names, though
-  not read rows or create objects. Add
-  `REVOKE CONNECT ON DATABASE <db> FROM PUBLIC` after creating each database.
+  under it. Enlarging primary storage is the durable fix; raising the threshold
+  only moves the ceiling. Rebuilding `dbaas-mysql` with a 6 GB root disk would
+  also make the three templates consistent.
+
+## Fixed
+
+- **`postgresql.sh` used to report success on a duplicate request.** Its
+  `DO $$ ... IF NOT EXISTS ... CREATE ROLE` block skipped role creation when the
+  role already existed, so the freshly generated password was never applied
+  while the script still exited 0. It now refuses outright with
+  `role already exists: <user>` and verifies the new credential authenticates
+  before printing `ok`.
+- **PostgreSQL tenants were not isolated at the database level.** Any tenant
+  role could `CONNECT` to another tenant's database and list its table names.
+  `postgresql.sh` now runs `REVOKE CONNECT ON DATABASE <db> FROM PUBLIC`, and a
+  cross-tenant connection is refused with
+  `FATAL: permission denied for database` / `User does not have CONNECT privilege`.
+- **`mongodb.sh` used to create tenant users through the localhost exception**,
+  which only authorizes creating the first user in `admin`. It failed on the
+  very first request and still exited 0. It now authenticates as `dbaas_admin`
+  and verifies the new credential before printing `ok`.
