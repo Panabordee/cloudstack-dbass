@@ -22,23 +22,27 @@ import javax.inject.Inject;
 import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.api.ApiErrorCode;
 import org.apache.cloudstack.api.BaseCmd;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.ServerApiException;
-import org.apache.cloudstack.api.response.CheckInstanceProxyNameResponse;
+import org.apache.cloudstack.api.response.ListResponse;
 import org.apache.cloudstack.api.response.ReverseProxyDomainResponse;
+import org.apache.cloudstack.api.response.UserVmResponse;
 import org.apache.cloudstack.reverseproxy.ReverseProxyService;
 
+import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.user.Account;
 
-@APICommand(name = "checkInstanceProxyName",
-        description = "Checks whether a name is available for use as an instance reverse proxy host",
-        responseObject = CheckInstanceProxyNameResponse.class,
+@APICommand(name = "listReverseProxyDomains",
+        description = "Lists the reverse proxy domain suffixes that can be used to expose instances. Users only get the "
+                + "domain suffixes they are allowed to use, admins get all domain suffixes with their grants.",
+        responseObject = ReverseProxyDomainResponse.class,
         requestHasSensitiveInfo = false,
         responseHasSensitiveInfo = false,
-        since = "4.22.0.0",
+        since = "4.22.2.0",
         authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User})
-public class CheckInstanceProxyNameCmd extends BaseCmd {
+public class ListReverseProxyDomainsCmd extends BaseCmd {
 
     @Inject
     public ReverseProxyService reverseProxyService;
@@ -47,24 +51,33 @@ public class CheckInstanceProxyNameCmd extends BaseCmd {
     //////////////// API parameters /////////////////////
     /////////////////////////////////////////////////////
 
-    @Parameter(name = ApiConstants.NAME, type = CommandType.STRING, required = true,
-            description = "The desired name (prefix of the proxy host name) to check")
-    private String name;
+    @Parameter(name = ApiConstants.ID, type = CommandType.UUID, entityType = ReverseProxyDomainResponse.class,
+            required = false, description = "The ID of the reverse proxy domain suffix")
+    private Long id;
 
-    @Parameter(name = ApiConstants.DOMAIN_ID, type = CommandType.UUID, entityType = ReverseProxyDomainResponse.class, required = false,
-            description = "The ID of the reverse proxy domain suffix to check the name on")
-    private Long domainId;
+    @Parameter(name = ApiConstants.VIRTUAL_MACHINE_ID, type = CommandType.UUID, entityType = UserVmResponse.class,
+            required = false, description = "The ID of the instance that will be exposed, when given the domain suffixes "
+                    + "granted to the shared networks of the instance are included as well")
+    private Long virtualMachineId;
+
+    @Parameter(name = ApiConstants.KEYWORD, type = CommandType.STRING, required = false,
+            description = "Filter the domain suffixes by keyword")
+    private String keyword;
 
     /////////////////////////////////////////////////////
     /////////////////// Accessors ///////////////////////
     /////////////////////////////////////////////////////
 
-    public String getName() {
-        return name;
+    public Long getId() {
+        return id;
     }
 
-    public Long getDomainId() {
-        return domainId;
+    public Long getVirtualMachineId() {
+        return virtualMachineId;
+    }
+
+    public String getKeyword() {
+        return keyword;
     }
 
     /////////////////////////////////////////////////////
@@ -78,9 +91,12 @@ public class CheckInstanceProxyNameCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
-        final CheckInstanceProxyNameResponse response = reverseProxyService.checkInstanceProxyName(name, domainId, this);
-        response.setResponseName(getCommandName());
-        response.setObjectName("instanceproxyname");
-        setResponseObject(response);
+        try {
+            final ListResponse<ReverseProxyDomainResponse> response = reverseProxyService.listReverseProxyDomains(this);
+            response.setResponseName(getCommandName());
+            setResponseObject(response);
+        } catch (final CloudRuntimeException e) {
+            throw new ServerApiException(ApiErrorCode.INTERNAL_ERROR, e.getMessage());
+        }
     }
 }

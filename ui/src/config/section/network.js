@@ -1492,6 +1492,93 @@ export default {
           groupMap: (selection) => { return selection.map(x => { return { id: x } }) }
         }
       ]
+    },
+    {
+      name: 'proxydomains',
+      title: 'label.proxy.domains',
+      icon: 'tags-outlined',
+      permission: ['listReverseProxyDomains', 'addReverseProxyDomain'],
+      resourceType: 'ReverseProxyDomain',
+      columns: [
+        'domain',
+        'description',
+        'ispublic',
+        {
+          field: 'accounts',
+          customTitle: 'label.accounts',
+          accounts: (record) => Array.isArray(record.accounts) ? record.accounts.join(', ') : ''
+        },
+        {
+          field: 'networks',
+          customTitle: 'label.networks',
+          networks: (record) => Array.isArray(record.networks) ? record.networks.join(', ') : ''
+        },
+        'proxycount',
+        'created'
+      ],
+      details: ['domain', 'description', 'ispublic', 'npmcertificateid', 'accounts', 'networks', 'proxycount', 'created'],
+      searchFilters: ['keyword'],
+      actions: [
+        {
+          api: 'addReverseProxyDomain',
+          icon: 'plus-outlined',
+          label: 'label.add.proxy.domain',
+          listView: true,
+          popup: true,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/network/ReverseProxyDomainForm.vue')))
+        },
+        {
+          api: 'updateReverseProxyDomain',
+          icon: 'edit-outlined',
+          label: 'label.edit',
+          dataView: true,
+          popup: true,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/network/ReverseProxyDomainForm.vue')))
+        },
+        {
+          api: 'deleteReverseProxyDomain',
+          icon: 'delete-outlined',
+          label: 'label.delete.proxy.domain',
+          message: 'message.delete.proxy.domain',
+          dataView: true
+        }
+      ]
+    },
+    {
+      name: 'reverseproxy',
+      title: 'label.reverse.proxy',
+      icon: 'global-outlined',
+      permission: ['listReverseProxyHosts'],
+      columns: [
+        'fqdn',
+        'virtualmachinename',
+        {
+          field: 'backend',
+          customTitle: 'label.proxy.backend',
+          backend: (record) => record.protocol && record.ipaddress ? record.protocol + '://' + record.ipaddress + ':' + record.port : ''
+        },
+        'account',
+        'domain',
+        'state',
+        'created'
+      ],
+      details: ['name', 'fqdn', 'url', 'virtualmachinename', 'ipaddress', 'protocol', 'port', 'state', 'account', 'domain', 'created'],
+      searchFilters: ['keyword'],
+      related: [{
+        name: 'vm',
+        title: 'label.instances',
+        param: 'virtualmachineid'
+      }],
+      actions: [
+        {
+          api: 'deleteInstanceProxy',
+          icon: 'delete-outlined',
+          label: 'label.remove.instance.proxy',
+          message: 'message.remove.instance.proxy',
+          dataView: true,
+          show: (record, store) => { return 'deleteInstanceProxy' in store.apis }
+        }
+      ]
     }
   ]
 }

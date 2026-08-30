@@ -31,20 +31,27 @@ import javax.inject.Inject;
 import javax.naming.ConfigurationException;
 
 import org.apache.cloudstack.acl.SecurityChecker;
+import org.apache.cloudstack.api.command.admin.reverseproxy.AddReverseProxyDomainCmd;
+import org.apache.cloudstack.api.command.admin.reverseproxy.DeleteReverseProxyDomainCmd;
 import org.apache.cloudstack.api.command.admin.reverseproxy.ListReverseProxyHostsCmd;
+import org.apache.cloudstack.api.command.admin.reverseproxy.UpdateReverseProxyDomainCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.AddInstanceProxyCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.CheckInstanceProxyNameCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.DeleteInstanceProxyCmd;
 import org.apache.cloudstack.api.command.user.reverseproxy.ListInstanceProxiesCmd;
+import org.apache.cloudstack.api.command.user.reverseproxy.ListReverseProxyDomainsCmd;
 import org.apache.cloudstack.api.response.CheckInstanceProxyNameResponse;
 import org.apache.cloudstack.api.response.InstanceProxyResponse;
 import org.apache.cloudstack.api.response.ListResponse;
+import org.apache.cloudstack.api.response.ReverseProxyDomainResponse;
 import org.apache.cloudstack.context.CallContext;
 import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
 import org.apache.cloudstack.reverseproxy.client.NpmCertificate;
 import org.apache.cloudstack.reverseproxy.client.NpmClient;
 import org.apache.cloudstack.reverseproxy.client.NpmProxyHost;
+import org.apache.cloudstack.reverseproxy.dao.ReverseProxyDomainDao;
+import org.apache.cloudstack.reverseproxy.dao.ReverseProxyDomainMapDao;
 import org.apache.cloudstack.reverseproxy.dao.ReverseProxyHostDao;
 import org.apache.commons.lang3.StringUtils;
 
@@ -80,11 +87,23 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
      */
     private static final Pattern PROXY_NAME_PATTERN = Pattern.compile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$");
 
+    /**
+     * A domain suffix must consist of at least two valid DNS labels
+     */
+    private static final Pattern DOMAIN_NAME_PATTERN =
+            Pattern.compile("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$");
+
     private static final String HTTP = "http";
     private static final String HTTPS = "https";
 
     @Inject
     private ReverseProxyHostDao reverseProxyHostDao;
+
+    @Inject
+    private ReverseProxyDomainDao reverseProxyDomainDao;
+
+    @Inject
+    private ReverseProxyDomainMapDao reverseProxyDomainMapDao;
 
     @Inject
     private UserVmDao userVmDao;
@@ -177,12 +196,91 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         }
     }
 
-    protected String getProxyDomain() {
-        return ReverseProxyDomain.value().trim().toLowerCase(Locale.ROOT);
+    protected String getWildcardDomain(final ReverseProxyDomainVO domain) {
+        return "*." + domain.getDomain();
+    }    ///////////////////////////////////////////////////////////
+    /////////////////// Domain suffix methods /////////////////
+    ///////////////////////////////////////////////////////////
+
+    protected boolean isAdmin(final Account account) {
+        return account != null && account.getType() == Account.Type.ADMIN;
     }
 
-    protected String getWildcardDomain() {
-        return "*." + getProxyDomain();
+    /**
+     * Resolves the domain suffix to use for a new proxy host: when no domain id is given exactly one
+     * domain suffix must be configured, otherwise the given domain suffix is validated
+     */
+    protected ReverseProxyDomainVO resolveProxyDomain(final Long domainId, final Account caller, final UserVmVO vm) {
+        final List<ReverseProxyDomainVO> domains = reverseProxyDomainDao.listAll();
+        if (domains.isEmpty()) {
+            throw new CloudRuntimeException("No reverse proxy domain suffix is configured, please ask your administrator "
+                    + "to add a domain suffix for the reverse proxy integration");
+        }
+        final ReverseProxyDomainVO domain;
+        if (domainId == null) {
+            if (domains.size() > 1) {
+                throw new InvalidParameterValueException("Multiple reverse proxy domain suffixes are configured, "
+                        + "please specify the domain suffix to expose the instance on");
+            }
+            domain = domains.get(0);
+        } else {
+            domain = reverseProxyDomainDao.findById(domainId);
+            if (domain == null) {
+                throw new InvalidParameterValueException(String.format("Unable to find reverse proxy domain suffix with id %s", domainId));
+            }
+        }
+        if (!canUseDomain(caller, vm, domain)) {
+            throw new InvalidParameterValueException(String.format("The domain suffix '%s' is not available for this instance, "
+                    + "please ask your administrator for access", domain.getDomain()));
+        }
+        return domain;
+    }
+
+    /**
+     * Checks whether the caller may use the given domain suffix: admins can use all suffixes, users need the
+     * suffix to be public, granted to their account or granted to one of the shared networks of the instance
+     */
+    protected boolean canUseDomain(final Account caller, final UserVmVO vm, final ReverseProxyDomainVO domain) {
+        if (caller == null) {
+            return false;
+        }
+        if (isAdmin(caller)) {
+            return true;
+        }
+        if (domain.isPublic()) {
+            return true;
+        }
+        if (reverseProxyDomainMapDao.findByDomainAndAccount(domain.getId(), caller.getAccountId()) != null) {
+            return true;
+        }
+        if (vm != null) {
+            final List<? extends Nic> nics = networkModel.getNics(vm.getId());
+            for (final Nic nic : nics) {
+                if (nic.getNetworkId() > 0 && reverseProxyDomainMapDao.findByDomainAndNetwork(domain.getId(), nic.getNetworkId()) != null) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Lists the domain suffixes the given account may use: admins get all suffixes, users get the public
+     * suffixes, the suffixes granted to their account and (when a VM is given) the suffixes granted to the
+     * shared networks of the VM
+     */
+    protected List<ReverseProxyDomainVO> listAllowedDomains(final Account caller, final UserVmVO vm) {
+        final List<ReverseProxyDomainVO> domains = reverseProxyDomainDao.listAll();
+        if (caller != null && isAdmin(caller)) {
+            return domains;
+        }
+        final List<ReverseProxyDomainVO> allowed = new ArrayList<>();
+        for (final ReverseProxyDomainVO domain : domains) {
+            if (canUseDomain(caller, vm, domain)) {
+                allowed.add(domain);
+            }
+        }
+        return allowed;
     }
 
     ///////////////////////////////////////////////////////////
@@ -259,26 +357,26 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
     }
 
     /**
-     * Resolves the NPM certificate to terminate TLS with: an explicitly configured certificate id
-     * takes precedence, otherwise the certificate covering the configured wildcard domain is
-     * auto-discovered.
+     * Resolves the NPM certificate to terminate TLS with for the given domain suffix: the certificate
+     * configured on the domain suffix takes precedence, otherwise the certificate covering the wildcard
+     * domain is auto-discovered.
      */
-    protected long resolveCertificateId(final NpmClient client) {
-        final Integer configuredCertificateId = ReverseProxyNpmCertificateId.value();
-        if (configuredCertificateId != null && configuredCertificateId > 0) {
-            return configuredCertificateId.longValue();
+    protected long resolveCertificateId(final NpmClient client, final ReverseProxyDomainVO domain) {
+        if (domain.getNpmCertificateId() != null && domain.getNpmCertificateId() > 0) {
+            return domain.getNpmCertificateId();
         }
-        final NpmCertificate certificate = client.findCertificateForWildcardDomain(getWildcardDomain());
+        final NpmCertificate certificate = client.findCertificateForWildcardDomain(getWildcardDomain(domain));
         if (certificate == null || certificate.getId() == null) {
             throw new CloudRuntimeException(String.format(
                     "No Nginx Proxy Manager certificate covering '%s' was found. Please provision the wildcard certificate in "
-                            + "Nginx Proxy Manager or explicitly set 'reverseproxy.npm.certificate.id'", getWildcardDomain()));
+                            + "Nginx Proxy Manager or set a certificate id on the reverse proxy domain suffix '%s'",
+                    getWildcardDomain(domain), domain.getDomain()));
         }
         return certificate.getId();
     }
 
     @Override
-    public ReverseProxyHost createInstanceProxy(final Long vmId, final String name, final String protocol, final Integer port) {
+    public ReverseProxyHost createInstanceProxy(final Long vmId, final String name, final String protocol, final Integer port, final Long domainId) {
         validateConfiguration();
 
         final Account caller = CallContext.current().getCallingAccount();
@@ -294,6 +392,7 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         }
         accountManager.checkAccess(caller, SecurityChecker.AccessType.OperateEntry, false, vm);
 
+        final ReverseProxyDomainVO domain = resolveProxyDomain(domainId, caller, vm);
         final NetworkVO network = resolveTargetNetwork(vm);
         final Nic nic = networkModel.getNicInNetwork(vmId, network.getId());
         if (nic == null || StringUtils.isBlank(nic.getIPv4Address())) {
@@ -303,7 +402,7 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         }
         final String ipAddress = nic.getIPv4Address();
 
-        final String fqdn = String.format("%s.%s", validatedName, getProxyDomain());
+        final String fqdn = String.format("%s.%s", validatedName, domain.getDomain());
 
         // Name availability checks (local mapping table and Nginx Proxy Manager)
         if (reverseProxyHostDao.findByFqdn(fqdn) != null) {
@@ -314,7 +413,7 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
             throw new InvalidParameterValueException(String.format("The domain '%s' is already in use, please choose another name", fqdn));
         }
 
-        final long certificateId = resolveCertificateId(client);
+        final long certificateId = resolveCertificateId(client, domain);
 
         final NpmProxyHost request = new NpmProxyHost();
         request.setDomainNames(Arrays.asList(fqdn));
@@ -340,6 +439,7 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         proxy.setForwardScheme(validatedProtocol);
         proxy.setForwardPort(port);
         proxy.setNpmProxyHostId(created.getId());
+        proxy.setReverseProxyDomainId(domain.getId());
         proxy.setAccountId(vm.getAccountId());
         proxy.setDomainId(vm.getDomainId());
         try {
@@ -413,7 +513,7 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
     }
 
     @Override
-    public CheckInstanceProxyNameResponse checkInstanceProxyName(final String name, final CheckInstanceProxyNameCmd cmd) {
+    public CheckInstanceProxyNameResponse checkInstanceProxyName(final String name, final Long domainId, final CheckInstanceProxyNameCmd cmd) {
         validateConfiguration();
 
         final CheckInstanceProxyNameResponse response = new CheckInstanceProxyNameResponse();
@@ -424,8 +524,19 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         } catch (final InvalidParameterValueException e) {
             message = e.getMessage();
         }
+        final String fqdn;
         if (validatedName != null) {
-            final String fqdn = String.format("%s.%s", validatedName, getProxyDomain());
+            final ReverseProxyDomainVO domain;
+            try {
+                final Account caller = CallContext.current().getCallingAccount();
+                domain = resolveProxyDomain(domainId, caller, null);
+            } catch (final CloudRuntimeException e) {
+                response.setName(validatedName);
+                response.setMessage(e.getMessage());
+                response.setAvailable(false);
+                return response;
+            }
+            fqdn = String.format("%s.%s", validatedName, domain.getDomain());
             response.setName(validatedName);
             response.setFqdn(fqdn);
             if (reverseProxyHostDao.findByFqdn(fqdn) != null) {
@@ -446,6 +557,210 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         }
         response.setMessage(message);
         response.setAvailable(message == null);
+        return response;
+    }
+
+    ///////////////////////////////////////////////////////////
+    /////////////// Domain suffix management //////////////////
+    ///////////////////////////////////////////////////////////
+
+    protected String validateDomainName(final String domain) {
+        if (StringUtils.isBlank(domain)) {
+            throw new InvalidParameterValueException("A domain suffix is required");
+        }
+        final String trimmed = domain.trim().toLowerCase(Locale.ROOT);
+        if (!DOMAIN_NAME_PATTERN.matcher(trimmed).matches()) {
+            throw new InvalidParameterValueException(String.format("The domain suffix '%s' is not valid, it must consist of "
+                    + "DNS labels of lowercase letters, digits and hyphens separated by dots, for example 'cloud.company.com'", domain));
+        }
+        return trimmed;
+    }
+
+    @Override
+    public ReverseProxyDomainVO addReverseProxyDomain(final String domain, final String description, final Boolean isPublic,
+            final Long npmCertificateId, final List<Long> accountIds, final List<Long> networkIds) {
+        if (!isEnabled()) {
+            throw new CloudRuntimeException("The reverse proxy integration is disabled");
+        }
+        final String validated = validateDomainName(domain);
+        if (reverseProxyDomainDao.findByName(validated) != null) {
+            throw new InvalidParameterValueException(String.format("The domain suffix '%s' already exists", validated));
+        }
+        final ReverseProxyDomainVO vo = new ReverseProxyDomainVO(validated);
+        vo.setDescription(StringUtils.trimToNull(description));
+        vo.setPublic(isPublic != null && isPublic);
+        if (npmCertificateId != null && npmCertificateId < 0) {
+            throw new InvalidParameterValueException("The Nginx Proxy Manager certificate id must not be negative");
+        }
+        vo.setNpmCertificateId(npmCertificateId);
+        final ReverseProxyDomainVO persisted = reverseProxyDomainDao.persist(vo);
+        updateGrants(persisted, accountIds, networkIds);
+        logger.info(String.format("Added reverse proxy domain suffix %s (id=%s, public=%s)", persisted.getDomain(),
+                persisted.getUuid(), persisted.isPublic()));
+        return persisted;
+    }
+
+    @Override
+    public ReverseProxyDomainVO updateReverseProxyDomain(final Long id, final String description, final Boolean isPublic,
+            final Long npmCertificateId, final List<Long> accountIds, final List<Long> networkIds) {
+        if (!isEnabled()) {
+            throw new CloudRuntimeException("The reverse proxy integration is disabled");
+        }
+        final ReverseProxyDomainVO domain = getDomainByIdOrThrow(id);
+        if (description != null) {
+            domain.setDescription(StringUtils.trimToNull(description));
+        }
+        if (isPublic != null) {
+            domain.setPublic(isPublic);
+        }
+        if (npmCertificateId != null) {
+            if (npmCertificateId < 0) {
+                throw new InvalidParameterValueException("The Nginx Proxy Manager certificate id must not be negative");
+            }
+            domain.setNpmCertificateId(npmCertificateId > 0 ? npmCertificateId : null);
+        }
+        reverseProxyDomainDao.update(id, domain);
+        updateGrants(domain, accountIds, networkIds);
+        logger.info(String.format("Updated reverse proxy domain suffix %s (id=%s, public=%s)", domain.getDomain(),
+                domain.getUuid(), domain.isPublic()));
+        return domain;
+    }
+
+    @Override
+    public void deleteReverseProxyDomain(final Long id) {
+        if (!isEnabled()) {
+            throw new CloudRuntimeException("The reverse proxy integration is disabled");
+        }
+        final ReverseProxyDomainVO domain = getDomainByIdOrThrow(id);
+        final long proxyCount = reverseProxyHostDao.countByDomainId(domain.getId());
+        if (proxyCount > 0) {
+            throw new InvalidParameterValueException(String.format(
+                    "The domain suffix '%s' still has %d proxy hosts, please remove them before deleting the domain suffix",
+                    domain.getDomain(), proxyCount));
+        }
+        for (final ReverseProxyDomainMapVO map : reverseProxyDomainMapDao.listByDomainId(domain.getId())) {
+            reverseProxyDomainMapDao.remove(map.getId());
+        }
+        reverseProxyDomainDao.remove(domain.getId());
+        logger.info(String.format("Deleted reverse proxy domain suffix %s (id=%s)", domain.getDomain(), domain.getUuid()));
+    }
+
+    @Override
+    public ListResponse<ReverseProxyDomainResponse> listReverseProxyDomains(final ListReverseProxyDomainsCmd cmd) {
+        if (!isEnabled()) {
+            throw new CloudRuntimeException("The reverse proxy integration is disabled");
+        }
+        final Account caller = CallContext.current().getCallingAccount();
+        final UserVmVO vm = cmd.getVirtualMachineId() != null ? userVmDao.findById(cmd.getVirtualMachineId()) : null;
+        final List<ReverseProxyDomainVO> domains = listAllowedDomains(caller, vm);
+        final Long domainId = cmd.getId();
+        final String keyword = cmd.getKeyword();
+        final boolean showDetails = isAdmin(caller);
+        final List<ReverseProxyDomainResponse> responses = new ArrayList<>();
+        int count = 0;
+        for (final ReverseProxyDomainVO domain : domains) {
+            if (domainId != null && domain.getId() != domainId) {
+                continue;
+            }
+            if (StringUtils.isNotBlank(keyword) && !domain.getDomain().contains(keyword.trim().toLowerCase(Locale.ROOT))) {
+                continue;
+            }
+            count++;
+            responses.add(createReverseProxyDomainResponse(domain, showDetails));
+        }
+        final ListResponse<ReverseProxyDomainResponse> response = new ListResponse<>();
+        response.setResponses(responses, count);
+        return response;
+    }
+
+    protected ReverseProxyDomainVO getDomainByIdOrThrow(final Long id) {
+        if (id == null) {
+            throw new InvalidParameterValueException("A reverse proxy domain suffix id is required");
+        }
+        final ReverseProxyDomainVO domain = reverseProxyDomainDao.findById(id);
+        if (domain == null) {
+            throw new InvalidParameterValueException(String.format("Unable to find reverse proxy domain suffix with id %s", id));
+        }
+        return domain;
+    }
+
+    /**
+     * Replaces the grants of the given domain suffix with the given accounts and shared networks.
+     * Null lists leave the grants unchanged.
+     */
+    protected void updateGrants(final ReverseProxyDomainVO domain, final List<Long> accountIds, final List<Long> networkIds) {
+        if (accountIds == null && networkIds == null) {
+            return;
+        }
+        for (final ReverseProxyDomainMapVO map : reverseProxyDomainMapDao.listByDomainId(domain.getId())) {
+            reverseProxyDomainMapDao.remove(map.getId());
+        }
+        if (accountIds != null) {
+            for (final Long accountId : new ArrayList<>(new java.util.LinkedHashSet<>(accountIds))) {
+                if (accountId == null) {
+                    continue;
+                }
+                final Account account = accountDao.findById(accountId);
+                if (account == null || account.getRemoved() != null) {
+                    throw new InvalidParameterValueException(String.format("Unable to find account with id %s", accountId));
+                }
+                reverseProxyDomainMapDao.persist(new ReverseProxyDomainMapVO(domain.getId(), accountId, null));
+            }
+        }
+        if (networkIds != null) {
+            for (final Long networkId : new ArrayList<>(new java.util.LinkedHashSet<>(networkIds))) {
+                if (networkId == null) {
+                    continue;
+                }
+                final NetworkVO network = networkDao.findById(networkId);
+                if (network == null) {
+                    throw new InvalidParameterValueException(String.format("Unable to find network with id %s", networkId));
+                }
+                if (network.getGuestType() != Network.GuestType.Shared) {
+                    throw new InvalidParameterValueException(String.format("The network '%s' is not a shared network, only "
+                            + "shared networks can be granted access to a reverse proxy domain suffix", network.getName()));
+                }
+                reverseProxyDomainMapDao.persist(new ReverseProxyDomainMapVO(domain.getId(), null, networkId));
+            }
+        }
+    }
+
+    @Override
+    public ReverseProxyDomainResponse createReverseProxyDomainResponse(final ReverseProxyDomainVO domain, final boolean showDetails) {
+        final ReverseProxyDomainResponse response = new ReverseProxyDomainResponse();
+        response.setObjectName("reverseproxydomain");
+        response.setId(domain.getUuid());
+        response.setDomain(domain.getDomain());
+        response.setDescription(domain.getDescription());
+        response.setPublic(domain.isPublic());
+        response.setNpmCertificateId(domain.getNpmCertificateId());
+        response.setCreated(domain.getCreated());
+        if (showDetails) {
+            final List<String> accounts = new ArrayList<>();
+            final List<String> accountIds = new ArrayList<>();
+            final List<String> networks = new ArrayList<>();
+            final List<String> networkIds = new ArrayList<>();
+            for (final ReverseProxyDomainMapVO map : reverseProxyDomainMapDao.listByDomainId(domain.getId())) {
+                if (map.getAccountId() != null) {
+                    final Account account = accountDao.findById(map.getAccountId());
+                    if (account != null) {
+                        accounts.add(account.getAccountName());
+                        accountIds.add(account.getUuid());
+                    }
+                } else if (map.getNetworkId() != null) {
+                    final NetworkVO network = networkDao.findById(map.getNetworkId());
+                    if (network != null) {
+                        networks.add(network.getName());
+                        networkIds.add(network.getUuid());
+                    }
+                }
+            }
+            response.setAccounts(accounts);
+            response.setAccountIds(accountIds);
+            response.setNetworks(networks);
+            response.setNetworkIds(networkIds);
+            response.setProxyCount(reverseProxyHostDao.countByDomainId(domain.getId()));
+        }
         return response;
     }
 
@@ -595,6 +910,10 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         cmdList.add(DeleteInstanceProxyCmd.class);
         cmdList.add(CheckInstanceProxyNameCmd.class);
         cmdList.add(ListReverseProxyHostsCmd.class);
+        cmdList.add(ListReverseProxyDomainsCmd.class);
+        cmdList.add(AddReverseProxyDomainCmd.class);
+        cmdList.add(UpdateReverseProxyDomainCmd.class);
+        cmdList.add(DeleteReverseProxyDomainCmd.class);
         return cmdList;
     }
 

@@ -276,7 +276,9 @@ known_categories = {
     'ImportVmTask': 'Import VM Task',
     'InstanceProxy': 'Reverse Proxy',
     'InstanceProxies': 'Reverse Proxy',
-    'ReverseProxyHosts': 'Reverse Proxy'
+    'ReverseProxyHosts': 'Reverse Proxy',
+    'ReverseProxyDomain': 'Reverse Proxy',
+    'ReverseProxyDomains': 'Reverse Proxy'
 }
 
 

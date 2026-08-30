@@ -29,6 +29,7 @@ import org.apache.cloudstack.api.BaseCmd;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.ServerApiException;
 import org.apache.cloudstack.api.response.InstanceProxyResponse;
+import org.apache.cloudstack.api.response.ReverseProxyDomainResponse;
 import org.apache.cloudstack.api.response.UserVmResponse;
 import org.apache.cloudstack.reverseproxy.ReverseProxyHost;
 import org.apache.cloudstack.reverseproxy.ReverseProxyService;
@@ -67,6 +68,11 @@ public class AddInstanceProxyCmd extends BaseCmd {
             description = "The desired name (prefix of the proxy host name), for example 'my-web' for 'my-web.cloud.company.com'")
     private String name;
 
+    @Parameter(name = ApiConstants.DOMAIN_ID, type = CommandType.UUID, entityType = ReverseProxyDomainResponse.class, required = false,
+            description = "The ID of the reverse proxy domain suffix to expose the instance on, required when multiple "
+                    + "domain suffixes are configured")
+    private Long domainId;
+
     @Parameter(name = ApiConstants.PROTOCOL, type = CommandType.STRING, required = true,
             description = "The protocol used to forward requests to the instance: http or https")
     private String protocol;
@@ -85,6 +91,10 @@ public class AddInstanceProxyCmd extends BaseCmd {
 
     public String getName() {
         return name;
+    }
+
+    public Long getDomainId() {
+        return domainId;
     }
 
     public String getProtocol() {
@@ -111,7 +121,7 @@ public class AddInstanceProxyCmd extends BaseCmd {
         if (virtualMachineId == null) {
             throw new InvalidParameterValueException("Instance ID is required");
         }
-        final ReverseProxyHost proxy = reverseProxyService.createInstanceProxy(virtualMachineId, name, protocol, port);
+        final ReverseProxyHost proxy = reverseProxyService.createInstanceProxy(virtualMachineId, name, protocol, port, domainId);
         if (proxy == null) {
             throw new ServerApiException(ApiErrorCode.INTERNAL_ERROR, "Failed to create the instance proxy");
         }
