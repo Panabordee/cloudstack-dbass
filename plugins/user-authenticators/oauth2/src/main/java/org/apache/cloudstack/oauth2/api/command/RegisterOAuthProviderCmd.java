@@ -65,6 +65,9 @@ public class RegisterOAuthProviderCmd extends BaseCmd {
     @Parameter(name = ApiConstants.TOKEN_URL, type = CommandType.STRING, description = "Token URL for OAuth finalization, for example https://idp.example.com/application/o/token/ (only required for keycloak provider)")
     private String tokenUrl;
 
+    @Parameter(name = ApiConstants.LOGO, type = CommandType.STRING, description = "Custom logo shown on the login button, as a base64 data URI (data:image/png;base64,...) with a maximum size of 256 KB")
+    private String logo;
+
     @Parameter(name = ApiConstants.DETAILS, type = CommandType.MAP,
             description = "Any OAuth provider details in key/value pairs using format details[i].keyname=keyvalue. Example: details[0].clientsecret=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")
     protected Map details;
@@ -100,6 +103,10 @@ public class RegisterOAuthProviderCmd extends BaseCmd {
 
     public String getTokenUrl() {
         return tokenUrl;
+    }
+
+    public String getLogo() {
+        return logo;
     }
 
     public Map getDetails() {

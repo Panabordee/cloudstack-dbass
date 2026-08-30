@@ -63,6 +63,9 @@ public final class UpdateOAuthProviderCmd extends BaseCmd {
     @Parameter(name = ApiConstants.TOKEN_URL, type = CommandType.STRING, description = "Token URL for OAuth finalization, for example https://idp.example.com/application/o/token/ (only required for keycloak provider)")
     private String tokenUrl;
 
+    @Parameter(name = ApiConstants.LOGO, type = CommandType.STRING, description = "Custom logo shown on the login button, as a base64 data URI (data:image/png;base64,...) with a maximum size of 256 KB; pass an empty value to remove the custom logo")
+    private String logo;
+
     @Parameter(name = ApiConstants.ENABLED, type = CommandType.BOOLEAN, description = "OAuth provider will be enabled or disabled based on this value")
     private Boolean enabled;
 
@@ -99,6 +102,10 @@ public final class UpdateOAuthProviderCmd extends BaseCmd {
 
     public String getTokenUrl() {
         return tokenUrl;
+    }
+
+    public String getLogo() {
+        return logo;
     }
 
     public Boolean getEnabled() {

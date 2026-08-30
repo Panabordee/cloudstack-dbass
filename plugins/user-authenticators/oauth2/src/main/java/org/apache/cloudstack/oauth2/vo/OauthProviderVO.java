@@ -63,6 +63,9 @@ public class OauthProviderVO implements Identity, InternalIdentity {
     @Column(name = "token_url")
     private String tokenUrl;
 
+    @Column(name = "logo", length = 65535)
+    private String logo;
+
     @Column(name = GenericDao.CREATED_COLUMN)
     private Date created;
 
@@ -140,6 +143,14 @@ public class OauthProviderVO implements Identity, InternalIdentity {
 
     public void setSecretKey(String secretKey) {
         this.secretKey = secretKey;
+    }
+
+    public String getLogo() {
+        return logo;
+    }
+
+    public void setLogo(String logo) {
+        this.logo = logo;
     }
 
     public boolean isEnabled() {

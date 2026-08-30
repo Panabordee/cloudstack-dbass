@@ -67,6 +67,10 @@ public class OauthProviderResponse extends BaseResponse {
     @Param(description = "Whether the OAuth provider is enabled or not")
     private boolean enabled;
 
+    @SerializedName(ApiConstants.LOGO)
+    @Param(description = "Custom logo (data URI) shown on the login button")
+    private String logo;
+
     public OauthProviderResponse(String id, String provider, String description, String clientId, String secretKey, String redirectUri, String authorizeUrl, String tokenUrl) {
         this.id = id;
         this.provider = provider;
@@ -77,6 +81,14 @@ public class OauthProviderResponse extends BaseResponse {
         this.redirectUri = redirectUri;
         this.authorizeUrl = authorizeUrl;
         this.tokenUrl = tokenUrl;
+    }
+
+    public void setLogo(String logo) {
+        this.logo = logo;
+    }
+
+    public String getLogo() {
+        return logo;
     }
 
     public String getId() {

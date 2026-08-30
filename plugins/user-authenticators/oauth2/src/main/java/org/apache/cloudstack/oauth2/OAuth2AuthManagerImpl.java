@@ -19,6 +19,7 @@
 package org.apache.cloudstack.oauth2;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -44,6 +45,8 @@ import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.exception.CloudRuntimeException;
 
 public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthManager, Manager, Configurable {
+
+    private static final int MAX_LOGO_LENGTH = 350 * 1024; // approx. 256 KB decoded image
 
     @Inject
     protected OauthProviderDao _oauthProviderDao;
@@ -138,6 +141,8 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         String secretKey = StringUtils.trim(cmd.getSecretKey());
         String authorizeUrl = StringUtils.trim(cmd.getAuthorizeUrl());
         String tokenUrl = StringUtils.trim(cmd.getTokenUrl());
+        String logo = StringUtils.trimToEmpty(cmd.getLogo());
+        validateLogo(logo);
 
         if (!isOAuthPluginEnabled()) {
             throw new CloudRuntimeException("OAuth is not enabled, please enable to register");
@@ -147,7 +152,7 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
             throw new CloudRuntimeException(String.format("Provider with the name %s is already registered", provider));
         }
 
-        return saveOauthProvider(provider, description, clientId, secretKey, redirectUri, authorizeUrl, tokenUrl);
+        return saveOauthProvider(provider, description, clientId, secretKey, redirectUri, authorizeUrl, tokenUrl, logo);
     }
 
     @Override
@@ -173,6 +178,10 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         String authorizeUrl = StringUtils.trim(cmd.getAuthorizeUrl());
         String tokenUrl = StringUtils.trim(cmd.getTokenUrl());
         Boolean enabled = cmd.getEnabled();
+        String logo = cmd.getLogo() == null ? null : StringUtils.trimToEmpty(cmd.getLogo());
+        if (logo != null) {
+            validateLogo(logo);
+        }
 
         OauthProviderVO providerVO = _oauthProviderDao.findById(id);
         if (providerVO == null) {
@@ -197,6 +206,10 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         if (StringUtils.isNotEmpty(tokenUrl)) {
             providerVO.setTokenUrl(tokenUrl);
         }
+        if (logo != null) {
+            // an empty value clears the custom logo
+            providerVO.setLogo(StringUtils.isEmpty(logo) ? null : logo);
+        }
         if (enabled != null) {
             providerVO.setEnabled(enabled);
         }
@@ -206,7 +219,7 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         return _oauthProviderDao.findById(id);
     }
 
-    private OauthProviderVO saveOauthProvider(String provider, String description, String clientId, String secretKey, String redirectUri, String authorizeUrl, String tokenUrl) {
+    private OauthProviderVO saveOauthProvider(String provider, String description, String clientId, String secretKey, String redirectUri, String authorizeUrl, String tokenUrl, String logo) {
         final OauthProviderVO oauthProviderVO = new OauthProviderVO();
 
         oauthProviderVO.setProvider(provider);
@@ -216,11 +229,34 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         oauthProviderVO.setRedirectUri(redirectUri);
         oauthProviderVO.setAuthorizeUrl(authorizeUrl);
         oauthProviderVO.setTokenUrl(tokenUrl);
+        if (StringUtils.isNotEmpty(logo)) {
+            oauthProviderVO.setLogo(logo);
+        }
         oauthProviderVO.setEnabled(true);
 
         _oauthProviderDao.persist(oauthProviderVO);
 
         return oauthProviderVO;
+    }
+
+    /**
+     * Validates the custom logo provided as a base64 data URI, e.g. data:image/png;base64,xxxx
+     */
+    private void validateLogo(String logo) {
+        if (StringUtils.isEmpty(logo)) {
+            return;
+        }
+        if (!logo.startsWith("data:image/") || !logo.contains(";base64,")) {
+            throw new CloudRuntimeException("Invalid logo: expected a base64 image data URI (data:image/png;base64,...)");
+        }
+        if (logo.length() > MAX_LOGO_LENGTH) {
+            throw new CloudRuntimeException(String.format("Invalid logo: maximum supported size is %d KB", MAX_LOGO_LENGTH / 1024));
+        }
+        try {
+            Base64.getMimeDecoder().decode(logo.substring(logo.indexOf(";base64,") + ";base64,".length()));
+        } catch (IllegalArgumentException e) {
+            throw new CloudRuntimeException("Invalid logo: value is not valid base64 data", e);
+        }
     }
 
     @Override

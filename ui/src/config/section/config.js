@@ -88,8 +88,9 @@ export default {
           label: 'label.register.oauth',
           listView: true,
           dataView: false,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/iam/RegisterOauthProvider.vue'))),
           args: [
-            'provider', 'description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl'
+            'provider', 'description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl', 'logo'
           ],
           mapping: {
             provider: {
@@ -103,7 +104,7 @@ export default {
           label: 'label.edit',
           dataView: true,
           popup: true,
-          args: ['description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl']
+          args: ['description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl', 'logo']
         },
         {
           api: 'updateOauthProvider',

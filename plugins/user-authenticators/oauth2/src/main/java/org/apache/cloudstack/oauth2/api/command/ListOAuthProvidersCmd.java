@@ -149,6 +149,7 @@ public class ListOAuthProvidersCmd extends BaseListCmd implements APIAuthenticat
             OauthProviderResponse r = new OauthProviderResponse(result.getUuid(), result.getProvider(),
                     result.getDescription(), result.getClientId(), secretKeyAllowed ? result.getSecretKey() : null,
                     result.getRedirectUri(), result.getAuthorizeUrl(), result.getTokenUrl());
+            r.setLogo(result.getLogo());
             if (OAuth2AuthManager.OAuth2IsPluginEnabled.value() && authenticatorPluginNames.contains(result.getProvider()) && result.isEnabled()) {
                 r.setEnabled(true);
             } else {

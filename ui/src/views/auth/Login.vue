@@ -39,6 +39,28 @@
           @finish="handleSubmit"
           v-ctrl-enter="handleSubmit"
         >
+          <a-form-item ref="domain" name="domain">
+            <div class="field-label">{{ $t('label.domain') }}</div>
+            <a-auto-complete
+              class="domain-select"
+              v-model:value="form.domain"
+              :options="domainOptions"
+              :filter-option="false"
+              backfill
+              @search="onDomainSearch"
+              @select="onDomainSelect"
+              @dropdown-visible-change="onDomainDropdownVisible"
+            >
+              <a-input
+                size="large"
+                :placeholder="$t('label.domain')"
+              >
+                <template #prefix>
+                  <project-outlined />
+                </template>
+              </a-input>
+            </a-auto-complete>
+          </a-form-item>
           <a-tabs
             class="tab-center"
             :activeKey="customActiveKey"
@@ -98,27 +120,6 @@
                     <lock-outlined />
                   </template>
                 </a-input-password>
-              </a-form-item>
-              <a-form-item ref="domain" name="domain">
-                <a-auto-complete
-                  class="domain-select"
-                  v-model:value="form.domain"
-                  :options="domainOptions"
-                  :filter-option="false"
-                  backfill
-                  @search="onDomainSearch"
-                  @select="onDomainSelect"
-                  @dropdown-visible-change="onDomainDropdownVisible"
-                >
-                  <a-input
-                    size="large"
-                    :placeholder="$t('label.domain')"
-                  >
-                    <template #prefix>
-                      <project-outlined />
-                    </template>
-                  </a-input>
-                </a-auto-complete>
               </a-form-item>
               <a-form-item ref="project" name="project" v-if="$config.displayProjectFieldOnLogin">
                 <a-input
@@ -198,49 +199,27 @@
             </a-col>
           </a-row>
           <div class="content" v-if="socialLogin">
-            <p class="or">or</p>
+            <p class="or">{{ $t('label.or.sign.in.with') }}</p>
           </div>
-          <div class="center">
-            <div class="social-auth" v-if="githubprovider">
-              <a-button
-                @click="handleGithubProviderAndDomain"
-                tag="a"
-                color="primary"
-                :href="getGitHubUrl(from)"
-                class="auth-btn github-auth"
-                style="height: 38px; width: 185px; padding: 0; margin-bottom: 5px;" >
-                <img src="/assets/github.svg" style="width: 32px; padding: 5px" />
-                <a-typography-text>Sign in with Github</a-typography-text>
-              </a-button>
-            </div>
-            <div class="social-auth" v-if="googleprovider">
-              <a-button
-                @click="handleGoogleProviderAndDomain"
-                tag="a"
-                color="primary"
-                :href="getGoogleUrl(from)"
-                class="auth-btn google-auth"
-                style="height: 38px; width: 185px; padding: 0" >
-                <img src="/assets/google.svg" style="width: 32px; padding: 5px" />
-                <a-typography-text>Sign in with Google</a-typography-text>
-              </a-button>
-            </div>
-            <div class="social-auth" v-if="keycloakprovider">
-              <a-button
-                @click="handleKeycloakProviderAndDomain"
-                tag="a"
-                color="primary"
-                :href="getKeycloakUrl(from)"
-                class="auth-btn keycloak-auth"
-                style="height: 38px; width: 185px; padding: 0; margin-bottom: 5px;" >
-                <img src="/assets/keycloak.svg" alt="Keycloak" style="width: 32px; padding: 5px" />
-                <a-typography-text>Login with {{ keycloakname || 'Keycloak' }}</a-typography-text>
-              </a-button>
-            </div>
+          <div v-if="socialLogin" class="oauth-section">
+            <a-button
+              v-for="(btn, idx) in oauthButtons"
+              :key="btn.key"
+              size="large"
+              block
+              :type="idx === 0 ? 'primary' : 'default'"
+              class="oauth-login-button"
+              :href="btn.url"
+              @click="btn.click()"
+            >
+              <img v-if="btn.img" :src="btn.img" class="oauth-btn-logo" />
+              <span>{{ btn.label }}</span>
+            </a-button>
           </div>
         </a-form>
 
         <div class="login-footer" v-if="loginFooter" v-html="loginFooter"></div>
+        <div class="login-footer" v-else v-html="naclFooter"></div>
       </div>
     </div>
   </div>
@@ -270,10 +249,14 @@ export default {
       secretcode: '',
       oauthexclude: '',
       socialLogin: false,
+      naclFooter: 'Built with 💙 by <a href="https://www.ce-nacl.com" target="_blank" rel="noopener">Network and Cloud Laboratory (NaCl)</a><br>On top of Apache CloudStack',
       googleprovider: false,
       githubprovider: false,
       keycloakprovider: false,
       keycloakname: '',
+      googlelogo: '',
+      githublogo: '',
+      keycloaklogo: '',
       googleredirecturi: '',
       githubredirecturi: '',
       keycloakredirecturi: '',
@@ -314,6 +297,37 @@ export default {
         return all
       }
       return all.filter(option => option.label.toLowerCase().indexOf(keyword) >= 0)
+    },
+    oauthButtons () {
+      const buttons = []
+      if (this.keycloakprovider) {
+        buttons.push({
+          key: 'keycloak',
+          label: this.$t('label.login.with.name', { name: this.keycloakname || 'Keycloak' }),
+          img: this.keycloaklogo || '',
+          url: this.getKeycloakUrl(this.from),
+          click: this.handleKeycloakProviderAndDomain
+        })
+      }
+      if (this.googleprovider) {
+        buttons.push({
+          key: 'google',
+          label: this.$t('label.login.with.name', { name: 'Google' }),
+          img: this.googlelogo || '/assets/google.svg',
+          url: this.getGoogleUrl(this.from),
+          click: this.handleGoogleProviderAndDomain
+        })
+      }
+      if (this.githubprovider) {
+        buttons.push({
+          key: 'github',
+          label: this.$t('label.login.with.name', { name: 'GitHub' }),
+          img: this.githublogo || '/assets/github.svg',
+          url: this.getGitHubUrl(this.from),
+          click: this.handleGithubProviderAndDomain
+        })
+      }
+      return buttons
     }
   },
   watch: {
@@ -438,11 +452,13 @@ export default {
               this.googleprovider = item.enabled
               this.googleclientid = item.clientid
               this.googleredirecturi = item.redirecturi
+              this.googlelogo = item.logo || ''
             }
             if (item.provider === 'github') {
               this.githubprovider = item.enabled
               this.githubclientid = item.clientid
               this.githubredirecturi = item.redirecturi
+              this.githublogo = item.logo || ''
             }
             if (item.provider === 'keycloak') {
               this.keycloakprovider = item.enabled
@@ -450,6 +466,7 @@ export default {
               this.keycloakredirecturi = item.redirecturi
               this.keycloakauthorizeurl = item.authorizeurl
               this.keycloakname = item.description || 'Keycloak'
+              this.keycloaklogo = item.logo || ''
             }
           })
           this.socialLogin = this.googleprovider || this.githubprovider || this.keycloakprovider
@@ -934,12 +951,37 @@ html, body {
     }
   }
 
-  .center {
+  .oauth-section {
+    margin-top: 16px;
+    margin-bottom: 4px;
+  }
+
+  .field-label {
+    text-align: left;
+    font-size: 14px;
+    color: rgba(0, 0, 0, 0.65);
+    margin-bottom: 8px;
+  }
+
+  .oauth-login-button {
     display: flex;
-    flex-direction: column;
-    justify-content: center;
     align-items: center;
-    margin-top: 20px;
+    justify-content: center;
+    height: 44px;
+    margin-bottom: 10px;
+    font-size: 15px;
+    border-radius: 6px;
+
+    &:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+  }
+
+  .oauth-btn-logo {
+    width: 22px;
+    height: 22px;
+    margin-right: 10px;
   }
 
   .content {
@@ -948,26 +990,19 @@ html, body {
   }
 
   .or {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     text-align: center;
     font-size: 14px;
     color: #8c8c8c;
-    background:
-      linear-gradient(#d9d9d9 0 0) left,
-      linear-gradient(#d9d9d9 0 0) right;
-    background-size: 45% 1px;
-    background-repeat: no-repeat;
-  }
 
-  .auth-btn {
-    border-radius: 6px;
-    border: 1px solid #d9d9d9;
-    background: #ffffff;
-    transition: all 0.3s ease;
-
-    &:hover {
-      border-color: #1890ff;
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    &::before,
+    &::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #d9d9d9;
     }
   }
 }

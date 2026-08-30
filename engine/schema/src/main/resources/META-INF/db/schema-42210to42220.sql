@@ -71,3 +71,6 @@ UPDATE `cloud`.`reverse_proxy_host` h
 -- Add URLs for OAuth provider
 CALL `cloud`.`IDEMPOTENT_ADD_COLUMN`('cloud.oauth_provider','authorize_url', 'VARCHAR(255) DEFAULT NULL COMMENT ''Authorize URL for OAuth initialization'' ');
 CALL `cloud`.`IDEMPOTENT_ADD_COLUMN`('cloud.oauth_provider','token_url', 'VARCHAR(255) DEFAULT NULL COMMENT ''Token URL for OAuth finalization'' ');
+
+-- Custom logo (data URI) shown on the OAuth login button
+CALL `cloud`.`IDEMPOTENT_ADD_COLUMN`('cloud.oauth_provider','logo', 'MEDIUMTEXT NULL COMMENT ''Custom logo (data URI) for the OAuth login button'' ');
