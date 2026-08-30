@@ -51,7 +51,17 @@ const err = (error) => {
       })
     }
     if (response.status === 401) {
-      if (response.config && response.config.params && ['forgotPassword', 'listIdps', 'cloudianIsEnabled'].includes(response.config.params.command)) {
+      let requestCommand = ''
+      if (response.config && response.config.params && response.config.params.command) {
+        requestCommand = response.config.params.command
+      } else if (response.config && response.config.data) {
+        try {
+          requestCommand = new URLSearchParams(response.config.data).get('command') || ''
+        } catch (e) {
+          requestCommand = ''
+        }
+      }
+      if (['forgotPassword', 'listIdps', 'cloudianIsEnabled'].includes(requestCommand)) {
         return
       }
       const originalPath = router.currentRoute.value.path
