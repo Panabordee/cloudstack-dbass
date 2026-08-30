@@ -130,15 +130,6 @@ deploy re-copies from secondary. This cost one full debugging cycle.
 
 ## Known issues
 
-- **`mysql.sh` reports success on a duplicate request.** Its
-  `CREATE USER IF NOT EXISTS` skips creation when the user already exists, so
-  the freshly generated password is never applied, yet the script exits 0 and
-  the extension hands the caller a password that fails to authenticate
-  (`ERROR 1045 Access denied`). This is the last engine still carrying the bug;
-  fix it the way `postgresql.sh` and `mongodb.sh` were fixed — refuse outright
-  when the user already exists, and verify the new credential logs in before
-  printing `ok`. MySQL's per-database GRANT isolation itself is correct: a
-  tenant cannot reach another tenant's database.
 - **A 10 GB template needs noticeably more headroom than a 6 GB one.** A deploy
   reserves the template spool *and* the root volume, so `dbaas-mysql` asks for
   20 GiB against `pool.storage.allocated.capacity.disablethreshold` while the
@@ -147,9 +138,29 @@ deploy re-copies from secondary. This cost one full debugging cycle.
   under it. Enlarging primary storage is the durable fix; raising the threshold
   only moves the ceiling. Rebuilding `dbaas-mysql` with a 6 GB root disk would
   also make the three templates consistent.
+- **`create_database` restarts mysqld on every call.** `mysql.sh` rewrites
+  `bind-address` whenever the line is present, which stays true after the first
+  rewrite, so every subsequent provision restarts the server and drops the live
+  connections of tenants already on that VM. Guard the rewrite on the value
+  actually needing a change.
 
 ## Fixed
 
+All three engines shared one bug: a repeat `create_database` for a name that
+already existed skipped user creation, never applied the freshly generated
+password, and still exited 0 — so the extension returned success with a
+credential that could not authenticate. Each script now refuses the duplicate
+outright and proves the new credential logs in before printing `ok`.
+
+- **`mysql.sh` used to report success on a duplicate request.** Its
+  `CREATE USER IF NOT EXISTS` skipped creation when the user already existed.
+  It now fails with `user already exists: <user>@%`. The post-create check
+  passes the password through `MYSQL_PWD` rather than `-p`, because the client
+  writes "Using a password on the command line interface can be insecure" to
+  stderr — which `2>&1` folded into the comparison and made every successful
+  provision look like a failure — and because `-p` would expose the password in
+  `ps` on the VM. MySQL's per-database GRANT isolation was already correct: a
+  tenant cannot reach another tenant's database.
 - **`postgresql.sh` used to report success on a duplicate request.** Its
   `DO $$ ... IF NOT EXISTS ... CREATE ROLE` block skipped role creation when the
   role already existed, so the freshly generated password was never applied
