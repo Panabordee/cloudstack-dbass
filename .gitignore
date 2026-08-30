@@ -8,3 +8,6 @@ __pycache__/
 # Local backups taken while patching template images.
 *.bak
 *.bak-*
+
+# Maven build output for the CloudStack API plugin.
+plugin/target/
