@@ -177,6 +177,14 @@ const TRANSIENT_ERRORS = [
   'No route to host',
   'Unable to connect to port 22',
   'NoValidConnectionsError',
+  // SSH is up but the engine behind it is not listening yet. Each engine says
+  // this differently and none of them overlaps with the refusals the scripts
+  // raise themselves ("user already exists", "invalid identifier"), which must
+  // still fail on the first attempt.
+  "Can't connect to local MySQL server",
+  'connection to server on socket',
+  'MongoNetworkError',
+  'ECONNREFUSED',
   // 'timed out' covers ssh/paramiko, 'timeout' covers axios' own
   // "timeout of 600000ms exceeded"
   'timed out',
