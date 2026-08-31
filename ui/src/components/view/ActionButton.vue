@@ -96,7 +96,12 @@
         <render-icon v-if="(typeof action.icon === 'string')" :icon="action.icon" />
         <font-awesome-icon v-else :icon="action.icon" />
       </a-button>
-      <a-dropdown v-if="showSubMenu(action)" :trigger="['click']">
+      <a-dropdown
+        v-if="action.api in $store.getters.apis && showSubMenu(action) && (
+          (!dataView && action.listView && ('show' in action ? action.show(resource, $store.getters) : true)) ||
+          (dataView && action.dataView && ('show' in action ? action.show(resource, $store.getters) : true))
+        )"
+        :trigger="['click']">
         <template #overlay>
           <a-menu>
             <a-menu-item
