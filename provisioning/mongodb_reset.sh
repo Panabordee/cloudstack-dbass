@@ -12,6 +12,21 @@ if [[ ! "$db_user" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]]; then
   exit 1
 fi
 
+# The rotation service rewrites this file after changing the password inside
+# mongod, and there is a window where mongod already has the new password while
+# the file still holds the old one. Wait for the marker it writes on success:
+# no marker means the rotation never finished, and the file would still carry
+# the password every image built from this template ships with.
+MARKER=/var/lib/dbaas/admin-password-rotated
+for _ in $(seq 1 60); do
+  [[ -e "$MARKER" ]] && break
+  sleep 2
+done
+if [[ ! -e "$MARKER" ]]; then
+  echo "admin password rotation has not completed on this instance" >&2
+  exit 1
+fi
+
 ADMIN_CRED_FILE="/opt/dbaas/admin_credentials.json"
 if [[ ! -r "$ADMIN_CRED_FILE" ]]; then
   echo "admin credentials file missing or unreadable: $ADMIN_CRED_FILE" >&2
