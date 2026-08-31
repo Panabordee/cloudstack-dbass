@@ -68,4 +68,11 @@ public class ReverseProxyHostDaoImpl extends GenericDaoBase<ReverseProxyHostVO, 
         final Integer count = getCount(sc);
         return count != null ? count : 0;
     }
+
+    @Override
+    public List<ReverseProxyHostVO> listByDomainId(final long domainId) {
+        final SearchCriteria<ReverseProxyHostVO> sc = DomainIdSearch.create();
+        sc.setParameters("reverse_proxy_domain_id", domainId);
+        return listBy(sc);
+    }
 }

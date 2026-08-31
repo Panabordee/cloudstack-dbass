@@ -29,6 +29,8 @@ import systemVms from '@/config/section/infra/systemVms'
 import routers from '@/config/section/infra/routers'
 import ilbvms from '@/config/section/infra/ilbvms'
 import managementServers from '@/config/section/infra/managementServers'
+import { shallowRef, defineAsyncComponent } from 'vue'
+import { isAdmin } from '@/role'
 
 export default {
   name: 'infra',
@@ -57,6 +59,104 @@ export default {
     routers,
     ilbvms,
     managementServers,
+    {
+      name: 'proxydomains',
+      title: 'label.proxy.domains',
+      icon: 'database-outlined',
+      permission: ['listReverseProxyDomains', 'addReverseProxyDomain'],
+      resourceType: 'ReverseProxyDomain',
+      columns: [
+        'domain',
+        'description',
+        'ispublic',
+        {
+          field: 'accounts',
+          customTitle: 'label.accounts',
+          accounts: (record) => Array.isArray(record.accounts) ? record.accounts.join(', ') : ''
+        },
+        {
+          field: 'networks',
+          customTitle: 'label.networks',
+          networks: (record) => Array.isArray(record.networks) ? record.networks.join(', ') : ''
+        },
+        'proxycount',
+        'created'
+      ],
+      details: ['domain', 'description', 'ispublic', 'npmcertificateid', 'accounts', 'networks', 'proxycount', 'created'],
+      searchFilters: ['keyword'],
+      tabs: [
+        {
+          name: 'details',
+          component: shallowRef(defineAsyncComponent(() => import('@/components/view/DetailsTab.vue')))
+        },
+        {
+          name: 'exposedinstances',
+          show: (resource, route, user) => { return isAdmin() },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/network/ReverseProxyDomainHostsTab.vue')))
+        }
+      ],
+      actions: [
+        {
+          api: 'addReverseProxyDomain',
+          icon: 'plus-outlined',
+          label: 'label.add.proxy.domain',
+          listView: true,
+          popup: true,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/network/ReverseProxyDomainForm.vue')))
+        },
+        {
+          api: 'updateReverseProxyDomain',
+          icon: 'edit-outlined',
+          label: 'label.edit',
+          dataView: true,
+          popup: true,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/network/ReverseProxyDomainForm.vue')))
+        },
+        {
+          api: 'deleteReverseProxyDomain',
+          icon: 'delete-outlined',
+          label: 'label.delete.proxy.domain',
+          message: 'message.delete.proxy.domain',
+          dataView: true
+        }
+      ]
+    },
+    {
+      name: 'reverseproxy',
+      title: 'label.reverse.proxy',
+      icon: 'global-outlined',
+      permission: ['listReverseProxyHosts'],
+      columns: [
+        'fqdn',
+        'virtualmachinename',
+        {
+          field: 'backend',
+          customTitle: 'label.proxy.backend',
+          backend: (record) => record.protocol && record.ipaddress ? record.protocol + '://' + record.ipaddress + ':' + record.port : ''
+        },
+        'account',
+        'domain',
+        'state',
+        'created'
+      ],
+      details: ['name', 'fqdn', 'url', 'virtualmachinename', 'ipaddress', 'protocol', 'port', 'state', 'account', 'domain', 'created'],
+      searchFilters: ['keyword'],
+      related: [{
+        name: 'vm',
+        title: 'label.instances',
+        param: 'virtualmachineid'
+      }],
+      actions: [
+        {
+          api: 'deleteInstanceProxy',
+          icon: 'delete-outlined',
+          label: 'label.remove.instance.proxy',
+          message: 'message.remove.instance.proxy',
+          dataView: true,
+          show: (record, store) => { return 'deleteInstanceProxy' in store.apis }
+        }
+      ]
+    },
     {
       name: 'cpusocket',
       title: 'label.cpu.sockets',

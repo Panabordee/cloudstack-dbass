@@ -4226,6 +4226,7 @@
   "label.proxy.domain.placeholder": "e.g. cloud.company.com",
   "label.npmcertificateid": "NPM Certificate ID",
   "label.proxycount": "Proxy Hosts",
+  "label.exposedinstances": "Exposed Instances",
   "label.add.proxy.domain": "Add Proxy Domain",
   "label.delete.proxy.domain": "Delete Proxy Domain",
   "message.proxy.domain.required": "Please enter a domain suffix, for example 'cloud.company.com'",
@@ -4234,7 +4235,7 @@
   "message.proxy.domain.accounts": "Accounts granted access to this domain suffix.",
   "message.proxy.domain.networks": "Shared networks granted access to this domain suffix. Instances attached to these networks can be exposed on it.",
   "message.proxy.domain.none.available": "No domain suffix is available for this instance, please ask your administrator for access",
-  "message.delete.proxy.domain": "Please confirm that you want to delete this proxy domain suffix. Only domain suffixes without proxy hosts can be deleted.",
+  "message.delete.proxy.domain": "Please confirm that you want to delete this proxy domain suffix? All exposed instances (proxy hosts) on this domain suffix will also be removed from the reverse proxy server.",
   "message.success.add.proxy.domain": "The proxy domain suffix has been added",
   "message.success.update.proxy.domain": "The proxy domain suffix has been updated"
 }

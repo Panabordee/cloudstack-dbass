@@ -632,11 +632,25 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
             throw new CloudRuntimeException("The reverse proxy integration is disabled");
         }
         final ReverseProxyDomainVO domain = getDomainByIdOrThrow(id);
-        final long proxyCount = reverseProxyHostDao.countByDomainId(domain.getId());
-        if (proxyCount > 0) {
-            throw new InvalidParameterValueException(String.format(
-                    "The domain suffix '%s' still has %d proxy hosts, please remove them before deleting the domain suffix",
-                    domain.getDomain(), proxyCount));
+        final List<ReverseProxyHostVO> proxies = reverseProxyHostDao.listByDomainId(domain.getId());
+        if (!proxies.isEmpty()) {
+            logger.info(String.format("Deleting %d proxy hosts still exposed on the reverse proxy domain suffix %s (id=%s)",
+                    proxies.size(), domain.getDomain(), domain.getUuid()));
+            final NpmClient client = isConfigured() ? getClient() : null;
+            for (final ReverseProxyHostVO proxy : proxies) {
+                if (client != null) {
+                    try {
+                        client.deleteProxyHost(proxy.getNpmProxyHostId());
+                    } catch (final Exception e) {
+                        logger.error(String.format("Failed to delete proxy host %s (npm id=%s) from the Nginx Proxy Manager while "
+                                + "deleting the reverse proxy domain suffix %s, please remove it manually",
+                                proxy.getFqdn(), proxy.getNpmProxyHostId(), domain.getDomain()), e);
+                    }
+                }
+                reverseProxyHostDao.remove(proxy.getId());
+                logger.info(String.format("Deleted instance proxy %s while deleting the reverse proxy domain suffix %s (id=%s)",
+                        proxy.getFqdn(), domain.getDomain(), domain.getUuid()));
+            }
         }
         for (final ReverseProxyDomainMapVO map : reverseProxyDomainMapDao.listByDomainId(domain.getId())) {
             reverseProxyDomainMapDao.remove(map.getId());

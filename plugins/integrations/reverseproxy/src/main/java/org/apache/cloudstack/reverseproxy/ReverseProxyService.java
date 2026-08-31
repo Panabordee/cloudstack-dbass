@@ -140,7 +140,7 @@ public interface ReverseProxyService extends PluggableService {
             List<Long> accountIds, List<Long> networkIds);
 
     /**
-     * Deletes a reverse proxy domain suffix, only possible when no proxy hosts exist on the suffix anymore
+     * Deletes a reverse proxy domain suffix and all proxy hosts exposed on it
      * @param id the id of the domain suffix
      */
     void deleteReverseProxyDomain(Long id);
