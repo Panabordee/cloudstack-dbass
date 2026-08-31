@@ -331,9 +331,6 @@ public class TemplateManagerImpl extends ManagerBase implements TemplateManager,
 
     protected boolean backupSnapshotAfterTakingSnapshot = SnapshotInfo.BackupSnapshotAfterTakingSnapshot.value();
 
-    @Inject
-    private UserDataDao userDataDao;
-
     private TemplateAdapter getAdapter(HypervisorType type) {
         TemplateAdapter adapter = null;
         if (type == HypervisorType.BareMetal) {
