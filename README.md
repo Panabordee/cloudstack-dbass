@@ -197,3 +197,7 @@ The following provides more details on the included cryptographic software:
 ## Contributors
 
 [![Apache CloudStack Contributors](https://contrib.rocks/image?repo=apache/cloudstack&anon=0&max=500)](https://github.com/apache/cloudstack/graphs/contributors)
+
+## Building this branch
+
+See [BUILD-DBAAS.md](BUILD-DBAAS.md) for the DBaaS build steps and gotchas.
