@@ -11,7 +11,7 @@ if [[ -z "$SCRIPT_NAME" && -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
   SCRIPT_NAME="$(awk '{print $NF}' <<< "$SSH_ORIGINAL_COMMAND")"
 fi
 
-ALLOWED="mysql.sh postgresql.sh mongodb.sh"
+ALLOWED="mysql.sh postgresql.sh mongodb.sh mysql_reset.sh postgresql_reset.sh mongodb_reset.sh"
 DBAAS_DIR="/opt/dbaas"
 
 if [[ -z "$SCRIPT_NAME" ]]; then

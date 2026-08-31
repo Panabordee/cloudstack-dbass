@@ -67,6 +67,9 @@ def main():
     if action_name == "create_database":
         from actions.create_database import run as run_create_database
         result = run_create_database(payload, config)
+    elif action_name == "reset_password":
+        from actions.reset_database_password import run as run_reset_password
+        result = run_reset_password(payload, config)
     else:
         result = {"status": "failed", "message": f"unknown action: {action_name}"}
 

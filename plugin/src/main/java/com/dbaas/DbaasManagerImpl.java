@@ -40,11 +40,15 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     @Inject
     private EntityManager _entityMgr;
 
-    @Override
-    public DbaasResponse createDatabase(CreateDatabaseCmd cmd) {
-        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, cmd.getVirtualMachineId());
+    /**
+     * Runs one extension.py action against a VM and hands back the connection
+     * details it reported. Both API commands go through here so the payload
+     * shape and the failure handling stay in one place.
+     */
+    private JsonObject runExtensionAction(String actionName, Long vmId, JsonObject parameters) {
+        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
         if (vm == null) {
-            throw new InvalidParameterValueException("VM not found: " + cmd.getVirtualMachineId());
+            throw new InvalidParameterValueException("VM not found: " + vmId);
         }
         VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
         String templateName = template != null ? template.getName() : null;
@@ -55,9 +59,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         vmDetails.addProperty("templatename", templateName);
         JsonObject externalDetails = new JsonObject();
         externalDetails.add("virtualmachine", vmDetails);
-        JsonObject parameters = new JsonObject();
-        parameters.addProperty("db_name", cmd.getDbName());
-        parameters.addProperty("db_username", cmd.getDbUsername());
 
         JsonObject payload = new JsonObject();
         payload.addProperty("virtualmachineid", vm.getUuid());
@@ -76,7 +77,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             // overload is the supported one.
             Script script = new Script("python3", Duration.standardSeconds(timeoutSeconds), logger);
             script.add(DbaasExtensionPath.value());
-            script.add("create_database");
+            script.add(actionName);
             script.add(payloadFile.getAbsolutePath());
             script.add(String.valueOf(timeoutSeconds));
 
@@ -90,17 +91,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             if (!"success".equals(result.get("status").getAsString())) {
                 throw new CloudRuntimeException("dbaas provisioning reported failure: " + result);
             }
-            JsonObject details = JsonParser.parseString(result.get("message").getAsString()).getAsJsonObject();
-
-            DbaasResponse response = new DbaasResponse();
-            response.setEngine(details.get("engine").getAsString());
-            response.setHost(details.get("host").getAsString());
-            response.setPort(details.get("port").getAsInt());
-            response.setDatabase(details.get("database").getAsString());
-            response.setUsername(details.get("username").getAsString());
-            response.setPassword(details.get("password").getAsString());
-            response.setObjectName("dbaas");
-            return response;
+            return JsonParser.parseString(result.get("message").getAsString()).getAsJsonObject();
         } catch (IOException e) {
             throw new CloudRuntimeException("failed to write dbaas payload file", e);
         } finally {
@@ -113,9 +104,48 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     }
 
     @Override
+    public DbaasResponse createDatabase(CreateDatabaseCmd cmd) {
+        JsonObject parameters = new JsonObject();
+        parameters.addProperty("db_name", cmd.getDbName());
+        parameters.addProperty("db_username", cmd.getDbUsername());
+
+        JsonObject details = runExtensionAction("create_database", cmd.getVirtualMachineId(), parameters);
+
+        DbaasResponse response = new DbaasResponse();
+        response.setEngine(details.get("engine").getAsString());
+        response.setHost(details.get("host").getAsString());
+        response.setPort(details.get("port").getAsInt());
+        response.setDatabase(details.get("database").getAsString());
+        response.setUsername(details.get("username").getAsString());
+        response.setPassword(details.get("password").getAsString());
+        response.setObjectName("dbaas");
+        return response;
+    }
+
+    @Override
+    public DbaasResponse resetDatabasePassword(ResetDatabasePasswordCmd cmd) {
+        JsonObject parameters = new JsonObject();
+        parameters.addProperty("db_username", cmd.getDbUsername());
+
+        JsonObject details = runExtensionAction("reset_password", cmd.getVirtualMachineId(), parameters);
+
+        // A reset does not name a database: the user keeps whatever it already
+        // had access to, so that field stays unset rather than guessed at.
+        DbaasResponse response = new DbaasResponse();
+        response.setEngine(details.get("engine").getAsString());
+        response.setHost(details.get("host").getAsString());
+        response.setPort(details.get("port").getAsInt());
+        response.setUsername(details.get("username").getAsString());
+        response.setPassword(details.get("password").getAsString());
+        response.setObjectName("dbaas");
+        return response;
+    }
+
+    @Override
     public List<Class<?>> getCommands() {
         List<Class<?>> cmdList = new ArrayList<>();
         cmdList.add(CreateDatabaseCmd.class);
+        cmdList.add(ResetDatabasePasswordCmd.class);
         return cmdList;
     }
 
