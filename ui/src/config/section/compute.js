@@ -109,7 +109,29 @@ export default {
           docHelp: 'adminguide/virtual_machines.html#creating-vms',
           listView: true,
           show: isZoneCreated,
-          component: () => import('@/views/compute/DeployVM.vue')
+          component: () => import('@/views/compute/DeployVM.vue'),
+          // Both entries create an instance, so they share one button rather
+          // than sitting next to each other as two unrelated icons. With only
+          // one of them reachable the menu collapses back to a plain button.
+          subActions: [
+            {
+              api: 'deployVirtualMachine',
+              icon: 'cloud-server-outlined',
+              label: 'label.instance',
+              listView: true,
+              show: isZoneCreated,
+              component: () => import('@/views/compute/DeployVM.vue')
+            },
+            {
+              api: 'createDatabase',
+              icon: 'database-outlined',
+              label: 'label.create.database.instance',
+              listView: true,
+              popup: true,
+              show: isZoneCreated,
+              component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
+            }
+          ]
         },
         {
           api: 'updateVirtualMachine',
@@ -407,6 +429,34 @@ export default {
           show: (record) => { return record.hypervisor !== 'External' && ['Stopped'].includes(record.state) && record.vmtype !== 'sharedfsvm' },
           popup: true,
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetUserData')))
+        },
+        {
+          api: 'createDatabase',
+          icon: 'database-outlined',
+          label: 'label.create.database',
+          message: 'message.desc.create.database',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running'].includes(record.state) &&
+              (record.templatename || '').startsWith('dbaas-')
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabase.vue')))
+        },
+        {
+          api: 'resetDatabasePassword',
+          icon: 'key-outlined',
+          label: 'label.reset.database.password',
+          message: 'message.desc.reset.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running'].includes(record.state) &&
+              (record.templatename || '').startsWith('dbaas-')
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
         },
         {
           api: 'assignVirtualMachine',

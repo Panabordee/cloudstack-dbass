@@ -57,7 +57,7 @@
         class="button-action-badge"
         :overflowCount="9"
         :count="actionBadge[action.api] ? actionBadge[action.api].badgeNum : 0"
-        v-if="action.api in $store.getters.apis &&
+        v-if="action.api in $store.getters.apis && !showSubMenu(action) &&
           action.showBadge && (
             (!dataView && ((action.listView && ('show' in action ? action.show(resource, $store.getters) : true)) || (action.groupAction && selectedRowKeys.length > 0 && ('groupShow' in action ? action.groupShow(selectedItems, $store.getters) : true)))) ||
             (dataView && action.dataView && ('show' in action ? action.show(resource, $store.getters) : true))
@@ -78,7 +78,7 @@
         </a-button>
       </a-badge>
       <a-button
-        v-if="action.api in $store.getters.apis &&
+        v-if="action.api in $store.getters.apis && !showSubMenu(action) &&
           !action.showBadge && (
             (!dataView && ((action.listView && ('show' in action ? action.show(resource, $store.getters) : true)) || (action.groupAction && selectedRowKeys.length > 0 && ('groupShow' in action ? action.groupShow(selectedItems, $store.getters) : true)))) ||
             (dataView && action.dataView && ('show' in action ? action.show(resource, $store.getters) : true))
@@ -96,6 +96,36 @@
         <render-icon v-if="(typeof action.icon === 'string')" :icon="action.icon" />
         <font-awesome-icon v-else :icon="action.icon" />
       </a-button>
+      <a-dropdown
+        v-if="action.api in $store.getters.apis && showSubMenu(action) && (
+          (!dataView && action.listView && ('show' in action ? action.show(resource, $store.getters) : true)) ||
+          (dataView && action.dataView && ('show' in action ? action.show(resource, $store.getters) : true))
+        )"
+        :trigger="['click']">
+        <template #overlay>
+          <a-menu>
+            <a-menu-item
+              v-for="(subAction, subIndex) in accessibleSubActions(action)"
+              :key="subIndex"
+              @click="execAction(subAction)">
+              <render-icon
+                v-if="(typeof subAction.icon === 'string')"
+                :icon="subAction.icon"
+                style="margin-right: 5px" />
+              <font-awesome-icon v-else :icon="subAction.icon" style="margin-right: 5px" />
+              {{ $t(subAction.label) }}
+            </a-menu-item>
+          </a-menu>
+        </template>
+        <a-button
+          type="primary"
+          shape="round"
+          style="margin-left: 5px"
+          :size="size">
+          {{ $t(action.label) }}
+          <down-outlined />
+        </a-button>
+      </a-dropdown>
     </a-tooltip>
   </span>
 </template>
@@ -175,6 +205,22 @@ export default {
     }
   },
   methods: {
+    // Sub-actions are gated exactly like top-level ones: the API has to be in
+    // the caller's allowed set before it is offered, so a user who cannot call
+    // it never sees the entry instead of finding out when they click it.
+    accessibleSubActions (action) {
+      if (!action.subActions) {
+        return []
+      }
+      return action.subActions.filter(subAction =>
+        subAction.api in this.$store.getters.apis &&
+        ('show' in subAction ? subAction.show(this.resource, this.$store.getters) : true))
+    },
+    // One reachable choice is not a menu; fall back to the plain button so the
+    // extra click only appears when there is something to choose between.
+    showSubMenu (action) {
+      return this.accessibleSubActions(action).length > 1
+    },
     execAction (action) {
       action.resource = this.resource
       if (action.docHelp) {

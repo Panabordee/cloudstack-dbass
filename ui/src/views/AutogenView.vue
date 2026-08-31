@@ -1310,8 +1310,13 @@ export default {
       if ('action' in this.$route.query) {
         const actionName = this.$route.query.action
         for (const action of this.actions) {
-          if (action.listView && action.api === actionName) {
-            this.execAction(action, false)
+          // An action grouped under a menu is still reachable by name, so a
+          // link that names it opens the same dialog the menu entry does.
+          const match = action.listView && action.api === actionName
+            ? action
+            : (action.subActions || []).find(sub => sub.listView && sub.api === actionName)
+          if (match) {
+            this.execAction(match, false)
             const query = Object.assign({}, this.$route.query)
             delete query.action
             this.$router.replace({ query })
