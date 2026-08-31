@@ -166,6 +166,8 @@ const TRANSIENT_ERRORS = [
   // sshd is not listening yet, or the guest has not brought the NIC up
   'Connection refused',
   'No route to host',
+  'Unable to connect to port 22',
+  'NoValidConnectionsError',
   // 'timed out' covers ssh/paramiko, 'timeout' covers axios' own
   // "timeout of 600000ms exceeded"
   'timed out',
@@ -192,7 +194,10 @@ export default {
       failureMessage: '',
       deployedVmId: null,
       attempt: 0,
-      maxAttempts: 5,
+      // A fresh instance needs about 48s before sshd answers, and each failed
+      // attempt burns ~15s of connect timeout on top of the delay, so eight
+      // attempts cover roughly three minutes of slow boot.
+      maxAttempts: 8,
       retryDelayMs: 10000
     }
   },
