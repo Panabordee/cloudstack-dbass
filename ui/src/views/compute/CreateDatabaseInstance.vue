@@ -75,6 +75,15 @@
             <a-select-option v-for="n in networks" :key="n.id" :label="n.name">{{ n.name }}</a-select-option>
           </a-select>
         </a-form-item>
+        <a-form-item name="keypair" ref="keypair" :label="$t('label.keypair')" v-if="showKeyPairs">
+          <a-select
+            v-model:value="form.keypair"
+            allowClear
+            :loading="keyPairLoading"
+            :placeholder="$t('label.keypair')">
+            <a-select-option v-for="k in keyPairs" :key="k" :label="k">{{ k }}</a-select-option>
+          </a-select>
+        </a-form-item>
         <a-form-item name="name" ref="name" :label="$t('label.name')">
           <a-input v-model:value="form.name" :placeholder="$t('label.name')" />
         </a-form-item>
@@ -190,6 +199,8 @@ export default {
       zones: [],
       offerings: [],
       networks: [],
+      keyPairs: [],
+      keyPairLoading: false,
       credentials: {},
       failureMessage: '',
       deployedVmId: null,
@@ -207,6 +218,9 @@ export default {
       if (this.step === 'deploying' || this.step === 'provisioning') return 1
       return 2
     },
+    showKeyPairs () {
+      return 'listSSHKeyPairs' in this.$store.getters.apis
+    },
     needsNetwork () {
       const zone = this.zones.find(z => z.id === this.form.zoneid)
       return !!zone && zone.networktype !== 'Basic'
@@ -218,6 +232,7 @@ export default {
   created () {
     this.initForm()
     this.fetchOptions()
+    this.fetchKeyPairs()
   },
   methods: {
     initForm () {
@@ -280,6 +295,19 @@ export default {
         this.networkLoading = false
       })
     },
+    fetchKeyPairs () {
+      if (!this.showKeyPairs) {
+        return
+      }
+      this.keyPairLoading = true
+      getAPI('listSSHKeyPairs', {}).then(json => {
+        this.keyPairs = (json.listsshkeypairsresponse.sshkeypair || []).map(k => k.name)
+      }).catch(error => {
+        this.$notifyError(error)
+      }).finally(() => {
+        this.keyPairLoading = false
+      })
+    },
     errorText (error) {
       const data = error?.response?.data
       if (data) {
@@ -303,6 +331,11 @@ export default {
         }
         if (values.name) {
           params.name = values.name
+        }
+        // deployVirtualMachine takes both `keypair` and `keypairs`; the standard
+        // Add Instance wizard sends `keypairs`, so match it.
+        if (values.keypair) {
+          params.keypairs = values.keypair
         }
         // Basic zones reject networkids outright, so it is only sent when the
         // selected zone actually needs one.
