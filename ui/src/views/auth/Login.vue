@@ -16,7 +16,7 @@
 // under the License.
 
 <template>
-  <div class="login-container">
+  <div class="login-container" :class="{ dark: darkMode }">
     <!-- Left Side - Image Only -->
     <div class="login-image-container">
       <div class="image-overlay"></div>
@@ -24,6 +24,28 @@
 
     <!-- Right Side - Login Form -->
     <div class="login-form-container">
+      <a-tooltip :title="darkMode ? $t('label.light.mode') : $t('label.dark.mode')">
+        <a-button class="theme-toggle" type="text" @click="toggleDarkMode">
+          <svg
+v-if="!darkMode"
+viewBox="0 0 24 24"
+width="18"
+height="18"
+fill="currentColor"
+            aria-hidden="true">
+            <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+          </svg>
+          <svg
+v-else
+viewBox="0 0 24 24"
+width="18"
+height="18"
+fill="currentColor"
+            aria-hidden="true">
+            <path d="M12 7c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58a.996.996 0 0 0-1.41 0a.996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0s.39-1.03 0-1.41L5.99 4.58zm12.37 12.37a.996.996 0 0 0-1.41 0a.996.996 0 0 0 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0a.996.996 0 0 0 0-1.41l-1.06-1.06zm1.06-10.96a.996.996 0 0 0 0-1.41a.996.996 0 0 0-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06zM7.05 18.36a.996.996 0 0 0 0-1.41a.996.996 0 0 0-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41s1.03.39 1.41 0l1.06-1.06z"/>
+          </svg>
+        </a-button>
+      </a-tooltip>
       <div class="login-form-wrapper">
         <div class="login-header">
           <img :src="logo" alt="Logo" class="brand-logo" />
@@ -45,6 +67,7 @@
               class="domain-select"
               v-model:value="form.domain"
               :options="domainOptions"
+              :dropdownClassName="darkMode ? 'domain-dropdown-dark' : undefined"
               :filter-option="false"
               backfill
               @search="onDomainSearch"
@@ -231,7 +254,7 @@ import { getAPI, postAPI } from '@/api'
 import store from '@/store'
 import { mapActions } from 'vuex'
 import { sourceToken } from '@/utils/request'
-import { SERVER_MANAGER, LAST_SELECTED_DOMAIN } from '@/store/mutation-types'
+import { SERVER_MANAGER, LAST_SELECTED_DOMAIN, LOGIN_THEME } from '@/store/mutation-types'
 import { setStore, getStore } from '@/utils/storage'
 import TranslationMenu from '@/components/header/TranslationMenu'
 
@@ -242,6 +265,7 @@ export default {
   data () {
     return {
       idps: [],
+      darkMode: false,
       customActiveKey: 'cs',
       customActiveKeyOauth: false,
       loginBtn: false,
@@ -336,6 +360,7 @@ export default {
     }
   },
   created () {
+    this.initTheme()
     if (this.$config.multipleServer) {
       this.server = this.$localStorage.get(SERVER_MANAGER) || this.$config.servers[0]
     }
@@ -352,6 +377,31 @@ export default {
   },
   methods: {
     ...mapActions(['Login', 'Logout', 'OauthLogin']),
+    initTheme () {
+      const stored = this.$localStorage.get(LOGIN_THEME)
+      if (stored === 'dark' || stored === 'light') {
+        this.darkMode = stored === 'dark'
+        return
+      }
+      // no explicit choice yet, follow the browser setting
+      const query = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)')
+      if (!query) {
+        return
+      }
+      this.darkMode = query.matches
+      const handler = (e) => {
+        if (!this.$localStorage.get(LOGIN_THEME)) {
+          this.darkMode = e.matches
+        }
+      }
+      if (query.addEventListener) {
+        query.addEventListener('change', handler)
+      }
+    },
+    toggleDarkMode () {
+      this.darkMode = !this.darkMode
+      this.$localStorage.set(LOGIN_THEME, this.darkMode ? 'dark' : 'light')
+    },
     initForm () {
       this.formRef = ref()
       const savedDomain = getStore(LAST_SELECTED_DOMAIN)
@@ -712,7 +762,6 @@ html, body {
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  background-color: #1890ff;
   min-height: 100vh;
 
   @media (max-width: 768px) {
@@ -739,10 +788,30 @@ html, body {
   padding: 40px;
   background: #ffffff;
   min-height: 100vh;
+  position: relative;
 
   @media (max-width: 768px) {
     min-height: auto;
     padding: 40px 24px;
+  }
+}
+
+.theme-toggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  color: #8c8c8c;
+
+  &:hover {
+    color: #1890ff;
+    background: rgba(0, 0, 0, 0.04);
   }
 }
 
@@ -1004,6 +1073,156 @@ html, body {
       height: 1px;
       background: #d9d9d9;
     }
+  }
+}
+
+.login-container.dark {
+  background: #141414;
+
+  .login-form-container {
+    background: #141414;
+  }
+
+  .theme-toggle {
+    color: rgba(255, 255, 255, 0.65);
+
+    &:hover {
+      color: #40a9ff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+  }
+
+  .field-label {
+    color: rgba(255, 255, 255, 0.65);
+  }
+
+  .login-footer {
+    border-top-color: #303030;
+    color: rgba(255, 255, 255, 0.45);
+
+    :deep(a) {
+      color: #40a9ff;
+
+      &:hover {
+        color: #69c0ff;
+      }
+    }
+  }
+
+  .forgot-password-link {
+    color: #40a9ff;
+
+    &:hover {
+      color: #69c0ff;
+    }
+  }
+
+  .or {
+    color: rgba(255, 255, 255, 0.45);
+
+    &::before,
+    &::after {
+      background: #424242;
+    }
+  }
+
+  .user-layout-login {
+    :deep(.ant-tabs-tab) {
+      color: rgba(255, 255, 255, 0.65);
+
+      &:hover {
+        color: #40a9ff;
+      }
+
+      &.ant-tabs-tab-active {
+        .ant-tabs-tab-btn {
+          color: #1890ff;
+        }
+      }
+    }
+
+    :deep(.ant-input-affix-wrapper),
+    :deep(.ant-input) {
+      background: #1f1f1f;
+      border-color: #424242;
+      color: rgba(255, 255, 255, 0.85);
+
+      &::placeholder {
+        color: rgba(255, 255, 255, 0.3);
+      }
+
+      &:hover {
+        border-color: #40a9ff;
+      }
+    }
+
+    :deep(.ant-input-affix-wrapper) {
+      .ant-input-prefix,
+      .ant-input-suffix {
+        color: rgba(255, 255, 255, 0.45);
+      }
+    }
+
+    :deep(.ant-select) {
+      .ant-select-selector {
+        background: #1f1f1f !important;
+        border-color: #424242 !important;
+      }
+
+      .ant-select-selection-item {
+        color: rgba(255, 255, 255, 0.85);
+      }
+
+      .ant-select-arrow {
+        color: rgba(255, 255, 255, 0.45);
+      }
+    }
+
+    :deep(.ant-btn-default) {
+      background: #1f1f1f;
+      border-color: #424242;
+      color: rgba(255, 255, 255, 0.85);
+
+      &:hover,
+      &:focus {
+        border-color: #40a9ff;
+        color: #40a9ff;
+      }
+    }
+  }
+}
+</style>
+
+<style lang="less">
+// The domain autocomplete dropdown is rendered in a portal attached to <body>,
+// outside the login container, so it cannot be themed by the scoped block above.
+// !important is used deliberately: the app's global dark-mode theme ships its own
+// dropdown hover rules with !important, and antd's own rules would otherwise win.
+.ant-select-dropdown.domain-dropdown-dark {
+  background-color: #1f1f1f !important;
+
+  .ant-select-item {
+    color: rgba(255, 255, 255, 0.85) !important;
+  }
+
+  .ant-select-item:hover,
+  .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+    background: rgba(255, 255, 255, 0.08) !important;
+    color: rgba(255, 255, 255, 0.85) !important;
+  }
+
+  .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+    background: rgba(24, 144, 255, 0.15) !important;
+    color: #40a9ff !important;
+
+    &:hover {
+      background: rgba(24, 144, 255, 0.25) !important;
+      color: #69c0ff !important;
+    }
+  }
+
+  .ant-empty-description {
+    color: rgba(255, 255, 255, 0.45) !important;
   }
 }
 </style>
