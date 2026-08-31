@@ -5,6 +5,8 @@ UI (Extensions Framework, CloudStack >= 4.22) on an already-deployed VM,
 provisions MySQL / PostgreSQL / MongoDB on it, and hands the caller back a
 connection string + generated credentials.
 
+> **Installing?** See [INSTALL.md](INSTALL.md) — what it adds, what it needs, and the steps.
+
 ## How the flow actually works (important)
 
 CloudStack's Extensions Framework runs **custom actions against an existing
