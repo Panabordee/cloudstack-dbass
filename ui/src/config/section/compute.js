@@ -106,16 +106,29 @@ export default {
           docHelp: 'adminguide/virtual_machines.html#creating-vms',
           listView: true,
           show: isZoneCreated,
-          component: () => import('@/views/compute/DeployVM.vue')
-        },
-        {
-          api: 'createDatabase',
-          icon: 'database-outlined',
-          label: 'label.create.database.instance',
-          listView: true,
-          popup: true,
-          show: isZoneCreated,
-          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
+          component: () => import('@/views/compute/DeployVM.vue'),
+          // Both entries create an instance, so they share one button rather
+          // than sitting next to each other as two unrelated icons. With only
+          // one of them reachable the menu collapses back to a plain button.
+          subActions: [
+            {
+              api: 'deployVirtualMachine',
+              icon: 'cloud-server-outlined',
+              label: 'label.instance',
+              listView: true,
+              show: isZoneCreated,
+              component: () => import('@/views/compute/DeployVM.vue')
+            },
+            {
+              api: 'createDatabase',
+              icon: 'database-outlined',
+              label: 'label.create.database.instance',
+              listView: true,
+              popup: true,
+              show: isZoneCreated,
+              component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
+            }
+          ]
         },
         {
           api: 'updateVirtualMachine',
