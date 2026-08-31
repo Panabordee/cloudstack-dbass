@@ -109,6 +109,15 @@ export default {
           component: () => import('@/views/compute/DeployVM.vue')
         },
         {
+          api: 'createDatabase',
+          icon: 'database-outlined',
+          label: 'label.create.database.instance',
+          listView: true,
+          popup: true,
+          show: isZoneCreated,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
+        },
+        {
           api: 'updateVirtualMachine',
           icon: 'edit-outlined',
           label: 'label.action.edit.instance',
