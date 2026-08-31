@@ -303,6 +303,7 @@ import com.cloud.service.dao.ServiceOfferingDetailsDao;
 import com.cloud.storage.BucketVO;
 import com.cloud.storage.DataStoreRole;
 import com.cloud.storage.DiskOfferingVO;
+import com.cloud.storage.LaunchPermissionVO;
 import com.cloud.storage.ScopeType;
 import com.cloud.storage.Snapshot;
 import com.cloud.storage.SnapshotVO;
@@ -321,6 +322,7 @@ import com.cloud.storage.VolumeVO;
 import com.cloud.storage.dao.BucketDao;
 import com.cloud.storage.dao.DiskOfferingDao;
 import com.cloud.storage.dao.GuestOSDao;
+import com.cloud.storage.dao.LaunchPermissionDao;
 import com.cloud.storage.dao.StoragePoolHostDao;
 import com.cloud.storage.dao.StoragePoolTagsDao;
 import com.cloud.storage.dao.VMTemplateDao;
@@ -376,6 +378,9 @@ public class QueryManagerImpl extends MutualExclusiveIdsManagerBase implements Q
 
     @Inject
     AccountManager accountMgr;
+
+    @Inject
+    protected LaunchPermissionDao launchPermissionDao;
 
     @Inject
     ProjectManager _projectMgr;
@@ -5033,6 +5038,18 @@ public class QueryManagerImpl extends MutualExclusiveIdsManagerBase implements Q
                 accountMgr.checkAccess(caller, null, false, template);
             }
 
+            // if the template/ISO has an explicit permission configuration (launch permission grants),
+            // it is restricted to the owner account, the granted accounts/projects and the root admin,
+            // even if it is flagged as public
+            if (caller.getType() != Account.Type.ADMIN && !Long.valueOf(caller.getId()).equals(template.getAccountId())) {
+                List<LaunchPermissionVO> launchPermissions = launchPermissionDao.findByTemplate(templateId);
+                if (CollectionUtils.isNotEmpty(launchPermissions) &&
+                        launchPermissionDao.findByTemplateAndAccount(templateId, caller.getId()) == null) {
+                    throw new PermissionDeniedException(String.format("Account %s does not have permission to access %s %s",
+                            caller, isIso ? "ISO" : "template", template));
+                }
+            }
+
             // if templateId is specified, then we will just use the id to
             // search and ignore other query parameters
             sc.addAnd("id", SearchCriteria.Op.EQ, templateId);
@@ -5143,10 +5160,34 @@ public class QueryManagerImpl extends MutualExclusiveIdsManagerBase implements Q
             }
         }
 
+        applyLaunchPermissionRestrictions(sc, caller, permittedAccounts);
+
         applyPublicTemplateSharingRestrictions(sc, caller);
 
         return templateChecks(isIso, hypers, tags, name, keyword, hyperType, onlyReady, bootable, zoneId, showDomr, caller,
                 showRemovedTmpl, parentTemplateId, showUnique, templateType, isVnf, forCks, searchFilter, sc);
+    }
+
+    /**
+     * Templates and ISOs that have an explicit permission configuration (launch permission grants added through
+     * updateTemplatePermissions/updateIsoPermissions) are restricted resources: they are only listed to the root admin,
+     * the owner account and the accounts/projects they were granted to. Resources without any explicit permission
+     * configuration keep their current visibility (public resources remain visible to everyone).
+     */
+    protected void applyLaunchPermissionRestrictions(SearchCriteria<TemplateJoinVO> sc, Account caller, List<Account> permittedAccounts) {
+        if (caller.getType() == Account.Type.ADMIN) {
+            logger.trace(String.format("Account [%s] is a root admin. Therefore, it has access to all templates and ISOs.", caller));
+            return;
+        }
+        SearchCriteria<TemplateJoinVO> restrictedSc = _templateJoinDao.createSearchCriteria();
+        restrictedSc.addOr("accountId", SearchCriteria.Op.EQ, caller.getId());
+        if (!permittedAccounts.isEmpty()) {
+            List<Long> permittedAccountIds = permittedAccounts.stream().map(Account::getId).collect(Collectors.toList());
+            restrictedSc.addOr("accountId", SearchCriteria.Op.IN, permittedAccountIds.toArray());
+            restrictedSc.addOr("sharedAccountId", SearchCriteria.Op.IN, permittedAccountIds.toArray());
+        }
+        restrictedSc.addOr("sharedAccountId", SearchCriteria.Op.NULL);
+        sc.addAnd("sharedAccountId", SearchCriteria.Op.SC, restrictedSc);
     }
 
     /**
