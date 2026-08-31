@@ -287,6 +287,7 @@ import com.cloud.configuration.ConfigurationManager;
 import com.cloud.configuration.Resource.ResourceOwnerType;
 import com.cloud.configuration.Resource.ResourceType;
 import com.cloud.configuration.ResourceCount;
+import com.cloud.configuration.Resource;
 import com.cloud.configuration.ResourceLimit;
 import com.cloud.dc.ClusterDetailsDao;
 import com.cloud.dc.ClusterVO;
@@ -618,9 +619,36 @@ public class ApiResponseHelper implements ResponseGenerator, ResourceIdSupport {
             resourceLimitResponse.setMax(limit.getMax());
         }
         resourceLimitResponse.setTag(limit.getTag());
+        populateResourceLimitSource(resourceLimitResponse, limit);
         resourceLimitResponse.setObjectName("resourcelimit");
 
         return resourceLimitResponse;
+    }
+
+    protected void populateResourceLimitSource(ResourceLimitResponse resourceLimitResponse, ResourceLimit limit) {
+        Long ownerId = limit.getOwnerId();
+        Resource.ResourceOwnerType ownerType = limit.getResourceOwnerType();
+        if (ownerType == Resource.ResourceOwnerType.Domain) {
+            resourceLimitResponse.setSource("domain");
+            return;
+        }
+        Account account = ApiDBUtils.findAccountById(ownerId);
+        if (account == null) {
+            resourceLimitResponse.setSource("global_default");
+            return;
+        }
+        if (ApiDBUtils.findExplicitResourceLimit(ownerId, ownerType, limit.getType(), limit.getTag()) != null) {
+            resourceLimitResponse.setSource(account.getType() == Account.Type.PROJECT ? "project" : "account");
+            return;
+        }
+        boolean isProject = account.getType() == Account.Type.PROJECT;
+        Long domainDefault = ApiDBUtils.findDomainDefaultResourceLimit(account.getDomainId(), limit.getType(), isProject);
+        if (domainDefault != null) {
+            resourceLimitResponse.setSource("domain_default");
+            resourceLimitResponse.setDomainDefault(domainDefault);
+        } else {
+            resourceLimitResponse.setSource("global_default");
+        }
     }
 
     @Override

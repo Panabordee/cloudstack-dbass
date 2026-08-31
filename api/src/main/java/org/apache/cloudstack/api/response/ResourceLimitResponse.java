@@ -68,6 +68,14 @@ public class ResourceLimitResponse extends BaseResponse implements ControlledEnt
     @Param(description = "The tag for the resource limit", since = "4.20.0")
     private String tag;
 
+    @SerializedName("source")
+    @Param(description = "Where the effective limit comes from: account, project, domain (explicit domain limit), domain_default or global_default", since = "4.22.0")
+    private String source;
+
+    @SerializedName("domaindefault")
+    @Param(description = "The domain-scoped default limit configured for the owner's domain, if any. For storage types the value is in GiB.", since = "4.22.0")
+    private Long domainDefault;
+
     @Override
     public void setAccountName(String accountName) {
         this.accountName = accountName;
@@ -108,5 +116,13 @@ public class ResourceLimitResponse extends BaseResponse implements ControlledEnt
 
     public void setTag(String tag) {
         this.tag = tag;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
+    }
+
+    public void setDomainDefault(Long domainDefault) {
+        this.domainDefault = domainDefault;
     }
 }

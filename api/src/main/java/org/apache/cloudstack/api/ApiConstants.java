@@ -384,6 +384,7 @@ public class ApiConstants {
     public static final String MAX_MEMORY = "maxmemory";
     public static final String MEMORY_OVERCOMMIT_RATIO = "memoryOvercommitRatio";
     public static final String MESSAGE = "message";
+    public static final String REMOVE = "remove";
     public static final String MIN_CPU_NUMBER = "mincpunumber";
     public static final String MIN_MEMORY = "minmemory";
     public static final String MIGRATION_TYPE = "migrationtype";

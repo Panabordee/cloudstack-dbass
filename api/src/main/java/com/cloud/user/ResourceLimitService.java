@@ -16,12 +16,15 @@
 // under the License.
 package com.cloud.user;
 
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 
 import org.apache.cloudstack.api.response.AccountResponse;
 import org.apache.cloudstack.api.response.DomainResponse;
 import org.apache.cloudstack.framework.config.ConfigKey;
 
+import com.cloud.configuration.Resource;
 import com.cloud.configuration.Resource.ResourceType;
 import com.cloud.configuration.ResourceCount;
 import com.cloud.configuration.ResourceLimit;
@@ -61,6 +64,39 @@ public interface ResourceLimitService {
     static final List<ResourceType> HostTagsSupportingTypes = List.of(ResourceType.user_vm, ResourceType.cpu, ResourceType.memory, ResourceType.gpu);
     static final List<ResourceType> StorageTagsSupportingTypes = List.of(ResourceType.volume, ResourceType.primary_storage);
 
+    String DOMAIN_DEFAULT_KEY_PREFIX = "resource.default";
+    String DOMAIN_DEFAULT_KEY_CATEGORY = "Advanced";
+
+    /**
+     * Domain-scoped default resource limits for accounts. When an account in a domain has no explicit resource limit,
+     * the value of the corresponding key for the account's domain is used; if that is also unset (empty), the
+     * global default (max.account.*) applies. Values are strings: -1 means unlimited, 0 means none allowed and for
+     * storage types the value is in GiB.
+     */
+    Map<ResourceType, ConfigKey<String>> DomainDefaultAccountLimitKeys = buildDomainDefaultLimitKeys(false);
+
+    /**
+     * Domain-scoped default resource limits for projects, analogous to {@link #DomainDefaultAccountLimitKeys}.
+     */
+    Map<ResourceType, ConfigKey<String>> DomainDefaultProjectLimitKeys = buildDomainDefaultLimitKeys(true);
+
+    private static Map<ResourceType, ConfigKey<String>> buildDomainDefaultLimitKeys(final boolean forProjects) {
+        final String owner = forProjects ? "project" : "account";
+        final Map<ResourceType, ConfigKey<String>> keys = new EnumMap<>(ResourceType.class);
+        for (final ResourceType type : ResourceType.values()) {
+            if (forProjects && type == ResourceType.project) {
+                continue; // projects cannot create projects
+            }
+            final String description = String.format("Domain-scoped default limit of resource type %s applied to every %s in the domain " +
+                    "that has no explicit resource limit of this type. If unset, the global default configuration is used. " +
+                    "A value of -1 means unlimited, 0 means no resources of this type are allowed" +
+                    (ResourceType.isStorageType(type) ? ", for storage types the value is in GiB." : "."), type.getName(), owner);
+            keys.put(type, new ConfigKey<>(DOMAIN_DEFAULT_KEY_CATEGORY, String.class,
+                    String.format("%s.%s.%s", DOMAIN_DEFAULT_KEY_PREFIX, owner, type.getName()), "", description, true, ConfigKey.Scope.Domain));
+        }
+        return keys;
+    }
+
     /**
      * Updates an existing resource limit with the specified details. If a limit doesn't exist, will create one.
      *
@@ -77,7 +113,45 @@ public interface ResourceLimitService {
      *
      * @return the updated/created resource limit
      */
-    ResourceLimit updateResourceLimit(Long accountId, Long domainId, Integer resourceType, Long max, String tag);
+    default ResourceLimit updateResourceLimit(Long accountId, Long domainId, Integer resourceType, Long max, String tag) {
+        return updateResourceLimit(accountId, domainId, resourceType, max, tag, false);
+    }
+
+    /**
+     * Updates an existing resource limit with the specified details. If a limit doesn't exist, will create one.
+     * If removeOverride is true, the explicit resource limit of the given account/project and type is removed so
+     * that the account/project inherits the domain default (or global default) limit again; max must be null in
+     * that case and an account or project must be specified.
+     *
+     * @param accountId
+     *            id of the account (or of the project account for project limits)
+     * @param domainId
+     *            id of the domain
+     * @param resourceType
+     *            type of the resource
+     * @param max
+     *            new maximum, ignored when removeOverride is true
+     * @param tag
+     *            tag for the resource type
+     * @param removeOverride
+     *            when true, removes the explicit limit override instead of updating it
+     * @return the updated/created resource limit or null if the explicit limit was removed
+     */
+    ResourceLimit updateResourceLimit(Long accountId, Long domainId, Integer resourceType, Long max, String tag, boolean removeOverride);
+
+    /**
+     * Returns the domain-scoped default limit of the given resource type configured for the given domain, or null
+     * if no domain default is set (the caller should then fall back to the global default configuration).
+     * For storage type resources the returned value is in GiB.
+     */
+    Long findDomainDefaultResourceLimit(Long domainId, ResourceType type, boolean isProject);
+
+    /**
+     * Returns the explicit resource limit row of the given owner (account id - or project account id - or domain id)
+     * for the given resource type and tag, or null if the owner has no explicit limit and therefore inherits from
+     * the domain default (or global default).
+     */
+    Long findExplicitResourceLimit(Long ownerId, Resource.ResourceOwnerType ownerType, ResourceType type, String tag);
 
     /**
      * Updates an existing resource count details for the account/domain

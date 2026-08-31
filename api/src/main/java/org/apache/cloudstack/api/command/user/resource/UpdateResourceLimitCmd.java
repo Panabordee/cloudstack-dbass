@@ -28,6 +28,7 @@ import org.apache.cloudstack.api.response.ResourceLimitResponse;
 import org.apache.cloudstack.context.CallContext;
 
 import com.cloud.configuration.ResourceLimit;
+import com.cloud.exception.InvalidParameterValueException;
 
 @APICommand(name = "updateResourceLimit", description = "Updates resource limits for an account or domain.", responseObject = ResourceLimitResponse.class,
         requestHasSensitiveInfo = false, responseHasSensitiveInfo = false)
@@ -52,6 +53,11 @@ public class UpdateResourceLimitCmd extends BaseCmd {
 
     @Parameter(name = ApiConstants.MAX, type = CommandType.LONG, description = "  Maximum resource limit.")
     private Long max;
+
+    @Parameter(name = ApiConstants.REMOVE, type = CommandType.BOOLEAN, since = "4.22.0",
+            description = "Remove the explicit resource limit of the specified account/project so that it inherits the domain default (or global default) limit again. "
+                + "When true, the max parameter must not be provided and an account or project must be specified.")
+    private Boolean remove;
 
     @Parameter(name = ApiConstants.RESOURCE_TYPE,
                type = CommandType.INTEGER,
@@ -90,6 +96,10 @@ public class UpdateResourceLimitCmd extends BaseCmd {
         return tag;
     }
 
+    public boolean isRemove() {
+        return Boolean.TRUE.equals(remove);
+    }
+
     public Integer getResourceType() {
         return resourceType;
     }
@@ -110,9 +120,18 @@ public class UpdateResourceLimitCmd extends BaseCmd {
 
     @Override
     public void execute() {
-        ResourceLimit result = _resourceLimitService.updateResourceLimit(_accountService.finalyzeAccountId(accountName, domainId, projectId, true), getDomainId(), resourceType, max, getTag());
-        if (result != null || (result == null && max != null && max.longValue() == -1L)) {
-            ResourceLimitResponse response = _responseGenerator.createResourceLimitResponse(result);
+        Long accountId = _accountService.finalyzeAccountId(accountName, domainId, projectId, true);
+        if (isRemove()) {
+            if (max != null) {
+                throw new InvalidParameterValueException("The max parameter must not be provided when remove=true");
+            }
+            if (accountId == null) {
+                throw new InvalidParameterValueException("An account or project must be specified when remove=true; domain limits cannot be removed, only overridden");
+            }
+        }
+        ResourceLimit result = _resourceLimitService.updateResourceLimit(accountId, getDomainId(), resourceType, max, getTag(), isRemove());
+        if (result != null || (result == null && max != null && max.longValue() == -1L) || isRemove()) {
+            ResourceLimitResponse response = result != null ? _responseGenerator.createResourceLimitResponse(result) : new ResourceLimitResponse();
             response.setResponseName(getCommandName());
             this.setResponseObject(response);
         } else {

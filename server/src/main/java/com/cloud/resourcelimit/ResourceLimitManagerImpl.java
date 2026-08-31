@@ -408,15 +408,21 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
             max = limit.getMax();
         } else {
             String resourceTypeName = type.name();
-            // If the account has an no limit set, then return global default account limits
+            // If the account has an no limit set, then return the domain default limit if set, else the global default account limits
             Long value;
             if (account.getType() == Account.Type.PROJECT) {
-                value = projectResourceLimitMap.get(resourceTypeName);
+                value = findDomainDefaultResourceLimit(account.getDomainId(), type, true);
+                if (value == null) {
+                    value = projectResourceLimitMap.get(resourceTypeName);
+                }
             } else {
                 if (StringUtils.isNotEmpty(tag)) {
                     return findCorrectResourceLimitForAccount(account, type, null);
                 }
-                value = accountResourceLimitMap.get(resourceTypeName);
+                value = findDomainDefaultResourceLimit(account.getDomainId(), type, false);
+                if (value == null) {
+                    value = accountResourceLimitMap.get(resourceTypeName);
+                }
             }
             if (value != null) {
                 if (value < 0) { // return unlimit if value is set to negative
@@ -452,12 +458,18 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
         if (limit != null) {
             max = limit;
         } else {
-            // If the account has an no limit set, then return global default account limits
+            // If the account has an no limit set, then return the domain default limit if set, else the global default account limits
             Long value;
             if (account.getType() == Account.Type.PROJECT) {
-                value = projectResourceLimitMap.get(type.getName());
+                value = findDomainDefaultResourceLimit(account.getDomainId(), type, true);
+                if (value == null) {
+                    value = projectResourceLimitMap.get(type.getName());
+                }
             } else {
-                value = accountResourceLimitMap.get(type.getName());
+                value = findDomainDefaultResourceLimit(account.getDomainId(), type, false);
+                if (value == null) {
+                    value = accountResourceLimitMap.get(type.getName());
+                }
             }
             if (value != null) {
                 if (value < 0) { // return unlimit if value is set to negative
@@ -471,6 +483,36 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
         }
 
         return max;
+    }
+
+    @Override
+    public Long findDomainDefaultResourceLimit(Long domainId, ResourceType type, boolean isProject) {
+        if (domainId == null || domainId == Domain.ROOT_DOMAIN) {
+            return null;
+        }
+        ConfigKey<String> key = (isProject ? DomainDefaultProjectLimitKeys : DomainDefaultAccountLimitKeys).get(type);
+        if (key == null) {
+            return null;
+        }
+        String rawValue = key.valueIn(domainId);
+        if (StringUtils.isBlank(rawValue)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(rawValue.trim());
+        } catch (NumberFormatException e) {
+            logger.warn("Ignoring invalid value [{}] configured for [{}] in domain id={}", rawValue, key.key(), domainId);
+            return null;
+        }
+    }
+
+    @Override
+    public Long findExplicitResourceLimit(Long ownerId, ResourceOwnerType ownerType, ResourceType type, String tag) {
+        if (ownerId == null) {
+            return null;
+        }
+        ResourceLimitVO limit = _resourceLimitDao.findByOwnerIdAndTypeAndTag(ownerId, ownerType, type, tag);
+        return limit != null ? limit.getMax() : null;
     }
 
     @Override
@@ -914,13 +956,12 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
 
     @Override
     public ResourceLimitVO updateResourceLimit(Long accountId, Long domainId, Integer typeId, Long max, String tag) {
-        Account caller = CallContext.current().getCallingAccount();
+        return updateResourceLimit(accountId, domainId, typeId, max, tag, false);
+    }
 
-        if (max == null) {
-            max = (long)Resource.RESOURCE_UNLIMITED;
-        } else if (max < Resource.RESOURCE_UNLIMITED) {
-            throw new InvalidParameterValueException("Please specify either '-1' for an infinite limit, or a limit that is at least '0'.");
-        }
+    @Override
+    public ResourceLimitVO updateResourceLimit(Long accountId, Long domainId, Integer typeId, Long max, String tag, boolean removeOverride) {
+        Account caller = CallContext.current().getCallingAccount();
 
         // Map resource type
         ResourceType resourceType = null;
@@ -933,6 +974,16 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
             if (resourceType == null) {
                 throw new InvalidParameterValueException("Please specify valid resource type");
             }
+        }
+
+        if (removeOverride) {
+            return removeResourceLimitOverride(accountId, resourceType, tag, caller);
+        }
+
+        if (max == null) {
+            max = (long)Resource.RESOURCE_UNLIMITED;
+        } else if (max < Resource.RESOURCE_UNLIMITED) {
+            throw new InvalidParameterValueException("Please specify either '-1' for an infinite limit, or a limit that is at least '0'.");
         }
 
         if (StringUtils.isNotEmpty(tag) &&
@@ -1050,6 +1101,50 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
         } else {
             return _resourceLimitDao.persist(new ResourceLimitVO(resourceType, max, ownerId, ownerType, tag));
         }
+    }
+
+    /**
+     * Removes an explicit account/project resource limit override so that the owner inherits the domain default
+     * (or global default) limit again. Domain aggregate limits cannot be removed this way.
+     */
+    protected ResourceLimitVO removeResourceLimitOverride(Long accountId, ResourceType resourceType, String tag, Account caller) {
+        if (accountId == null) {
+            throw new InvalidParameterValueException("Removing a resource limit requires an account or project; domain limits cannot be removed, only overridden");
+        }
+        if (resourceType == null) {
+            throw new InvalidParameterValueException("Please specify valid resource type");
+        }
+        Account account = _entityMgr.findById(Account.class, accountId);
+        if (account == null) {
+            throw new InvalidParameterValueException("Unable to find account " + accountId);
+        }
+        if (account.getId() == Account.ACCOUNT_ID_SYSTEM) {
+            throw new InvalidParameterValueException("Can't remove resource limit of system account");
+        }
+        if ((caller.getAccountId() == accountId) && (_accountMgr.isDomainAdmin(caller.getId()) || caller.getType() == Account.Type.RESOURCE_DOMAIN_ADMIN)) {
+            throw new PermissionDeniedException(String.format("Unable to remove resource limit of their own account %s, permission denied", account));
+        }
+        if (account.getType() == Account.Type.PROJECT) {
+            _accountMgr.checkAccess(caller, AccessType.ModifyProject, true, account);
+        } else {
+            _accountMgr.checkAccess(caller, null, true, account);
+        }
+        _accountMgr.verifyCallerPrivilegeForUserOrAccountOperations(account);
+
+        ResourceLimitVO limit = _resourceLimitDao.findByOwnerIdAndTypeAndTag(accountId, ResourceOwnerType.Account, resourceType, tag);
+        if (limit == null) {
+            logger.debug("No explicit resource limit of type {} for account {} to remove, the owner already inherits the domain default (or global default) limit", resourceType, account);
+            return null;
+        }
+        _resourceLimitDao.remove(limit.getId());
+
+        Long callingUserId = CallContext.current().getCallingUserId();
+        ActionEventUtils.onActionEvent(callingUserId, caller.getAccountId(),
+                caller.getDomainId(), EventTypes.EVENT_RESOURCE_LIMIT_UPDATE,
+                "Resource limit override removed. Resource Type: " + resourceType + ", the owner inherits the domain default (or global default) limit",
+                account.getId(), account.getType() == Account.Type.PROJECT ? ApiCommandResourceType.Project.toString() : ApiCommandResourceType.Account.toString());
+
+        return null;
     }
 
     protected boolean isTaggedResourceCountRecalculationNotNeeded(ResourceType type, List<String> hostTags, List <String> storageTags) {
@@ -2241,7 +2336,7 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
 
     @Override
     public ConfigKey<?>[] getConfigKeys() {
-        return new ConfigKey<?>[] {
+        List<ConfigKey<?>> keys = new ArrayList<>(Arrays.asList(
                 ResourceCountCheckInterval,
                 ResourceReservationCleanupDelay,
                 MaxAccountSecondaryStorage,
@@ -2252,8 +2347,10 @@ public class ResourceLimitManagerImpl extends ManagerBase implements ResourceLim
                 DefaultMaxDomainProjects,
                 DefaultMaxAccountGpus,
                 DefaultMaxDomainGpus,
-                DefaultMaxProjectGpus
-        };
+                DefaultMaxProjectGpus));
+        keys.addAll(DomainDefaultAccountLimitKeys.values());
+        keys.addAll(DomainDefaultProjectLimitKeys.values());
+        return keys.toArray(new ConfigKey<?>[0]);
     }
 
     protected class ResourceCountCheckTask extends ManagedContextRunnable {

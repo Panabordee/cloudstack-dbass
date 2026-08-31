@@ -990,6 +990,14 @@ public class ApiDBUtils {
         return (limit == null) ? s_resourceLimitMgr.findDefaultResourceLimitForDomain(resourceType) : limit;
     }
 
+    public static Long findDomainDefaultResourceLimit(Long domainId, ResourceType type, boolean isProject) {
+        return s_resourceLimitMgr.findDomainDefaultResourceLimit(domainId, type, isProject);
+    }
+
+    public static Long findExplicitResourceLimit(Long ownerId, Resource.ResourceOwnerType ownerType, ResourceType type, String tag) {
+        return s_resourceLimitMgr.findExplicitResourceLimit(ownerId, ownerType, type, tag);
+    }
+
     public static long getResourceCount(ResourceType type, long accountId) {
         AccountVO account = s_accountDao.findById(accountId);
 

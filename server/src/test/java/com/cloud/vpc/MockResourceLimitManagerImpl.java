@@ -27,6 +27,7 @@ import org.apache.cloudstack.api.response.DomainResponse;
 import org.apache.cloudstack.resourcelimit.Reserver;
 import org.springframework.stereotype.Component;
 
+import com.cloud.configuration.Resource;
 import com.cloud.configuration.Resource.ResourceType;
 import com.cloud.configuration.ResourceCount;
 import com.cloud.configuration.ResourceLimit;
@@ -47,6 +48,11 @@ public class MockResourceLimitManagerImpl extends ManagerBase implements Resourc
      */
     @Override
     public ResourceLimit updateResourceLimit(Long accountId, Long domainId, Integer resourceType, Long max, String tag) {
+        return null;
+    }
+
+    @Override
+    public ResourceLimit updateResourceLimit(Long accountId, Long domainId, Integer resourceType, Long max, String tag, boolean removeOverride) {
         return null;
     }
 
@@ -100,6 +106,16 @@ public class MockResourceLimitManagerImpl extends ManagerBase implements Resourc
     @Override
     public long findDefaultResourceLimitForDomain(ResourceType resourceType) {
         return 0;
+    }
+
+    @Override
+    public Long findDomainDefaultResourceLimit(Long domainId, ResourceType type, boolean isProject) {
+        return null;
+    }
+
+    @Override
+    public Long findExplicitResourceLimit(Long ownerId, Resource.ResourceOwnerType ownerType, ResourceType type, String tag) {
+        return null;
     }
 
     @Override

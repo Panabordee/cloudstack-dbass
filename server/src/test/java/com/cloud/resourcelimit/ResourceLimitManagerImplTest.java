@@ -66,6 +66,8 @@ import com.cloud.domain.DomainVO;
 import com.cloud.domain.dao.DomainDao;
 import com.cloud.event.ActionEventUtils;
 import com.cloud.event.EventTypes;
+import com.cloud.exception.InvalidParameterValueException;
+import com.cloud.exception.PermissionDeniedException;
 import com.cloud.exception.ResourceAllocationException;
 import com.cloud.offering.DiskOffering;
 import com.cloud.offering.ServiceOffering;
@@ -1377,5 +1379,158 @@ public class ResourceLimitManagerImplTest {
 
         Assert.assertEquals(EnumSet.allOf(Resource.ResourceType.class).size(), result.size());
         Assert.assertEquals(25L, result.get(0).getMax().longValue());
+    }
+
+    private ConfigKey<String> getDomainDefaultKey(Resource.ResourceType type, boolean isProject) {
+        return (isProject ? ResourceLimitService.DomainDefaultProjectLimitKeys : ResourceLimitService.DomainDefaultAccountLimitKeys).get(type);
+    }
+
+    @Test
+    public void testFindDomainDefaultResourceLimit() throws Exception {
+        ConfigKey<String> cpuKey = getDomainDefaultKey(Resource.ResourceType.cpu, false);
+        ConfigKey<String> projectVmKey = getDomainDefaultKey(Resource.ResourceType.user_vm, true);
+        try {
+            // unset by default
+            Assert.assertNull(resourceLimitManager.findDomainDefaultResourceLimit(2L, Resource.ResourceType.cpu, false));
+            // ROOT domain is never used
+            overrideDefaultConfigValue(cpuKey, "_defaultValue", "5");
+            Assert.assertNull(resourceLimitManager.findDomainDefaultResourceLimit(Domain.ROOT_DOMAIN, Resource.ResourceType.cpu, false));
+            Assert.assertNull(resourceLimitManager.findDomainDefaultResourceLimit(null, Resource.ResourceType.cpu, false));
+            // configured value is returned as-is (no storage conversion here)
+            Assert.assertEquals(Long.valueOf(5L), resourceLimitManager.findDomainDefaultResourceLimit(2L, Resource.ResourceType.cpu, false));
+            // invalid values are ignored
+            overrideDefaultConfigValue(cpuKey, "_defaultValue", "not-a-number");
+            Assert.assertNull(resourceLimitManager.findDomainDefaultResourceLimit(2L, Resource.ResourceType.cpu, false));
+            // project keys are distinct from account keys
+            overrideDefaultConfigValue(projectVmKey, "_defaultValue", "3");
+            Assert.assertEquals(Long.valueOf(3L), resourceLimitManager.findDomainDefaultResourceLimit(2L, Resource.ResourceType.user_vm, true));
+            Assert.assertNull(resourceLimitManager.findDomainDefaultResourceLimit(2L, Resource.ResourceType.user_vm, false));
+            // no key for project type in the project set
+            Assert.assertNull(getDomainDefaultKey(Resource.ResourceType.project, true));
+        } finally {
+            overrideDefaultConfigValue(cpuKey, "_defaultValue", "");
+            overrideDefaultConfigValue(projectVmKey, "_defaultValue", "");
+        }
+    }
+
+    @Test
+    public void testFindCorrectResourceLimitForAccountWithDomainDefault() throws Exception {
+        Long accountId = 2L;
+        Account account = mock(Account.class);
+        when(account.getId()).thenReturn(accountId);
+        when(account.getDomainId()).thenReturn(2L);
+        when(account.getType()).thenReturn(Account.Type.NORMAL);
+        when(accountManager.isRootAdmin(accountId)).thenReturn(false);
+        when(resourceLimitDao.findByOwnerIdAndTypeAndTag(accountId, Resource.ResourceOwnerType.Account, Resource.ResourceType.cpu, null)).thenReturn(null);
+
+        Map<String, Long> accountResourceLimitMap = new HashMap<>();
+        accountResourceLimitMap.put(Resource.ResourceType.cpu.name(), 10L);
+        resourceLimitManager.accountResourceLimitMap = accountResourceLimitMap;
+
+        ConfigKey<String> cpuKey = getDomainDefaultKey(Resource.ResourceType.cpu, false);
+        try {
+            // no domain default configured: fall back to global default
+            Assert.assertEquals(10L, resourceLimitManager.findCorrectResourceLimitForAccount(account, Resource.ResourceType.cpu, null));
+            // domain default wins over the global default
+            overrideDefaultConfigValue(cpuKey, "_defaultValue", "4");
+            Assert.assertEquals(4L, resourceLimitManager.findCorrectResourceLimitForAccount(account, Resource.ResourceType.cpu, null));
+            // -1 means unlimited
+            overrideDefaultConfigValue(cpuKey, "_defaultValue", "-1");
+            Assert.assertEquals(Resource.RESOURCE_UNLIMITED, resourceLimitManager.findCorrectResourceLimitForAccount(account, Resource.ResourceType.cpu, null));
+            // an explicit account limit wins over the domain default
+            overrideDefaultConfigValue(cpuKey, "_defaultValue", "4");
+            ResourceLimitVO explicit = new ResourceLimitVO(Resource.ResourceType.cpu, 2L, accountId, Resource.ResourceOwnerType.Account);
+            when(resourceLimitDao.findByOwnerIdAndTypeAndTag(accountId, Resource.ResourceOwnerType.Account, Resource.ResourceType.cpu, null)).thenReturn(explicit);
+            Assert.assertEquals(2L, resourceLimitManager.findCorrectResourceLimitForAccount(account, Resource.ResourceType.cpu, null));
+            // storage type domain default is converted from GiB to bytes
+            ConfigKey<String> primaryStorageKey = getDomainDefaultKey(Resource.ResourceType.primary_storage, false);
+            overrideDefaultConfigValue(primaryStorageKey, "_defaultValue", "100");
+            Assert.assertEquals(100L * Resource.ResourceType.bytesToGiB,
+                    resourceLimitManager.findCorrectResourceLimitForAccount(account, Resource.ResourceType.primary_storage, null));
+        } finally {
+            overrideDefaultConfigValue(cpuKey, "_defaultValue", "");
+            overrideDefaultConfigValue(getDomainDefaultKey(Resource.ResourceType.primary_storage, false), "_defaultValue", "");
+        }
+    }
+
+    @Test
+    public void testFindCorrectResourceLimitForProjectWithDomainDefault() throws Exception {
+        Long projectId = 3L;
+        Account projectAccount = mock(Account.class);
+        when(projectAccount.getId()).thenReturn(projectId);
+        when(projectAccount.getDomainId()).thenReturn(2L);
+        when(projectAccount.getType()).thenReturn(Account.Type.PROJECT);
+        when(accountManager.isRootAdmin(projectId)).thenReturn(false);
+        when(resourceLimitDao.findByOwnerIdAndTypeAndTag(projectId, Resource.ResourceOwnerType.Account, Resource.ResourceType.user_vm, null)).thenReturn(null);
+
+        Map<String, Long> projectResourceLimitMap = new HashMap<>();
+        projectResourceLimitMap.put(Resource.ResourceType.user_vm.name(), 8L);
+        resourceLimitManager.projectResourceLimitMap = projectResourceLimitMap;
+
+        ConfigKey<String> projectVmKey = getDomainDefaultKey(Resource.ResourceType.user_vm, true);
+        try {
+            // no domain default configured: fall back to the global project default
+            Assert.assertEquals(8L, resourceLimitManager.findCorrectResourceLimitForAccount(projectAccount, Resource.ResourceType.user_vm, null));
+            // project domain default wins over the global project default
+            overrideDefaultConfigValue(projectVmKey, "_defaultValue", "3");
+            Assert.assertEquals(3L, resourceLimitManager.findCorrectResourceLimitForAccount(projectAccount, Resource.ResourceType.user_vm, null));
+            // the account key set must not be used for project accounts
+            overrideDefaultConfigValue(getDomainDefaultKey(Resource.ResourceType.user_vm, false), "_defaultValue", "99");
+            Assert.assertEquals(3L, resourceLimitManager.findCorrectResourceLimitForAccount(projectAccount, Resource.ResourceType.user_vm, null));
+        } finally {
+            overrideDefaultConfigValue(projectVmKey, "_defaultValue", "");
+            overrideDefaultConfigValue(getDomainDefaultKey(Resource.ResourceType.user_vm, false), "_defaultValue", "");
+        }
+    }
+
+    @Test
+    public void testRemoveResourceLimitOverride() {
+        Long accountId = 5L;
+        Account account = mock(Account.class);
+        when(account.getId()).thenReturn(accountId);
+        when(account.getType()).thenReturn(Account.Type.NORMAL);
+        when(entityManager.findById(Account.class, accountId)).thenReturn(account);
+        ResourceLimitVO limit = mock(ResourceLimitVO.class);
+        when(limit.getId()).thenReturn(7L);
+        when(resourceLimitDao.findByOwnerIdAndTypeAndTag(accountId, Resource.ResourceOwnerType.Account, Resource.ResourceType.cpu, null)).thenReturn(limit);
+
+        try (MockedStatic<ActionEventUtils> actionEventUtilsMockedStatic = Mockito.mockStatic(ActionEventUtils.class)) {
+            actionEventUtilsMockedStatic.when(() -> ActionEventUtils.onActionEvent(Mockito.anyLong(), Mockito.anyLong(), Mockito.anyLong(),
+                    Mockito.anyString(), Mockito.anyString(), Mockito.anyLong(), Mockito.anyString())).thenReturn(1L);
+
+            ResourceLimit result = resourceLimitManager.updateResourceLimit(accountId, null, Resource.ResourceType.cpu.getOrdinal(), null, null, true);
+
+            Assert.assertNull(result);
+            Mockito.verify(resourceLimitDao, Mockito.times(1)).remove(7L);
+        }
+    }
+
+    @Test
+    public void testRemoveResourceLimitOverrideWithNoExplicitLimit() {
+        Long accountId = 5L;
+        Account account = mock(Account.class);
+        when(account.getId()).thenReturn(accountId);
+        when(account.getType()).thenReturn(Account.Type.NORMAL);
+        when(entityManager.findById(Account.class, accountId)).thenReturn(account);
+        when(resourceLimitDao.findByOwnerIdAndTypeAndTag(accountId, Resource.ResourceOwnerType.Account, Resource.ResourceType.cpu, null)).thenReturn(null);
+
+        Assert.assertNull(resourceLimitManager.updateResourceLimit(accountId, null, Resource.ResourceType.cpu.getOrdinal(), null, null, true));
+        Mockito.verify(resourceLimitDao, Mockito.never()).remove(Mockito.anyLong());
+    }
+
+    @Test(expected = InvalidParameterValueException.class)
+    public void testRemoveResourceLimitOverrideRequiresAccount() {
+        resourceLimitManager.updateResourceLimit(null, 2L, Resource.ResourceType.cpu.getOrdinal(), null, null, true);
+    }
+
+    @Test(expected = PermissionDeniedException.class)
+    public void testRemoveResourceLimitOverrideOfOwnAccount() {
+        Long callerAccountId = 0L;
+        Account target = mock(Account.class);
+        when(target.getId()).thenReturn(callerAccountId);
+        when(entityManager.findById(Account.class, callerAccountId)).thenReturn(target);
+        when(accountManager.isDomainAdmin(callerAccountId)).thenReturn(true);
+
+        resourceLimitManager.updateResourceLimit(callerAccountId, null, Resource.ResourceType.cpu.getOrdinal(), null, null, true);
     }
 }
