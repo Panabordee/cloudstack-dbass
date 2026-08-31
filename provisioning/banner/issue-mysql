@@ -1,0 +1,5 @@
+DBaaS Instance -- MySQL
+Log in with the SSH key you selected when the instance was created (user: ubuntu).
+Database credentials come from CloudStack, not from this console.
+\4
+

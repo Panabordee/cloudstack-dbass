@@ -128,6 +128,27 @@ primary cache and silently keep the old contents. Either patch
 template and let the storage garbage collector drop the cached copy so the next
 deploy re-copies from secondary. This cost one full debugging cycle.
 
+## What every dbaas-* image carries
+
+Under `/opt/dbaas`:
+
+- `provision.sh` — SSH forced-command entrypoint; its `ALLOWED` list is the
+  only gate on what can be run, so a new engine script is unreachable until it
+  is added there **and** the images are patched.
+- `<engine>.sh` — creates a database + user.
+- `<engine>_reset.sh` — rotates an existing user's password.
+
+Under `/etc`, from `provisioning/banner/`:
+
+- `dbaas-engine` — `DBAAS_ENGINE_NAME` / `DBAAS_ENGINE_PORT` for this image.
+- `update-motd.d/00-dbaas` — prints the banner at SSH login. Ubuntu 24.04 builds
+  the login banner from that directory, so a plain `/etc/motd` ends up buried
+  under the stock Ubuntu output; running first from here is what puts it in
+  front of the user.
+- `motd` — the same text, for anything reading the file directly.
+- `issue` — shown at the console *before* login, which is the only thing a user
+  with no credentials yet can read.
+
 ## Known issues
 
 - **A 10 GB template needs noticeably more headroom than a 6 GB one.** A deploy
@@ -161,6 +182,13 @@ deploy re-copies from secondary. This cost one full debugging cycle.
 
   Raising `ssh_connect_timeout_seconds` masks it at best; size the offering
   properly instead.
+
+- **`mongod` is not listening yet when the deploy job completes.** A freshly
+  deployed `dbaas-mongodb` instance answers SSH before the engine is up, so a
+  `create_database` fired immediately fails with
+  `MongoNetworkError: connect ECONNREFUSED 127.0.0.1:27017`. It is transient —
+  the same call succeeds a minute later — and the UI already retries on it, but
+  a script calling the API directly needs its own retry.
 
 ## Fixed
 
