@@ -140,7 +140,7 @@ export default {
       }
       this.loading = true
       getAPI('listReverseProxyHosts', {
-        domainid: this.resource.id,
+        reverseproxydomainid: this.resource.id,
         listAll: true
       }).then(response => {
         this.proxies = response.listreverseproxyhostsresponse.instanceproxy || []

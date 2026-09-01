@@ -29,6 +29,7 @@ import org.apache.cloudstack.api.ServerApiException;
 import org.apache.cloudstack.api.response.DomainResponse;
 import org.apache.cloudstack.api.response.InstanceProxyResponse;
 import org.apache.cloudstack.api.response.ListResponse;
+import org.apache.cloudstack.api.response.ReverseProxyDomainResponse;
 import org.apache.cloudstack.api.response.UserVmResponse;
 import org.apache.cloudstack.reverseproxy.ReverseProxyService;
 
@@ -53,6 +54,10 @@ public class ListReverseProxyHostsCmd extends BaseListCmd {
             description = "List proxy hosts only for the specified domain")
     private Long domainId;
 
+    @Parameter(name = ApiConstants.REVERSE_PROXY_DOMAIN_ID, type = CommandType.UUID, entityType = ReverseProxyDomainResponse.class,
+            description = "List proxy hosts only for the specified reverse proxy domain suffix")
+    private Long reverseProxyDomainId;
+
     @Parameter(name = ApiConstants.IS_RECURSIVE, type = CommandType.BOOLEAN,
             description = "Defaults to false, but if true, lists the proxy hosts of the specified domain and all its sub-domains")
     private Boolean isRecursive;
@@ -67,6 +72,10 @@ public class ListReverseProxyHostsCmd extends BaseListCmd {
 
     public Long getDomainId() {
         return domainId;
+    }
+
+    public Long getReverseProxyDomainId() {
+        return reverseProxyDomainId;
     }
 
     public Boolean isRecursive() {

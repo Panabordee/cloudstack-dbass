@@ -840,6 +840,7 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         sb.and("vmInstanceId", sb.entity().getVmInstanceId(), SearchCriteria.Op.EQ);
         sb.and("fqdn", sb.entity().getFqdn(), SearchCriteria.Op.LIKE);
         sb.and("domainId", sb.entity().getDomainId(), SearchCriteria.Op.IN);
+        sb.and("reverseProxyDomainId", sb.entity().getReverseProxyDomainId(), SearchCriteria.Op.EQ);
 
         final SearchCriteria<ReverseProxyHostVO> sc = sb.create();
         if (vmId != null) {
@@ -847,6 +848,10 @@ public class ReverseProxyManagerImpl extends ComponentLifecycleBase implements R
         }
         if (StringUtils.isNotBlank(keyword)) {
             sc.setParameters("fqdn", "%" + keyword.trim() + "%");
+        }
+        final Long reverseProxyDomainId = cmd.getReverseProxyDomainId();
+        if (reverseProxyDomainId != null) {
+            sc.setParameters("reverseProxyDomainId", reverseProxyDomainId);
         }
         final List<Long> domainIds = resolveDomainIds(domainId, cmd.isRecursive());
         if (!domainIds.isEmpty()) {

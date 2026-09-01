@@ -453,14 +453,14 @@
                 <div>
                   <div
                     v-for="network in resource.networks"
-                    :key="network.id"
+                    :key="network.id || network"
                     style="margin-top: 5px;">
                     <font-awesome-icon
                       :icon="['fa-solid', 'fa-ethernet']"
                       class="anticon"
                       :style="[$store.getters.darkMode ? { color: 'rgba(255, 255, 255, 0.65)' } : { color: '#888' }]" />
-                    {{ network.name }}
-                    <span v-if="resource.defaultnetworkid === network.id">
+                    {{ network.name || network }}
+                    <span v-if="network.id && resource.defaultnetworkid === network.id">
                       ({{ $t('label.default') }})
                     </span>
                   </div>
