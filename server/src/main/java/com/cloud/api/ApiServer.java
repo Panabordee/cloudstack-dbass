@@ -90,6 +90,7 @@ import org.apache.cloudstack.api.command.admin.storage.ListStoragePoolsCmd;
 import org.apache.cloudstack.api.command.admin.user.ListUsersCmd;
 import org.apache.cloudstack.api.command.user.account.ListAccountsCmd;
 import org.apache.cloudstack.api.command.user.account.ListProjectAccountsCmd;
+import org.apache.cloudstack.api.command.user.announcement.ListAnnouncementsCmd;
 import org.apache.cloudstack.api.command.user.event.ListEventsCmd;
 import org.apache.cloudstack.api.command.user.gui.theme.ListGuiThemesCmd;
 import org.apache.cloudstack.api.command.user.offering.ListDiskOfferingsCmd;
@@ -997,7 +998,8 @@ public class ApiServer extends ManagerBase implements HttpRequestHandler, ApiSer
                 final User user = ApiDBUtils.findUserById(userId);
                 return commandAvailable(remoteAddress, commandName, user);
             } else {
-                if (commandName.equalsIgnoreCase(ListGuiThemesCmd.class.getAnnotation(APICommand.class).name())) {
+                if (commandName.equalsIgnoreCase(ListGuiThemesCmd.class.getAnnotation(APICommand.class).name())
+                        || commandName.equalsIgnoreCase(ListAnnouncementsCmd.class.getAnnotation(APICommand.class).name())) {
                     return true;
                 }
                 // check against every available command to see if the command exists or not

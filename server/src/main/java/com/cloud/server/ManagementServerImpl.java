@@ -403,6 +403,10 @@ import org.apache.cloudstack.api.command.user.firewall.UpdateFirewallRuleCmd;
 import org.apache.cloudstack.api.command.user.firewall.UpdatePortForwardingRuleCmd;
 import org.apache.cloudstack.api.command.user.guest.ListGuestOsCategoriesCmd;
 import org.apache.cloudstack.api.command.user.guest.ListGuestOsCmd;
+import org.apache.cloudstack.api.command.user.announcement.CreateAnnouncementCmd;
+import org.apache.cloudstack.api.command.user.announcement.DeleteAnnouncementCmd;
+import org.apache.cloudstack.api.command.user.announcement.ListAnnouncementsCmd;
+import org.apache.cloudstack.api.command.user.announcement.UpdateAnnouncementCmd;
 import org.apache.cloudstack.api.command.user.gui.theme.CreateGuiThemeCmd;
 import org.apache.cloudstack.api.command.user.gui.theme.ListGuiThemesCmd;
 import org.apache.cloudstack.api.command.user.gui.theme.RemoveGuiThemeCmd;
@@ -4379,6 +4383,10 @@ public class ManagementServerImpl extends MutualExclusiveIdsManagerBase implemen
         cmdList.add(UpdateGuiThemeCmd.class);
         cmdList.add(CreateGuiThemeCmd.class);
         cmdList.add(RemoveGuiThemeCmd.class);
+        cmdList.add(ListAnnouncementsCmd.class);
+        cmdList.add(CreateAnnouncementCmd.class);
+        cmdList.add(UpdateAnnouncementCmd.class);
+        cmdList.add(DeleteAnnouncementCmd.class);
 
         // Out-of-band management APIs for admins
         cmdList.add(EnableOutOfBandManagementForHostCmd.class);

@@ -841,6 +841,11 @@ public class EventTypes {
     public static final String EVENT_GUI_THEME_REMOVE = "GUI.THEME.REMOVE";
     public static final String EVENT_GUI_THEME_UPDATE = "GUI.THEME.UPDATE";
 
+    // Announcement
+    public static final String EVENT_ANNOUNCEMENT_CREATE = "ANNOUNCEMENT.CREATE";
+    public static final String EVENT_ANNOUNCEMENT_REMOVE = "ANNOUNCEMENT.REMOVE";
+    public static final String EVENT_ANNOUNCEMENT_UPDATE = "ANNOUNCEMENT.UPDATE";
+
     // Extension
     public static final String EVENT_EXTENSION_CREATE = "EXTENSION.CREATE";
     public static final String EVENT_EXTENSION_UPDATE = "EXTENSION.UPDATE";
@@ -1381,6 +1386,11 @@ public class EventTypes {
         entityEventDetails.put(EVENT_GUI_THEME_CREATE, "GuiTheme");
         entityEventDetails.put(EVENT_GUI_THEME_REMOVE, "GuiTheme");
         entityEventDetails.put(EVENT_GUI_THEME_UPDATE, "GuiTheme");
+
+        // Announcement
+        entityEventDetails.put(EVENT_ANNOUNCEMENT_CREATE, "Announcement");
+        entityEventDetails.put(EVENT_ANNOUNCEMENT_REMOVE, "Announcement");
+        entityEventDetails.put(EVENT_ANNOUNCEMENT_UPDATE, "Announcement");
 
         // Extension
         entityEventDetails.put(EVENT_EXTENSION_CREATE, Extension.class);

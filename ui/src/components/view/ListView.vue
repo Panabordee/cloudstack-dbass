@@ -890,6 +890,20 @@
         <router-link v-if="$router.resolve('/extension/' + record.extensionid).matched[0].redirect !== '/exception/404'" :to="{ path: '/extension/' + record.extensionid }">{{ text }}</router-link>
         <span v-else>  {{ text + record}} </span>
       </template>
+      <template v-if="column.key === 'title' && $route.path.split('/')[1] === 'announcement'">
+        <router-link
+          v-if="$router.resolve('/announcement/' + record.id).matched[0].redirect !== '/exception/404'"
+          :to="{ path: '/announcement/' + record.id }"
+        >{{ text }}</router-link>
+        <span v-else>{{ text }}</span>
+        <QuickView
+          style="margin-left: 5px"
+          :actions="actions"
+          :resource="record"
+          :enabled="quickViewEnabled() && actions.length > 0"
+          @exec-action="$parent.execAction"
+        />
+      </template>
       <template v-if="column.key === 'success'">
         <status :text="text ? 'success' : 'error'" />
       </template>
@@ -1238,7 +1252,7 @@ export default {
         '/computeoffering', '/systemoffering', '/diskoffering', '/backupoffering', '/networkoffering', '/vpcoffering',
         '/tungstenfabric', '/oauthsetting', '/guestos', '/guestoshypervisormapping', '/webhook', 'webhookdeliveries', '/quotatariff', '/sharedfs',
         '/ipv4subnets', '/managementserver', '/gpucard', '/gpudevices', '/vgpuprofile', '/extension', '/snapshotpolicy', '/backupschedule',
-        '/proxydomains', '/reverseproxy'].join('|'))
+        '/proxydomains', '/reverseproxy', '/announcement'].join('|'))
         .test(this.$route.path)
     },
     enableGroupAction () {

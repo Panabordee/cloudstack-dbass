@@ -799,6 +799,10 @@ public class ApiConstants {
     public static final String DEST_PHYSICAL_NETWORK_ID = "destinationphysicalnetworkid";
     public static final String ENABLE = "enable";
     public static final String ENABLED = "enabled";
+    public static final String TITLE = "title";
+    public static final String PRIORITY = "priority";
+    public static final String CLOSABLE = "closable";
+    public static final String PERSIST_DISMISSAL = "persistdismissal";
     public static final String SERVICE_NAME = "servicename";
     public static final String DHCP_RANGE = "dhcprange";
     public static final String UUID = "uuid";
