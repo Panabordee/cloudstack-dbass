@@ -20,6 +20,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.ByteArrayInputStream;
@@ -221,5 +223,89 @@ public class KeycloakOAuth2ProviderTest {
     @Test
     public void testGetDescription() {
         assertEquals("Keycloak OAuth2 Provider Plugin", provider.getDescription());
+    }
+
+    private String buildFakeIdToken(String email, String audience) {
+        String header = "{\"alg\":\"none\"}";
+        String payload = "{" +
+                "\"aud\":[\"" + audience + "\"]," +
+                "\"email\":\"" + email + "\"," +
+                "\"iss\":\"http://keycloak\"," +
+                "\"sub\":\"12345\"" +
+                "}";
+
+        String encodedHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(header.getBytes());
+        String encodedPayload = Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes());
+        return encodedHeader + "." + encodedPayload + ".not-checked-signature";
+    }
+
+    private CloseableHttpResponse mockSuccessfulTokenResponse(String idToken) throws IOException {
+        CloseableHttpResponse response = mock(CloseableHttpResponse.class);
+        StatusLine statusLine = mock(StatusLine.class);
+        HttpEntity entity = mock(HttpEntity.class);
+
+        when(statusLine.getStatusCode()).thenReturn(200);
+        when(response.getStatusLine()).thenReturn(statusLine);
+
+        String jsonResponseBody = "{\"id_token\":\"" + idToken + "\", \"access_token\":\"acc-123\"}";
+        when(entity.getContent()).thenReturn(new ByteArrayInputStream(jsonResponseBody.getBytes(StandardCharsets.UTF_8)));
+        when(response.getEntity()).thenReturn(entity);
+
+        return response;
+    }
+
+    @Test
+    public void testVerifyCodeAndFetchEmailUsesCacheForSameCode() throws IOException {
+        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+
+        String testEmail = "user@example.com";
+        CloseableHttpResponse response = mockSuccessfulTokenResponse(buildFakeIdToken(testEmail, "test-client"));
+        when(httpClient.execute(any(HttpPost.class))).thenReturn(response);
+
+        String firstEmail = provider.verifyCodeAndFetchEmail("valid-auth-code");
+        String secondEmail = provider.verifyCodeAndFetchEmail("valid-auth-code");
+
+        assertEquals("First call should return the email from the id_token", testEmail, firstEmail);
+        assertEquals("Same code should be served from the cache", testEmail, secondEmail);
+        verify(httpClient, times(1)).execute(any(HttpPost.class));
+    }
+
+    @Test
+    public void testSecondCodeReturnsFreshEmail() throws IOException {
+        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+
+        String firstEmail = "first.user@example.com";
+        String secondEmail = "second.user@example.com";
+        CloseableHttpResponse firstResponse = mockSuccessfulTokenResponse(buildFakeIdToken(firstEmail, "test-client"));
+        CloseableHttpResponse secondResponse = mockSuccessfulTokenResponse(buildFakeIdToken(secondEmail, "test-client"));
+        when(httpClient.execute(any(HttpPost.class))).thenReturn(firstResponse).thenReturn(secondResponse);
+
+        String first = provider.verifyCodeAndFetchEmail("first-auth-code");
+        String second = provider.verifyCodeAndFetchEmail("second-auth-code");
+
+        assertEquals("First code should return the email of its own token", firstEmail, first);
+        assertEquals("Second code must not be served a stale cached email", secondEmail, second);
+        verify(httpClient, times(2)).execute(any(HttpPost.class));
+    }
+
+    @Test(expected = CloudRuntimeException.class)
+    public void testVerifyCodeAndFetchEmailWithoutEmailClaim() throws IOException {
+        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+
+        String header = "{\"alg\":\"none\"}";
+        String payload = "{" +
+                "\"aud\":[\"test-client\"]," +
+                "\"iss\":\"http://keycloak\"," +
+                "\"sub\":\"12345\"" +
+                "}";
+
+        String encodedHeader = Base64.getUrlEncoder().withoutPadding().encodeToString(header.getBytes());
+        String encodedPayload = Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes());
+        String fakeJwt = encodedHeader + "." + encodedPayload + ".not-checked-signature";
+
+        CloseableHttpResponse response = mockSuccessfulTokenResponse(fakeJwt);
+        when(httpClient.execute(any(HttpPost.class))).thenReturn(response);
+
+        provider.verifyCodeAndFetchEmail("valid-auth-code");
     }
 }
