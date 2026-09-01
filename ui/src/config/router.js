@@ -41,6 +41,7 @@ import config from '@/config/section/config'
 import extension from '@/config/section/extension'
 import customaction from '@/config/section/extension/customaction'
 import tools from '@/config/section/tools'
+import announcement from '@/config/section/announcement'
 import quota from '@/config/section/plugin/quota'
 import cloudian from '@/config/section/plugin/cloudian'
 
@@ -226,6 +227,7 @@ export function asyncRouterMap () {
       generateRouterMap(extension),
       generateRouterMap(customaction),
       generateRouterMap(tools),
+      generateRouterMap(announcement),
       generateRouterMap(quota),
       generateRouterMap(cloudian),
       {

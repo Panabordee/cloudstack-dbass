@@ -16,17 +16,19 @@
 // under the License.
 
 <template>
-  <a-affix v-if="showBanner" class="announcement-banner-container">
+  <a-affix v-if="visibleAnnouncements.length > 0" class="announcement-banner-container">
     <a-alert
-      :type="bannerConfig.type || 'default'"
-      :show-icon="bannerConfig.showIcon !== false"
-      :closable="bannerConfig.closable !== false"
+      v-for="announcement in visibleAnnouncements"
+      :key="announcement.id"
+      :type="alertType(announcement.type)"
+      :show-icon="announcement.showIcon !== false"
+      :closable="announcement.closable !== false"
       :banner="true"
-      @close="handleClose"
-      :style="[ { border: borderColor }]"
+      @close="handleClose(announcement)"
+      :style="[{ border: borderColor(announcement.type) }]"
     >
       <template #message>
-        <div class="banner-content" v-html="sanitizedMessage" :style="[$store.getters.darkMode ? { color: 'rgba(255, 255, 255, 0.65)' } : { color: '#888' }]" />
+        <div class="banner-content" v-html="sanitize(announcement.message)" :style="[$store.getters.darkMode ? { color: 'rgba(255, 255, 255, 0.65)' } : { color: '#888' }]" />
       </template>
     </a-alert>
   </a-affix>
@@ -34,20 +36,169 @@
 
 <script>
 import DOMPurify from 'dompurify'
+import { getAPI } from '@/api'
+
+const TYPE_SEVERITY_ORDER = ['error', 'warning', 'success', 'info']
 
 export default {
   name: 'AnnouncementBanner',
   data () {
     return {
-      showBanner: false,
-      bannerConfig: {},
-      dismissed: false
+      announcements: [],
+      sessionDismissed: [],
+      eventSource: null,
+      now: new Date(),
+      nowTimer: null
     }
   },
   computed: {
-    sanitizedMessage () {
-      if (!this.bannerConfig.message) return ''
-      const cleanHTML = DOMPurify.sanitize(this.bannerConfig.message, {
+    visibleAnnouncements () {
+      return [...this.announcements]
+        .filter(announcement => announcement.message && this.isWithinDisplayPeriod(announcement) && !this.isDismissed(announcement))
+        .sort((a, b) => {
+          const priorityDiff = (a.priority || 0) - (b.priority || 0)
+          if (priorityDiff !== 0) return priorityDiff
+          return TYPE_SEVERITY_ORDER.indexOf(this.alertType(a.type)) - TYPE_SEVERITY_ORDER.indexOf(this.alertType(b.type))
+        })
+    }
+  },
+  mounted () {
+    this.loadStaticConfig()
+    this.fetchAnnouncements()
+    this.openEventSource()
+    this.nowTimer = setInterval(() => {
+      this.now = new Date()
+    }, 60 * 1000)
+  },
+  beforeUnmount () {
+    if (this.eventSource) {
+      this.eventSource.close()
+      this.eventSource = null
+    }
+    if (this.nowTimer) {
+      clearInterval(this.nowTimer)
+    }
+  },
+  methods: {
+    // Data sources
+    loadStaticConfig () {
+      const config = this.$config?.announcementBanner || {}
+      if (!config.enabled || !config.message) {
+        return
+      }
+      this.announcements = [{
+        id: `static-${this.getHash(config.message)}`,
+        message: config.message,
+        type: config.type || 'info',
+        closable: config.closable !== false,
+        persistDismissal: config.persistDismissal !== false,
+        showIcon: config.showIcon !== false,
+        startDate: config.startDate,
+        endDate: config.endDate,
+        priority: 0
+      }]
+    },
+    async fetchAnnouncements () {
+      try {
+        const json = await getAPI('listAnnouncements')
+        const response = json?.listannouncementsresponse
+        const items = response?.announcement || []
+        if (!Array.isArray(items) || items.length === 0) {
+          return
+        }
+        this.announcements = items.map(this.mapAnnouncement)
+      } catch (error) {
+        // Keep the static config banner when the API is not reachable.
+      }
+    },
+    mapAnnouncement (item) {
+      return {
+        id: item.id || item.uuid,
+        title: item.title,
+        message: item.message,
+        type: item.type || 'info',
+        closable: item.closable !== false,
+        persistDismissal: item.persistdismissal !== false,
+        showIcon: true,
+        startDate: item.startdate,
+        endDate: item.enddate,
+        priority: item.priority || 0
+      }
+    },
+    openEventSource () {
+      if (typeof EventSource === 'undefined') {
+        return
+      }
+      const apiBase = this.$config.apiBase || '/client/api'
+      const eventsUrl = apiBase.replace(/\/api\/?$/, '/announcements/events')
+      if (!eventsUrl.endsWith('/announcements/events')) {
+        return
+      }
+      try {
+        this.eventSource = new EventSource(eventsUrl)
+        this.eventSource.addEventListener('announcement', event => {
+          try {
+            const payload = JSON.parse(event.data)
+            const items = payload?.announcements || []
+            this.announcements = items.map(this.mapAnnouncement)
+          } catch (error) {
+            // ignore malformed payloads
+          }
+        })
+        this.eventSource.onopen = () => {
+          this.fetchAnnouncements()
+        }
+      } catch (error) {
+        // EventSource not available or connection failed; polling-free live update disabled.
+      }
+    },
+    // Display logic
+    alertType (type) {
+      const normalized = type === 'danger' ? 'error' : type
+      return ['info', 'success', 'warning', 'error'].includes(normalized) ? normalized : 'default'
+    },
+    borderColor (type) {
+      const colorMap = {
+        error: '#ffa39e',
+        warning: '#ffe58f',
+        success: '#b7eb8f',
+        info: '#b3cde3'
+      }
+      const color = colorMap[this.alertType(type)]
+      return color ? `1px solid ${color}` : '0px'
+    },
+    isWithinDisplayPeriod (announcement) {
+      if (announcement.startDate && this.now < new Date(announcement.startDate)) {
+        return false
+      }
+      if (announcement.endDate && this.now > new Date(announcement.endDate)) {
+        return false
+      }
+      return true
+    },
+    // Dismissal handling
+    isDismissed (announcement) {
+      const key = this.dismissedKey(announcement)
+      if (this.sessionDismissed.includes(key)) {
+        return true
+      }
+      if (!announcement.persistDismissal) {
+        return false
+      }
+      return this.$localStorage.get(key) === 'true'
+    },
+    handleClose (announcement) {
+      const key = this.dismissedKey(announcement)
+      this.sessionDismissed.push(key)
+      if (announcement.persistDismissal) {
+        this.$localStorage.set(key, 'true')
+      }
+    },
+    dismissedKey (announcement) {
+      return `cs-ann-dismissed-${announcement.id}-${this.getHash(announcement.message)}`
+    },
+    sanitize (message) {
+      return DOMPurify.sanitize(message, {
         ALLOWED_TAGS: [
           'p', 'div', 'span', 'br', 'strong', 'b', 'em', 'i', 'u',
           'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
@@ -58,69 +209,14 @@ export default {
         FORBID_TAGS: ['script', 'object', 'embed', 'form', 'input', 'textarea', 'select', 'button'],
         FORBID_ATTR: ['onclick', 'onload', 'onerror', 'onmouseover', 'onfocus', 'onblur']
       })
-      return cleanHTML
     },
-    borderColor () {
-      const colorMap = {
-        error: '#ffa39e',
-        warning: '#ffe58f',
-        success: '#b7eb8f',
-        info: '#b3cde3'
-      }
-      const color = colorMap[this.bannerConfig.type]
-      return color ? `1px solid ${color}` : '0px'
-    }
-  },
-  mounted () {
-    this.loadBannerConfig()
-  },
-  methods: {
-    loadBannerConfig () {
-      const config = this.$config?.announcementBanner || {}
-      if (config && config.enabled && config.message) {
-        this.bannerConfig = config
-        if (config.persistDismissal) {
-          const dismissedKey = `cs-banner-dismissed-${this.getBannerHash()}`
-          this.dismissed = this.$localStorage.get(dismissedKey) === 'true'
-        }
-        if (!this.dismissed && this.isWithinDisplayPeriod()) {
-          this.showBanner = true
-        }
-      }
-    },
-    isWithinDisplayPeriod () {
-      const config = this.bannerConfig
-      const now = new Date()
-
-      if (config.startDate) {
-        const startDate = new Date(config.startDate)
-        if (now < startDate) return false
-      }
-
-      if (config.endDate) {
-        const endDate = new Date(config.endDate)
-        if (now > endDate) return false
-      }
-      return true
-    },
-    handleClose () {
-      this.showBanner = false
-      if (this.bannerConfig.persistDismissal) {
-        const dismissedKey = `cs-banner-dismissed-${this.getBannerHash()}`
-        this.$localStorage.set(dismissedKey, 'true')
-      }
-      if (this.bannerConfig.onClose) {
-        this.bannerConfig.onClose()
-      }
-    },
-    getBannerHash () {
-      // Create a simple hash of the message content for dismissal tracking
+    getHash (str) {
       let hash = 0
-      const str = this.bannerConfig.message || ''
-      for (let i = 0; i < str.length; i++) {
-        const char = str.charCodeAt(i)
+      const value = str || ''
+      for (let i = 0; i < value.length; i++) {
+        const char = value.charCodeAt(i)
         hash = ((hash << 5) - hash) + char
-        hash = hash & hash // Convert to 32bit integer
+        hash = hash & hash
       }
       return Math.abs(hash).toString()
     }

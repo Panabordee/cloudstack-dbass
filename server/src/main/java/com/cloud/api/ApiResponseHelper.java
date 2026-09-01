@@ -223,6 +223,8 @@ import org.apache.cloudstack.engine.subsystem.api.storage.SnapshotInfo;
 import org.apache.cloudstack.framework.jobs.AsyncJob;
 import org.apache.cloudstack.framework.jobs.AsyncJobManager;
 import org.apache.cloudstack.framework.jobs.dao.AsyncJobDao;
+import org.apache.cloudstack.announcement.Announcement;
+import org.apache.cloudstack.api.response.AnnouncementResponse;
 import org.apache.cloudstack.gui.theme.GuiThemeJoin;
 import org.apache.cloudstack.management.ManagementServerHost;
 import org.apache.cloudstack.network.BgpPeerVO;
@@ -5681,6 +5683,26 @@ protected Map<String, ResourceIcon> getResourceIconsUsingOsCategory(List<Templat
         guiThemeResponse.setResponseName("guithemes");
 
         return guiThemeResponse;
+    }
+
+    @Override
+    public AnnouncementResponse createAnnouncementResponse(Announcement announcement) {
+        AnnouncementResponse response = new AnnouncementResponse();
+
+        response.setId(announcement.getUuid());
+        response.setTitle(announcement.getTitle());
+        response.setMessage(announcement.getMessage());
+        response.setType(announcement.getType());
+        response.setEnabled(announcement.getEnabled());
+        response.setClosable(announcement.getClosable());
+        response.setPersistDismissal(announcement.getPersistDismissal());
+        response.setStartDate(announcement.getStartDate());
+        response.setEndDate(announcement.getEndDate());
+        response.setPriority(announcement.getPriority());
+        response.setCreated(announcement.getCreated());
+        response.setResponseName("announcement");
+
+        return response;
     }
 
     private void populateDomainFieldsOnConsoleSessionResponse(ConsoleSession consoleSession, ConsoleSessionResponse consoleSessionResponse) {
