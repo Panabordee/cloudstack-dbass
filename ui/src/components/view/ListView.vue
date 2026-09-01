@@ -48,8 +48,8 @@
         </a-menu>
       </div>
     </template>
-    <template #bodyCell="{ column, text, record }">
-      <template v-if="['name', 'provider'].includes(column.key) ">
+      <template #bodyCell="{ column, text, record }">
+      <template v-if="['name', 'provider', 'domain', 'fqdn'].includes(column.key) ">
         <span
           v-if="['vm', 'vnfapp'].includes($route.path.split('/')[1])"
           style="margin-right: 5px"
@@ -70,7 +70,7 @@
             style="margin-left: 5px"
             :actions="actions"
             :resource="record"
-            :enabled="quickViewEnabled() && actions.length > 0 && columns && ['name', 'provider'].includes(columns[0].dataIndex)"
+            :enabled="quickViewEnabled() && actions.length > 0 && columns && ['name', 'provider', 'domain', 'fqdn'].includes(columns[0].dataIndex)"
             @exec-action="$parent.execAction"
           />
           <span
