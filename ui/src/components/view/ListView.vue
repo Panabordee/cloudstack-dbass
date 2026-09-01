@@ -49,7 +49,7 @@
       </div>
     </template>
       <template #bodyCell="{ column, text, record }">
-      <template v-if="['name', 'provider', 'domain', 'fqdn'].includes(column.key) ">
+      <template v-if="['name', 'provider'].includes(column.key) ">
         <span
           v-if="['vm', 'vnfapp'].includes($route.path.split('/')[1])"
           style="margin-right: 5px"
@@ -70,7 +70,7 @@
             style="margin-left: 5px"
             :actions="actions"
             :resource="record"
-            :enabled="quickViewEnabled() && actions.length > 0 && columns && ['name', 'provider', 'domain', 'fqdn'].includes(columns[0].dataIndex)"
+            :enabled="quickViewEnabled() && actions.length > 0 && columns && ['name', 'provider'].includes(columns[0].dataIndex)"
             @exec-action="$parent.execAction"
           />
           <span
@@ -374,6 +374,13 @@
             <copy-outlined />
           </a>
         </a-tooltip>
+        <QuickView
+          style="margin-left: 5px"
+          :actions="actions"
+          :resource="record"
+          :enabled="quickViewEnabled() && actions.length > 0 && columns && columns[0].dataIndex === 'fqdn'"
+          @exec-action="$parent.execAction"
+        />
       </template>
       <template v-if="column.key === 'publicip'">
         <router-link
@@ -719,7 +726,17 @@
             <span v-if="idx < record.domainid.split(',').length - 1">, </span>
           </template>
         </span>
+        <span v-else-if="$route.path.startsWith('/proxydomains') && record.id">
+          <router-link :to="{ path: $route.path + '/' + record.id }">{{ text }}</router-link>
+        </span>
         <span v-else>{{ text }}</span>
+        <QuickView
+          style="margin-left: 5px"
+          :actions="actions"
+          :resource="record"
+          :enabled="quickViewEnabled() && actions.length > 0 && columns && columns[0].dataIndex === 'domain'"
+          @exec-action="$parent.execAction"
+        />
       </template>
       <template v-if="column.key === 'domainpath'">
         <router-link
