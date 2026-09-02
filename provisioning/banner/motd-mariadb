@@ -1,7 +1,7 @@
 
-=== DBaaS Instance: MongoDB ===
+=== DBaaS Instance: MariaDB ===
 OS login          : the username/key or password set when this instance was deployed
-Database engine   : MongoDB, listening on 0.0.0.0:27017
+Database engine   : MariaDB, listening on 0.0.0.0:3306
 Database accounts : created through the CloudStack "Create Database" action
 Lost a password?  : use "Reset Database Password" on this instance in CloudStack
 

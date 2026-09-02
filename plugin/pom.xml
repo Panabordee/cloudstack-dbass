@@ -6,7 +6,7 @@
 
   <groupId>com.dbaas</groupId>
   <artifactId>cloud-plugin-dbaas</artifactId>
-  <version>4.22.1.1</version>
+  <version>4.22.2.0-SNAPSHOT</version>
   <packaging>jar</packaging>
   <name>Apache CloudStack Plugin - DBaaS</name>
 
@@ -17,7 +17,7 @@
     <!-- Pin every dependency to the jars this host actually runs (4.22.1.1).
          Nothing is pulled from Maven Central: the ABI must match the
          management server we drop the finished jar into. -->
-    <cs.version>4.22.1.1</cs.version>
+    <cs.version>4.22.2.0-SNAPSHOT</cs.version>
     <cs.lib>/usr/share/cloudstack-agent/lib</cs.lib>
   </properties>
 
@@ -50,6 +50,17 @@
       <version>${cs.version}</version>
       <scope>system</scope>
       <systemPath>${cs.lib}/cloud-server-${cs.version}.jar</systemPath>
+    </dependency>
+
+    <!-- TransactionLegacy, for the dbaas_credentials table. This plugin has
+         no DAO/VO framework of its own, so raw JDBC through the same
+         connection pool CloudStack itself uses is the lightest option. -->
+    <dependency>
+      <groupId>org.apache.cloudstack</groupId>
+      <artifactId>cloud-framework-db</artifactId>
+      <version>${cs.version}</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/cloud-framework-db-${cs.version}.jar</systemPath>
     </dependency>
 
     <!-- ConfigKey / Configurable, for tunables exposed in Global Settings -->

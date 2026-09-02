@@ -15,16 +15,10 @@ import paramiko
 
 from cs_api import CloudStackAPI
 
-# Map template name (or a tag on the VM) -> provisioning script / default port.
-# TODO: confirm how you want to detect the engine — this assumes the payload
-# carries the template name under vm details; adjust the lookup below to
-# whatever field your 4.22.1.1 install actually sends (check the log file
-# after a first test run).
-ENGINE_BY_TEMPLATE = {
-    "dbaas-mysql": {"script": "mysql.sh", "port": 3306},
-    "dbaas-postgresql": {"script": "postgresql.sh", "port": 5432},
-    "dbaas-mongodb": {"script": "mongodb.sh", "port": 27017},
-}
+# Template name -> provisioning script / port comes entirely from config.json's
+# "engines" map (see config.example.json) — never hardcode it here. Adding a
+# new engine means adding a config entry and dropping the script into every
+# dbaas-* template's /opt/dbaas/, not touching this file.
 
 
 def generate_password(length=24):
@@ -34,15 +28,14 @@ def generate_password(length=24):
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
-def detect_engine(payload):
+def detect_engine(payload, config):
     vm_details = payload.get("cloudstack.vm.details", {}) or {}
     template_name = (
         payload.get("externaldetails", {}).get("virtualmachine", {}).get("templatename")
         or vm_details.get("templatename")
     )
-    if template_name in ENGINE_BY_TEMPLATE:
-        return template_name, ENGINE_BY_TEMPLATE[template_name]
-    return None, None
+    engines = config.get("engines", {})
+    return template_name, engines.get(template_name)
 
 
 def extract_param(payload, name):
@@ -66,12 +59,12 @@ def run(payload, config):
     if not db_name or not db_username:
         return {"status": "failed", "message": "db_name and db_username are required"}
 
-    template_name, engine = detect_engine(payload)
+    template_name, engine = detect_engine(payload, config)
     if not engine:
         return {
             "status": "failed",
             "message": f"could not determine DB engine from template (got {template_name!r}); "
-                       f"was this VM deployed from one of {list(ENGINE_BY_TEMPLATE)}?",
+                       f"was this VM deployed from one of {list(config.get('engines', {}))}?",
         }
 
     try:
