@@ -928,7 +928,14 @@ export default {
       })
     },
     fetchData (params = {}) {
-      if (['deployVirtualMachine', 'usage'].includes(this.$route.name)) {
+      // Navigating to /database must not fetch anything here: the Database
+      // section renders its own component and fetches on its own, and since
+      // createDatabase is a mutating command (not a list* API), callAPI()
+      // would turn this spurious fetch into a POST createDatabase that
+      // fails with "missing parameter virtualmachineid" (HTTP 431).
+      // meta.name covers /database/:id, whose record has no route name.
+      const routeName = this.$route.name || this.$route.meta.name
+      if (['deployVirtualMachine', 'usage', 'database'].includes(routeName)) {
         return
       }
       if (this.routeName !== this.$route.name) {

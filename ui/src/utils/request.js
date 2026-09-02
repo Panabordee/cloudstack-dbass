@@ -157,8 +157,14 @@ const err = (error) => {
 
 // request interceptor
 service.interceptors.request.use(config => {
-  source = sourceToken.getSource()
-  config.cancelToken = source.token
+  // Requests that must survive navigation opt out with ignoreCancelToken:
+  // beforeRouteLeave cancels this shared source app-wide on every route
+  // change, which would otherwise abort an in-flight call mid-flight even
+  // though the management server keeps executing it server-side.
+  if (!config.ignoreCancelToken) {
+    source = sourceToken.getSource()
+    config.cancelToken = source.token
+  }
 
   handleGetRequestParams(config)
 

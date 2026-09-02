@@ -244,6 +244,7 @@ export default {
       credentials: {},
       passwordCopied: false,
       failureMessage: '',
+      closed: false,
       deployedVmId: null,
       attempt: 0,
       // A fresh instance needs about 48s before sshd answers, and each failed
@@ -281,6 +282,12 @@ export default {
     this.initForm()
     this.fetchOptions()
     this.fetchKeyPairs()
+  },
+  // Leaving via the sidebar (or browser back) bypasses closeAction entirely;
+  // marking closed here is what arms the background success/failure
+  // notifications, whichever way the user exits.
+  unmounted () {
+    this.closed = true
   },
   methods: {
     initForm () {
@@ -406,7 +413,11 @@ export default {
           params.networkids = values.networkid
         }
         this.step = 'deploying'
-        postAPI('deployVirtualMachine', params).then(response => {
+        // ignoreCancelToken: leaving mid-deploy must not abort the deploy
+        // request -- the API call submits the async job server-side even if
+        // the client stops listening, and the success handler below then
+        // chains into provisioning in the background.
+        postAPI('deployVirtualMachine', params, { ignoreCancelToken: true }).then(response => {
           const jobId = response.deployvirtualmachineresponse.jobid
           if (!jobId) {
             this.failStep(this.$t('error.fetching.async.job.result'))
@@ -414,6 +425,7 @@ export default {
           }
           this.$pollJob({
             jobId,
+            ignoreCancelToken: true,
             title: this.$t('label.create.database.instance'),
             description: values.name || values.dbname,
             showSuccessMessage: false,
@@ -444,16 +456,33 @@ export default {
     },
     provision (vmId, values, attempt) {
       this.attempt = attempt
+      // ignoreCancelToken keeps this call (and its retries) alive after the
+      // dialog is closed: the whole point of the non-blocking flow is that
+      // provisioning finishes in the background while route changes cancel
+      // every other in-flight request. Without it a navigation aborts the
+      // call, the client treats the cancellation as a hard failure, and the
+      // retry chain dies silently -- the database then never gets provisioned
+      // and Show Password finds no stored credential.
       postAPI('createDatabase', {
         virtualmachineid: vmId,
         dbname: values.dbname,
         dbusername: values.dbusername
-      }).then(json => {
+      }, { ignoreCancelToken: true }).then(json => {
         const dbaas = json.createdatabaseresponse?.dbaas
         if (dbaas) {
           this.credentials = dbaas
           this.step = 'done'
           this.loading = false
+          if (this.closed) {
+            // The user already left via the non-blocking close; the password
+            // is stored server-side, so point them at Show Password instead
+            // of showing a credentials pane nobody is looking at.
+            this.$notification.success({
+              message: this.$t('label.create.database.instance'),
+              description: this.$t('message.desc.created.database'),
+              duration: 0
+            })
+          }
           this.$emit('refresh-data')
         } else {
           this.failStep(this.$t('message.error.database.response'))
@@ -473,13 +502,22 @@ export default {
       this.failureMessage = message
       this.step = 'partial'
       this.loading = false
+      if (this.closed) {
+        this.$notification.error({
+          message: this.$t('label.dbaas.database.failed'),
+          description: message,
+          duration: 0
+        })
+      }
       this.$emit('refresh-data')
     },
     goToInstance () {
       if (this.deployedVmId) {
         this.$router.push({ path: '/vm/' + this.deployedVmId })
       }
-      this.closeAction()
+      // The push above already navigates; closeAction() would $router.back()
+      // on top of it and land on the wrong page.
+      this.closed = true
     },
     notifyCopied () {
       this.passwordCopied = true
@@ -504,7 +542,14 @@ export default {
       })
     },
     closeAction () {
+      this.closed = true
       this.$emit('close-action')
+      // This view is only ever rendered as the full-page /action/createDatabase
+      // route (never inside a modal), so nothing listens for close-action:
+      // navigate back ourselves, the same way DeployVM's full page does.
+      if (this.$route.path.startsWith('/action/')) {
+        this.$router.back()
+      }
     }
   }
 }
