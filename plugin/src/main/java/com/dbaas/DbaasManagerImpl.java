@@ -1,17 +1,20 @@
 package com.dbaas;
 
 import java.io.File;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import javax.inject.Inject;
 
 import org.joda.time.Duration;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -255,11 +258,43 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     }
 
     @Override
+    public List<DbaasEngineResponse> listEngines() {
+        JsonObject engines = readEnginesConfig().getAsJsonObject("engines");
+        List<DbaasEngineResponse> result = new ArrayList<>();
+        for (Map.Entry<String, JsonElement> entry : engines.entrySet()) {
+            JsonObject cfg = entry.getValue().getAsJsonObject();
+            DbaasEngineResponse engine = new DbaasEngineResponse();
+            engine.setTemplate(entry.getKey());
+            engine.setScript(cfg.get("script").getAsString());
+            if (cfg.has("reset_script")) {
+                engine.setResetScript(cfg.get("reset_script").getAsString());
+            }
+            engine.setPort(cfg.get("port").getAsInt());
+            engine.setObjectName("dbaasengine");
+            result.add(engine);
+        }
+        return result;
+    }
+
+    // config.json lives next to extension.py; the engines map inside it is the
+    // single source of truth for which templates are DBaaS engines.
+    private JsonObject readEnginesConfig() {
+        File extensionFile = new File(DbaasExtensionPath.value());
+        File configFile = new File(extensionFile.getParentFile(), "config.json");
+        try (FileReader reader = new FileReader(configFile)) {
+            return JsonParser.parseReader(reader).getAsJsonObject();
+        } catch (Exception e) {
+            throw new CloudRuntimeException("failed to read dbaas engine config at " + configFile, e);
+        }
+    }
+
+    @Override
     public List<Class<?>> getCommands() {
         List<Class<?>> cmdList = new ArrayList<>();
         cmdList.add(CreateDatabaseCmd.class);
         cmdList.add(ResetDatabasePasswordCmd.class);
         cmdList.add(GetDatabasePasswordCmd.class);
+        cmdList.add(ListDbaasEnginesCmd.class);
         return cmdList;
     }
 
