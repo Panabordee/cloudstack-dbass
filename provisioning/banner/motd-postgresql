@@ -1,6 +1,6 @@
 
 === DBaaS Instance: PostgreSQL ===
-OS login          : ubuntu  (SSH key only, no password)
+OS login          : the username/key or password set when this instance was deployed
 Database engine   : PostgreSQL, listening on 0.0.0.0:5432
 Database accounts : created through the CloudStack "Create Database" action
 Lost a password?  : use "Reset Database Password" on this instance in CloudStack

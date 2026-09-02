@@ -1,18 +1,26 @@
 # DBaaS template images
 
-The three `dbaas-*` templates are qcow2 disk images living on the CloudStack
-secondary storage NFS share, not in this repo — they are 2.6–3.8 GB each
-(~9.3 GB total), well past GitHub's 100 MB per-file limit. What is version
-controlled here is everything needed to rebuild them: the provisioning scripts
-that go inside the image, the sshd/sudo wiring, and the runbook below.
+The four `dbaas-*` templates are qcow2 disk images living on the CloudStack
+secondary storage NFS share, not in this repo — each a few GB, well past
+GitHub's 100 MB per-file limit. What is version controlled here is everything
+needed to rebuild them: the provisioning scripts that go inside the image, the
+sshd/sudo wiring, and the runbook below.
 
 ## Manifest
 
-| Template | Root disk | Image size on secondary storage |
-| --- | --- | --- |
-| `dbaas-mysql` | 10 GB | 2.63 GiB |
-| `dbaas-postgresql` | 6 GB | 2.47 GiB |
-| `dbaas-mongodb` | 6 GB | 3.56 GiB |
+| Template | Engine | Root disk | Image size on secondary storage |
+| --- | --- | --- | --- |
+| `dbaas-mysql` | MySQL Community 8.0.46 (official MySQL APT repo) | 10 GB | 1.84 GiB |
+| `dbaas-mariadb` | MariaDB 10.11 (Debian's native `mariadb-server`) | 6 GB | 1.36 GiB |
+| `dbaas-postgresql` | PostgreSQL 15 (Debian's native `postgresql`) | 6 GB | 1.41 GiB |
+| `dbaas-mongodb` | MongoDB 7.0 (official MongoDB APT repo) | 6 GB | 2.11 GiB |
+
+`dbaas-mysql` and `dbaas-mariadb` exist side by side on purpose: Debian
+bookworm's main repo dropped `mysql-server` in favor of MariaDB, but some
+users want the real MySQL Community Server. `mysql.sh`/`mysql_reset.sh` and
+`mariadb.sh`/`mariadb_reset.sh` are identical except for the config file path
+and service name — MariaDB accepts the same wire protocol, `mysql` client,
+and SQL.
 
 Look up the live UUIDs and storage paths for your own install with:
 
@@ -24,20 +32,28 @@ FROM vm_template vt JOIN template_store_ref ts ON ts.template_id = vt.id
 WHERE vt.removed IS NULL AND ts.destroyed = 0 AND vt.name LIKE 'dbaas%';
 ```
 
-All three are built from an `ubuntu-24.04-base` template registered from
-`https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img`.
-Use that direct URL, not a `/current/` redirect — the SSVM does not follow
-302s and the registration fails with "due to redirection, response code: 302".
+All four are built from a `debian-12-base` template (Debian 12/bookworm
+`genericcloud` image). CloudStack's own mirror
+(`https://download.cloudstack.org/templates/cloud-images/debian/debian-12-genericcloud-amd64.qcow2`)
+serves it without a redirect and is what this install uses — the same
+"SSVM does not follow 302s" caveat that applied to
+`cloud-images.ubuntu.com/.../current/` also applies to `cloud.debian.org`,
+which always 302s to a mirror regardless of whether you ask for `/latest/`
+or a dated build. If you need to re-fetch it yourself, resolve a real mirror
+URL first (`curl -sI <cloud.debian.org url>` and use the `Location:` target)
+and confirm it 200s directly before registering.
 
-`dbaas-mysql` has a 10 GB root disk while the other two have 6 GB. That is not
-deliberate; see "Known issues" below.
+Previously (Ubuntu 24.04) `dbaas-mysql` had a 10 GB root disk while the other
+two had 6 GB, which was not deliberate (see "Known issues" below) — kept the
+same split here since real MySQL Community Server's data footprint runs
+larger than MariaDB's.
 
 ## What is inside every image
 
 | Path | Owner / mode | Contents |
 | --- | --- | --- |
 | `/opt/dbaas/provision.sh` | `root:root` 755 | `provisioning/provision.sh` verbatim |
-| `/opt/dbaas/<engine>.sh` | `root:root` 755 | `provisioning/mysql.sh`, `postgresql.sh` or `mongodb.sh` |
+| `/opt/dbaas/<engine>.sh` | `root:root` 755 | `provisioning/mysql.sh`, `mariadb.sh`, `postgresql.sh` or `mongodb.sh` |
 | `/home/dbaas-provisioner/.ssh/authorized_keys` | `root:root` 644 | `provisioning/authorized_keys.example` — root-owned so the user cannot edit its own forced command |
 | `/etc/sudoers.d/dbaas-provisioner` | `root:root` 440 | `provisioning/sudoers.d-dbaas-provisioner` |
 
@@ -52,8 +68,8 @@ MongoDB additionally carries:
 ### Why the forced command runs under sudo
 
 `authorized_keys` uses `command="sudo -n /opt/dbaas/provision.sh"`, not the bare
-path the README originally showed. All three engine scripts need root — MySQL
-uses socket auth as root, PostgreSQL shells out to `sudo -u postgres`, and
+path the README originally showed. All engine scripts need root — MySQL/MariaDB
+use socket auth as root, PostgreSQL shells out to `sudo -u postgres`, and
 MongoDB reads a 0600 root-owned credentials file. The sudoers entry pins the
 command to exactly that path *with no arguments* (`/opt/dbaas/provision.sh ""`),
 so the only thing the key holder controls is `$SSH_ORIGINAL_COMMAND`, which
@@ -62,30 +78,134 @@ so the only thing the key holder controls is `$SSH_ORIGINAL_COMMAND`, which
 
 ### Engine configuration
 
-- **MySQL** — `bind-address` is rewritten to `0.0.0.0` by `mysql.sh` on first
-  provision. `/var/lib/mysql/auto.cnf` is deleted before templating so each VM
-  generates its own `server_uuid`.
-- **PostgreSQL** — `listen_addresses = '*'` and `pg_hba.conf` allows
-  `scram-sha-256` from `0.0.0.0/0`. The perimeter is CloudStack security groups.
-- **MongoDB** — `bindIp: 0.0.0.0` with `security.authorization: enabled`.
-  Requires `guest.cpu.mode=host-passthrough` in the KVM agent's
-  `agent.properties`: MongoDB 5.0+ needs AVX, and the default QEMU model does
-  not expose it, so `mongod` dies with `Illegal instruction (core dumped)`.
+- **MySQL** — installed from the official MySQL APT repo, not
+  `mysql-apt-config` (that .deb's postinst is interactive and hangs over a
+  non-interactive SSH session with no way to preseed the dynamically-generated
+  `select-server` debconf question). Add the repo directly instead:
+  ```
+  curl -fsSL https://repo.mysql.com/RPM-GPG-KEY-mysql-2025 | gpg --dearmor | sudo tee /usr/share/keyrings/mysql.gpg > /dev/null
+  echo "deb [signed-by=/usr/share/keyrings/mysql.gpg] http://repo.mysql.com/apt/debian bookworm mysql-8.0" | sudo tee /etc/apt/sources.list.d/mysql.list
+  ```
+  Use `RPM-GPG-KEY-mysql-2025`, not `-2023` — the 2023 key had expired
+  (`EXPKEYSIG`) by the time this was last rebuilt; check
+  `https://repo.mysql.com/` for the current one. `gnupg` is not preinstalled on
+  the Debian cloud image and must be installed before this step.
+  The official package ships **no `bind-address` line at all** in
+  `/etc/mysql/mysql.conf.d/mysqld.cnf` (unlike Ubuntu's repackaged
+  `mysql-server`, which explicitly sets `127.0.0.1`), so it already listens on
+  every interface by default — `mysql.sh`'s bind-address rewrite is a no-op
+  here and that's fine, it exists for defense in depth. `/var/lib/mysql/auto.cnf`
+  is deleted before templating so each VM generates its own `server_uuid`.
+- **MariaDB** — Debian's native `mariadb-server`, no external repo needed.
+  Unlike the MySQL package, this one *does* ship `bind-address = 127.0.0.1` in
+  `/etc/mysql/mariadb.conf.d/50-server.cnf`, so `mariadb.sh`'s rewrite to
+  `0.0.0.0` (service name `mariadb`, not `mysql`) actually fires here.
+  `auto.cnf` cleanup applies here too.
+- **PostgreSQL** — Debian's native `postgresql` package, no external repo
+  needed. Unlike the MySQL/MariaDB engines, **nothing in `postgresql.sh` (or
+  any runtime script) opens this up to the network** — `listen_addresses = '*'`
+  and the `pg_hba.conf` line allowing `scram-sha-256` from `0.0.0.0/0` are a
+  one-time manual step during image build (step 2 below), matching how the
+  original Ubuntu template was built. Forgetting this step produces a template
+  where `create_database` succeeds but the extension can never reach the
+  resulting database (`listen_addresses` defaults to `localhost` only). On
+  this install the perimeter is *not* CloudStack security groups (the zone's
+  shared network offering has no SecurityGroup/Firewall/ACL service) — every
+  VM on the guest subnet can reach every port of every other VM. Confirmed
+  acceptable for this PoC zone since it carries no production data;
+  re-evaluate before pointing this runbook at a zone that does.
+- **MongoDB** — installed from the official MongoDB APT repo (Debian's own
+  repo has no `mongodb-org`), same gnupg/keyring pattern as MySQL:
+  ```
+  curl -fsSL https://pgp.mongodb.com/server-7.0.asc | gpg --dearmor | sudo tee /usr/share/keyrings/mongodb-server-7.0.gpg > /dev/null
+  echo "deb [signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+  ```
+  `bindIp: 0.0.0.0` with `security.authorization: enabled` set manually in
+  `/etc/mongod.conf` during image build, same one-time-step caveat as
+  PostgreSQL above. Requires `guest.cpu.mode=host-passthrough` in the KVM
+  agent's `agent.properties`: MongoDB 5.0+ needs AVX, and the default QEMU
+  model does not expose it, so `mongod` dies with
+  `Illegal instruction (core dumped)`. Verified present and working on this
+  install.
 
 ## Rebuilding a template
 
-1. Deploy a VM from `ubuntu-24.04-base` with a keypair you hold.
+0. **Prerequisite for this specific host (`cloudstackcve`):** the management
+   server must be able to SSH into VMs on `dbaas-network` at all, for both this
+   build process and every real `create_database`/`reset_password` call
+   afterwards. On this all-in-one host that requires a secondary IP on
+   `cloudbr0` in the guest subnet (`/etc/netplan/60-dbaas-secondary-ip.yaml`)
+   and a rule dropping rogue DHCP replies from the physical uplink
+   (`dbaas-block-rogue-dhcp.service`) — see the memory note on this if you're
+   re-deriving why SSH from the management server times out against a
+   freshly-deployed VM even though ping/console work fine. Not a Debian- or
+   template-specific issue; it will bite every engine equally if missing.
+1. Deploy a VM from `debian-12-base` with a keypair you hold. Debian's
+   `genericcloud` image sets its cloud-init default user to `debian`, not
+   `ubuntu` — SSH in as `debian@<ip>` and `sudo -i` from there.
 2. Install the engine. Do **not** create any databases — the extension does that.
+   - `dbaas-mysql`: add the official MySQL APT repo directly (see "Engine
+     configuration" above for the exact commands and the expired-key gotcha)
+     before `apt-get install mysql-server` — bookworm's own repo has no
+     `mysql-server` package. Needs `gnupg` installed first.
+   - `dbaas-mariadb`: `apt-get install mariadb-server` from Debian's own repo,
+     no extra setup.
+   - `dbaas-postgresql`: `apt-get install postgresql` from Debian's own repo,
+     then edit `/etc/postgresql/15/main/postgresql.conf`
+     (`listen_addresses = '*'`) and append
+     `host all all 0.0.0.0/0 scram-sha-256` to `pg_hba.conf`, then
+     `systemctl restart postgresql`. Nothing else does this — skipping it
+     silently produces a template where the database works locally but the
+     extension can never reach it.
+   - `dbaas-mongodb`: add the official MongoDB APT repo (see "Engine
+     configuration" above) — Debian's own repo has no `mongodb-org` either.
+     After install, create the `dbaas_admin` root role via `mongosh`, then set
+     `bindIp: 0.0.0.0` and `security.authorization: enabled` in
+     `/etc/mongod.conf` and restart. Same "nothing else does this" caveat as
+     PostgreSQL.
+   - No package installs needed for the login banner — Debian's cloud image
+     already ships `/etc/update-motd.d/` and PAM's `pam_motd.so` wired up via
+     `base-files`/`libpam-modules`, same as Ubuntu. There is no separate
+     `update-motd` package to install.
 3. Copy `provisioning/provision.sh` and the matching `provisioning/<engine>.sh`
-   into `/opt/dbaas/`, `chmod 755`, owned by root.
+   (+ `<engine>_reset.sh`) into `/opt/dbaas/`, `chmod 755`, owned by root.
 4. Create the `dbaas-provisioner` user, install
    `provisioning/authorized_keys.example` as its root-owned 644
    `authorized_keys`, and `provisioning/sudoers.d-dbaas-provisioner` as
    `/etc/sudoers.d/dbaas-provisioner` (440). Verify with `visudo -c -f`.
-5. MongoDB only: create the `dbaas_admin` root role, write
-   `/opt/dbaas/admin_credentials.json` (0600), install
-   `rotate-admin-password.sh` (0700) and its unit, and enable the unit.
-6. Generalize, then create the template from the stopped VM's ROOT volume.
+5. MongoDB only: write `/opt/dbaas/admin_credentials.json` (0600) with the
+   `dbaas_admin` credentials created in step 2, install
+   `rotate-admin-password.sh` (0700) and its unit, and enable the unit. Test it
+   with `systemctl start dbaas-rotate-admin-password.service` before
+   generalizing — if it fires successfully here, re-enable it again afterward
+   (starting it consumes the one-shot marker file, which generalizing must
+   remove anyway, but the service itself must stay *enabled* for the next
+   real boot).
+6. Install `provisioning/banner/dbaas-engine-<engine>` as `/etc/dbaas-engine`,
+   `provisioning/banner/00-dbaas` as `/etc/update-motd.d/00-dbaas` (755),
+   `motd-<engine>` as `/etc/motd`, and `issue-<engine>` as `/etc/issue`.
+7. Test every script end to end over the *forced-command* path before
+   generalizing, not just as root locally — `ssh -i <provisioner-key>
+   dbaas-provisioner@<ip> '<engine>.sh' <<< '{"db_name":...}'` should print
+   `ok`. This exercises `provision.sh`'s allowlist, sudo wiring, and the real
+   SSH path the extension uses, which running the engine script directly as
+   root does not. Drop whatever test database/user/role this creates
+   afterward — leftover MongoDB users are scoped to the database they were
+   created in (`db.getSiblingDB(db_name).dropUser(...)`), not `admin`, and
+   `DROP DATABASE` in PostgreSQL must be its own statement, not combined with
+   other commands in one `-c` (it errors with "cannot run inside a transaction
+   block").
+8. Generalize, then create the template from the stopped VM's ROOT volume.
+
+   Once `/etc/ssh/ssh_host_*` and the build-key `authorized_keys` are removed
+   (generalizing step 3 below), SSH access to *that specific VM* is gone for
+   good until it boots again as a fresh clone — there is no recovering into it
+   over SSH even to fix a mistake in the same generalize pass. If you need to
+   fix something after that point (e.g. leftover test data you forgot to
+   clean up first), stop the VM and patch the disk offline instead, the same
+   way as "Patching an existing template in place" below: `qemu-nbd` the ROOT
+   volume, drop a temporary `authorized_keys` into `/home/debian/.ssh/`,
+   unmount, boot, fix it, then repeat the key-removal step before templating.
 
 ### Generalizing before `createTemplate`
 
@@ -96,13 +216,13 @@ rm -f /etc/ssh/ssh_host_*
 truncate -s 0 /etc/machine-id
 rm -f /var/lib/dbus/machine-id
 rm -f /var/lib/dhcpcd/* /run/systemd/netif/leases/*
-rm -f /var/lib/mysql/auto.cnf            # MySQL only
+rm -f /var/lib/mysql/auto.cnf            # MySQL/MariaDB only
 rm -rf /var/lib/dbaas                    # MongoDB only: the rotation marker
 apt-get clean
 journalctl --rotate && journalctl --vacuum-time=1s
 find /var/log -type f -exec truncate -s 0 {} \;
-rm -f /root/.bash_history /home/ubuntu/.bash_history
-rm -f /home/ubuntu/.ssh/authorized_keys /root/.ssh/authorized_keys
+rm -f /root/.bash_history /home/debian/.bash_history
+rm -f /home/debian/.ssh/authorized_keys /root/.ssh/authorized_keys
 ```
 
 The last line removes your build key, so run it last — you cannot SSH back in.
@@ -141,10 +261,11 @@ Under `/opt/dbaas`:
 Under `/etc`, from `provisioning/banner/`:
 
 - `dbaas-engine` — `DBAAS_ENGINE_NAME` / `DBAAS_ENGINE_PORT` for this image.
-- `update-motd.d/00-dbaas` — prints the banner at SSH login. Ubuntu 24.04 builds
-  the login banner from that directory, so a plain `/etc/motd` ends up buried
-  under the stock Ubuntu output; running first from here is what puts it in
-  front of the user.
+- `update-motd.d/00-dbaas` — prints the banner at SSH login. Both Ubuntu 24.04
+  and Debian 12 (once the `update-motd` package is installed — see step 2 of
+  the rebuild runbook) build the login banner from that directory, so a plain
+  `/etc/motd` ends up buried under the stock distro output; running first from
+  here is what puts it in front of the user.
 - `motd` — the same text, for anything reading the file directly.
 - `issue` — shown at the console *before* login, which is the only thing a user
   with no credentials yet can read.
@@ -155,25 +276,27 @@ Under `/etc`, from `provisioning/banner/`:
   reserves the template spool *and* the root volume, so `dbaas-mysql` asks for
   20 GiB against `pool.storage.allocated.capacity.disablethreshold` while the
   6 GB templates ask for 12 GiB. On a small pool that already carries the system
-  VM volumes, MySQL can cross the 0.85 default while the other two stay well
+  VM volumes, MySQL can cross the 0.85 default while the others stay well
   under it. Enlarging primary storage is the durable fix; raising the threshold
-  only moves the ceiling. Rebuilding `dbaas-mysql` with a 6 GB root disk would
-  also make the three templates consistent.
-- **`create_database` restarts mysqld on every call.** `mysql.sh` rewrites
-  `bind-address` whenever the line is present, which stays true after the first
-  rewrite, so every subsequent provision restarts the server and drops the live
-  connections of tenants already on that VM. Guard the rewrite on the value
-  actually needing a change.
+  only moves the ceiling.
+- **`create_database` restarts mysqld/mariadbd on every call.** `mysql.sh` and
+  `mariadb.sh` rewrite `bind-address` whenever the line is present, which stays
+  true after the first rewrite, so every subsequent provision restarts the
+  server and drops the live connections of tenants already on that VM. Guard
+  the rewrite on the value actually needing a change.
 
 - **`Small Instance` is too small for these templates — use `Medium Instance`
-  or larger (1 vCPU @ 1 GHz+, 1 GB+ RAM).** On `Small Instance`
-  (1 vCPU capped at 500 MHz, 512 MB RAM) MySQL 8.0 on Ubuntu 24.04 pins the
-  vCPU at **87-97% continuously**, which starves `sshd` badly enough that it
-  cannot answer the SSH protocol banner in time. The failure looks like a
-  network problem but is not: a raw TCP socket still reads the banner in ~2 s
-  while both the OpenSSH client and paramiko time out during banner exchange,
-  and `create_database` fails intermittently with `No existing session`.
-  Measured handshake latency, same template and same host:
+  or larger (1 vCPU @ 1 GHz+, 1 GB+ RAM).** Measured on Ubuntu 24.04 with
+  MySQL 8.0 (not yet re-measured on the Debian 12 rebuild, but the mechanism is
+  OS-independent and Debian's stock kernel/scheduler behaves the same way):
+  on `Small Instance` (1 vCPU capped at 500 MHz, 512 MB RAM) the database
+  engine pins the vCPU at **87-97% continuously**, which starves `sshd` badly
+  enough that it cannot answer the SSH protocol banner in time. The failure
+  looks like a network problem but is not: a raw TCP socket still reads the
+  banner in ~2 s while both the OpenSSH client and paramiko time out during
+  banner exchange, and `create_database` fails intermittently with
+  `No existing session`. Measured handshake latency, same template and same
+  host:
 
   | Offering | vCPU during idle | SSH handshake |
   | --- | --- | --- |
@@ -192,11 +315,13 @@ Under `/etc`, from `provisioning/banner/`:
 
 ## Fixed
 
-All three engines shared one bug: a repeat `create_database` for a name that
-already existed skipped user creation, never applied the freshly generated
-password, and still exited 0 — so the extension returned success with a
-credential that could not authenticate. Each script now refuses the duplicate
-outright and proves the new credential logs in before printing `ok`.
+All three original engines shared one bug: a repeat `create_database` for a
+name that already existed skipped user creation, never applied the freshly
+generated password, and still exited 0 — so the extension returned success
+with a credential that could not authenticate. Each script now refuses the
+duplicate outright and proves the new credential logs in before printing `ok`.
+`mariadb.sh`/`mariadb_reset.sh` were written after this fix and inherit it
+directly — they were never affected.
 
 - **`mysql.sh` used to report success on a duplicate request.** Its
   `CREATE USER IF NOT EXISTS` skipped creation when the user already existed.

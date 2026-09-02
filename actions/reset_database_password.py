@@ -24,6 +24,7 @@ from actions.create_database import (
 # create_database, so a VM only ever gets the reset script for its own engine.
 RESET_BY_TEMPLATE = {
     "dbaas-mysql": {"script": "mysql_reset.sh", "port": 3306},
+    "dbaas-mariadb": {"script": "mariadb_reset.sh", "port": 3306},
     "dbaas-postgresql": {"script": "postgresql_reset.sh", "port": 5432},
     "dbaas-mongodb": {"script": "mongodb_reset.sh", "port": 27017},
 }

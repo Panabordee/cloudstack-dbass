@@ -22,6 +22,7 @@ from cs_api import CloudStackAPI
 # after a first test run).
 ENGINE_BY_TEMPLATE = {
     "dbaas-mysql": {"script": "mysql.sh", "port": 3306},
+    "dbaas-mariadb": {"script": "mariadb.sh", "port": 3306},
     "dbaas-postgresql": {"script": "postgresql.sh", "port": 5432},
     "dbaas-mongodb": {"script": "mongodb.sh", "port": 27017},
 }
