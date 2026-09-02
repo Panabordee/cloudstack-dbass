@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.dbaas</groupId>
+  <artifactId>cloud-plugin-dbaas</artifactId>
+  <version>4.22.2.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+  <name>Apache CloudStack Plugin - DBaaS</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <!-- Pin every dependency to the jars this host actually runs (4.22.1.1).
+         Nothing is pulled from Maven Central: the ABI must match the
+         management server we drop the finished jar into. -->
+    <cs.version>4.22.2.0-SNAPSHOT</cs.version>
+    <cs.lib>/usr/share/cloudstack-agent/lib</cs.lib>
+  </properties>
+
+  <dependencies>
+    <!-- BaseCmd, APICommand, Parameter, BaseResponse, ApiConstants,
+         com.cloud.serializer.Param, CallContext, Account, UserVm,
+         ServerApiException, RoleType, ManagementService -->
+    <dependency>
+      <groupId>org.apache.cloudstack</groupId>
+      <artifactId>cloud-api</artifactId>
+      <version>${cs.version}</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/cloud-api-${cs.version}.jar</systemPath>
+    </dependency>
+
+    <!-- PluggableService, ManagerBase, EntityManager, Script,
+         CloudRuntimeException -->
+    <dependency>
+      <groupId>org.apache.cloudstack</groupId>
+      <artifactId>cloud-utils</artifactId>
+      <version>${cs.version}</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/cloud-utils-${cs.version}.jar</systemPath>
+    </dependency>
+
+    <!-- Server-side manager interfaces we may need to reach VM/account state -->
+    <dependency>
+      <groupId>org.apache.cloudstack</groupId>
+      <artifactId>cloud-server</artifactId>
+      <version>${cs.version}</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/cloud-server-${cs.version}.jar</systemPath>
+    </dependency>
+
+    <!-- TransactionLegacy, for the dbaas_credentials table. This plugin has
+         no DAO/VO framework of its own, so raw JDBC through the same
+         connection pool CloudStack itself uses is the lightest option. -->
+    <dependency>
+      <groupId>org.apache.cloudstack</groupId>
+      <artifactId>cloud-framework-db</artifactId>
+      <version>${cs.version}</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/cloud-framework-db-${cs.version}.jar</systemPath>
+    </dependency>
+
+    <!-- ConfigKey / Configurable, for tunables exposed in Global Settings -->
+    <dependency>
+      <groupId>org.apache.cloudstack</groupId>
+      <artifactId>cloud-framework-config</artifactId>
+      <version>${cs.version}</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/cloud-framework-config-${cs.version}.jar</systemPath>
+    </dependency>
+
+    <!-- BaseCmd exposes a protected org.apache.logging.log4j.Logger field -->
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-api</artifactId>
+      <version>2.19.0</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/log4j-api-2.19.0.jar</systemPath>
+    </dependency>
+
+    <!-- @SerializedName on the response fields -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.10.1</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/gson-2.10.1.jar</systemPath>
+    </dependency>
+
+    <!-- Not used by our code directly: javac must see it to resolve the
+         Script(String, Duration, Logger) overload sitting next to the
+         Script(String, long, Logger) constructor we actually call. -->
+    <dependency>
+      <groupId>joda-time</groupId>
+      <artifactId>joda-time</artifactId>
+      <version>2.12.5</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/joda-time-2.12.5.jar</systemPath>
+    </dependency>
+
+    <!-- @Inject on the manager's collaborators -->
+    <dependency>
+      <groupId>javax.inject</groupId>
+      <artifactId>javax.inject</artifactId>
+      <version>1</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/javax.inject-1.jar</systemPath>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>${project.artifactId}-${project.version}</finalName>
+  </build>
+</project>

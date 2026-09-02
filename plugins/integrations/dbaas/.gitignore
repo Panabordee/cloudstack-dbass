@@ -1,0 +1,13 @@
+# Holds real CloudStack API credentials — copy config.example.json instead.
+config.json
+
+.venv/
+__pycache__/
+*.pyc
+
+# Local backups taken while patching template images.
+*.bak
+*.bak-*
+
+# Maven build output for the CloudStack API plugin.
+target/

@@ -1,0 +1,17 @@
+{
+  "cloudstack_api_url": "https://YOUR-CLOUDSTACK-HOST/client/api",
+  "cloudstack_api_key": "REPLACE_ME",
+  "cloudstack_secret_key": "REPLACE_ME",
+  "ssh_private_key_path": "/etc/dbaas-extension/dbaas_provisioner_id_ed25519",
+  "ssh_user": "dbaas-provisioner",
+  "_comment_ssh_connect_timeout_seconds": "Applied to paramiko's timeout, banner_timeout AND auth_timeout together. Setting only timeout is not enough: banner_timeout and auth_timeout keep their own 15s defaults, so a slow-to-answer sshd still fails at 15s no matter how large this is. See TEMPLATES.md for the offering sizing that makes those timeouts matter.",
+  "ssh_connect_timeout_seconds": 30,
+  "log_file": "/var/log/cloudstack/management/dbaas-extension.log",
+  "_comment_engines": "Template name -> provisioning scripts + port. Add a new engine here and drop its scripts into every dbaas-* image's /opt/dbaas/ (see TEMPLATES.md) -- never hardcode this mapping in the Python source.",
+  "engines": {
+    "dbaas-mysql": {"script": "mysql.sh", "reset_script": "mysql_reset.sh", "port": 3306},
+    "dbaas-mariadb": {"script": "mariadb.sh", "reset_script": "mariadb_reset.sh", "port": 3306},
+    "dbaas-postgresql": {"script": "postgresql.sh", "reset_script": "postgresql_reset.sh", "port": 5432},
+    "dbaas-mongodb": {"script": "mongodb.sh", "reset_script": "mongodb_reset.sh", "port": 27017}
+  }
+}
