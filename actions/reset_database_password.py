@@ -21,24 +21,19 @@ from actions.create_database import (
 )
 
 # Engine detection stays keyed on the template name, exactly as it is for
-# create_database, so a VM only ever gets the reset script for its own engine.
-RESET_BY_TEMPLATE = {
-    "dbaas-mysql": {"script": "mysql_reset.sh", "port": 3306},
-    "dbaas-mariadb": {"script": "mariadb_reset.sh", "port": 3306},
-    "dbaas-postgresql": {"script": "postgresql_reset.sh", "port": 5432},
-    "dbaas-mongodb": {"script": "mongodb_reset.sh", "port": 27017},
-}
-
-
-def detect_engine(payload):
+# create_database, and comes from the same config.json "engines" map — so a
+# VM only ever gets the reset script for its own engine, and adding an engine
+# never touches this file.
+def detect_engine(payload, config):
     vm_details = payload.get("cloudstack.vm.details", {}) or {}
     template_name = (
         payload.get("externaldetails", {}).get("virtualmachine", {}).get("templatename")
         or vm_details.get("templatename")
     )
-    if template_name in RESET_BY_TEMPLATE:
-        return template_name, RESET_BY_TEMPLATE[template_name]
-    return None, None
+    entry = config.get("engines", {}).get(template_name)
+    if not entry:
+        return template_name, None
+    return template_name, {"script": entry["reset_script"], "port": entry["port"]}
 
 
 def extract_param(payload, name):
@@ -58,12 +53,12 @@ def run(payload, config):
     if not db_username:
         return {"status": "failed", "message": "db_username is required"}
 
-    template_name, engine = detect_engine(payload)
+    template_name, engine = detect_engine(payload, config)
     if not engine:
         return {
             "status": "failed",
             "message": f"could not determine DB engine from template (got {template_name!r}); "
-                       f"was this VM deployed from one of {list(RESET_BY_TEMPLATE)}?",
+                       f"was this VM deployed from one of {list(config.get('engines', {}))}?",
         }
 
     try:

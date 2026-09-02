@@ -11,7 +11,6 @@ if [[ -z "$SCRIPT_NAME" && -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
   SCRIPT_NAME="$(awk '{print $NF}' <<< "$SSH_ORIGINAL_COMMAND")"
 fi
 
-ALLOWED="mysql.sh postgresql.sh mongodb.sh mariadb.sh mysql_reset.sh postgresql_reset.sh mongodb_reset.sh mariadb_reset.sh"
 DBAAS_DIR="/opt/dbaas"
 
 if [[ -z "$SCRIPT_NAME" ]]; then
@@ -19,17 +18,22 @@ if [[ -z "$SCRIPT_NAME" ]]; then
   exit 1
 fi
 
-ok=false
-for name in $ALLOWED; do
-  if [[ "$SCRIPT_NAME" == "$name" ]]; then
-    ok=true
-    break
-  fi
-done
-
-if [[ "$ok" != "true" ]]; then
+# No fixed per-engine allowlist to keep in sync with the extension's own
+# config — anything named "<word>.sh" or "<word>_reset.sh" that actually
+# exists in /opt/dbaas/ is fair game. That directory is root:root 755 and
+# only ever populated at template-build time, so dbaas-provisioner (the only
+# account this forced-command runs under) can never plant a file there —
+# the allowlist IS the filesystem. provision.sh itself is excluded so a
+# client can't ask to re-invoke the entrypoint.
+if [[ ! "$SCRIPT_NAME" =~ ^[a-z0-9]+(_reset)?\.sh$ ]] || [[ "$SCRIPT_NAME" == "provision.sh" ]]; then
   echo "refusing to run unrecognized script: $SCRIPT_NAME" >&2
   exit 1
 fi
 
-exec "$DBAAS_DIR/$SCRIPT_NAME"
+TARGET="$DBAAS_DIR/$SCRIPT_NAME"
+if [[ ! -f "$TARGET" || ! -x "$TARGET" ]]; then
+  echo "refusing to run unrecognized script: $SCRIPT_NAME" >&2
+  exit 1
+fi
+
+exec "$TARGET"

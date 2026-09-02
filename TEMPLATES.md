@@ -252,9 +252,13 @@ deploy re-copies from secondary. This cost one full debugging cycle.
 
 Under `/opt/dbaas`:
 
-- `provision.sh` — SSH forced-command entrypoint; its `ALLOWED` list is the
-  only gate on what can be run, so a new engine script is unreachable until it
-  is added there **and** the images are patched.
+- `provision.sh` — SSH forced-command entrypoint. There is no hardcoded
+  per-engine allowlist: it runs anything matching `^[a-z0-9]+(_reset)?\.sh$`
+  that actually exists and is executable in `/opt/dbaas/` (and isn't
+  `provision.sh` itself). The gate is the filesystem, not a list to keep in
+  sync — `/opt/dbaas` is root:root 755 and only ever populated at
+  template-build time, so `dbaas-provisioner` can never plant a file there
+  to reach through it.
 - `<engine>.sh` — creates a database + user.
 - `<engine>_reset.sh` — rotates an existing user's password.
 
@@ -262,13 +266,45 @@ Under `/etc`, from `provisioning/banner/`:
 
 - `dbaas-engine` — `DBAAS_ENGINE_NAME` / `DBAAS_ENGINE_PORT` for this image.
 - `update-motd.d/00-dbaas` — prints the banner at SSH login. Both Ubuntu 24.04
-  and Debian 12 (once the `update-motd` package is installed — see step 2 of
-  the rebuild runbook) build the login banner from that directory, so a plain
-  `/etc/motd` ends up buried under the stock distro output; running first from
-  here is what puts it in front of the user.
+  and Debian 12 build the login banner from that directory out of the box
+  (`base-files`/`libpam-modules`, no extra package needed on either distro), so
+  a plain `/etc/motd` ends up buried under the stock distro output; running
+  first from here is what puts it in front of the user.
 - `motd` — the same text, for anything reading the file directly.
 - `issue` — shown at the console *before* login, which is the only thing a user
   with no credentials yet can read.
+
+## Adding a new engine
+
+Nothing about engine selection is hardcoded in the Python extension or in
+`provision.sh` — both read the mapping or the filesystem at runtime. To add
+engine `foo`:
+
+1. Write `provisioning/foo.sh` and `provisioning/foo_reset.sh` (same stdin/JSON
+   contract as the existing engines) and, if it needs one, a
+   `provisioning/banner/dbaas-engine-foo` + `motd-foo` + `issue-foo` set.
+2. Add an entry to `config.json`'s `"engines"` map (both on your dev copy and
+   on `/usr/share/cloudstack-management/extensions/dbaas/config.json` — see
+   `config.example.json` for the shape): template name, `script`,
+   `reset_script`, `port`. That is the *only* code-adjacent change; nothing in
+   `actions/create_database.py`, `actions/reset_database_password.py`, or
+   `provision.sh` needs to change or be redeployed for a new engine.
+3. Build the template following "Rebuilding a template" above, using
+   `dbaas-foo` as the template name — it has to match the config key exactly.
+4. Deploy a VM from it and confirm `create_database`/`reset_password` both
+   return `ok` before relying on it.
+
+The one thing that **does** require redeploying the extension's `.py` files to
+the management server path is a change to the extension's own logic (as
+opposed to config) — e.g. this section didn't exist until a real
+`create_database` call failed with "could not determine DB engine from
+template (got None)" against a template (`dbaas-mariadb`) that config.json
+didn't know about yet, because the deployed copy at
+`/usr/share/cloudstack-management/extensions/dbaas/` was never synced after
+the config-driven refactor landed in this repo. Config changes take effect on
+the next SSH-triggered subprocess call with no CloudStack restart; `.py`/`.sh`
+file changes need `cp`-ing to that path (there is no automated deploy step for
+this yet — see `register_extension.sh`'s header comment).
 
 ## Known issues
 
