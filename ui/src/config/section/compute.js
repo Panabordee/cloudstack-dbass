@@ -437,6 +437,19 @@ export default {
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
         },
         {
+          api: 'getDatabasePassword',
+          icon: 'eye-outlined',
+          label: 'label.show.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running', 'Stopped'].includes(record.state) &&
+              (record.templatename || '').startsWith('dbaas-')
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ShowDatabasePassword.vue')))
+        },
+        {
           api: 'assignVirtualMachine',
           icon: 'user-add-outlined',
           label: 'label.assign.instance.another',

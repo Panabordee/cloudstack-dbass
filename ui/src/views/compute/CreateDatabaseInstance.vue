@@ -130,6 +130,15 @@
       <p v-if="step === 'provisioning'" class="progress-sub">
         {{ $t('label.in.progress') }} {{ attempt }}/{{ maxAttempts }}
       </p>
+      <!-- The instance already exists once this step is reached; provisioning
+           keeps retrying in the background even after this dialog closes, so
+           there is nothing left here that requires staying open. -->
+      <p v-if="step === 'provisioning'" class="progress-sub">
+        {{ $t('message.dbaas.close.early') }}
+      </p>
+      <div :span="24" class="action-button">
+        <a-button v-if="step === 'provisioning'" @click="closeAction">{{ $t('label.close') }}</a-button>
+      </div>
     </div>
 
     <!-- step 3a: success -->
@@ -147,8 +156,8 @@
         <a-button @click="notifyCopied" v-clipboard:copy="credentials.password" type="primary">
           {{ $t('label.copy.password') }}
         </a-button>
-        <a-button @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
-        <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
+        <a-button @click="confirmClose(goToInstance)">{{ $t('label.go.to.instance') }}</a-button>
+        <a-button @click="confirmClose(closeAction)">{{ $t('label.close') }}</a-button>
       </div>
     </div>
 
@@ -171,6 +180,7 @@
 
 <script>
 import { ref, reactive, toRaw } from 'vue'
+import { Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
 
@@ -232,6 +242,7 @@ export default {
       keyPairs: [],
       keyPairLoading: false,
       credentials: {},
+      passwordCopied: false,
       failureMessage: '',
       deployedVmId: null,
       attempt: 0,
@@ -471,8 +482,25 @@ export default {
       this.closeAction()
     },
     notifyCopied () {
+      this.passwordCopied = true
       this.$notification.info({
         message: this.$t('message.success.copy.clipboard')
+      })
+    },
+    // Only guards the credentials step -- by the time this runs the password
+    // is already stored server-side and retrievable via Show Password later,
+    // so this is a courtesy nudge to copy it now, not a last chance.
+    confirmClose (proceed) {
+      if (this.step !== 'done' || this.passwordCopied) {
+        proceed()
+        return
+      }
+      Modal.confirm({
+        title: this.$t('label.close'),
+        content: this.$t('message.confirm.close.database.password'),
+        okText: this.$t('label.yes'),
+        cancelText: this.$t('label.no'),
+        onOk: proceed
       })
     },
     closeAction () {
