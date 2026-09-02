@@ -64,6 +64,26 @@
           </a-select>
         </a-form-item>
         <a-form-item
+          name="rootdisksize"
+          ref="rootdisksize"
+          :label="$t('label.rootdisksize')"
+          v-if="selectedOfferingIsCustomized">
+          <a-input-number
+            v-model:value="form.rootdisksize"
+            :min="1"
+            style="width: 100%"
+            :placeholder="$t('label.rootdisksize')" />
+        </a-form-item>
+        <a-form-item name="diskofferingid" ref="diskofferingid" :label="$t('label.datadiskoffering')">
+          <a-select
+            v-model:value="form.diskofferingid"
+            allowClear
+            :loading="optionsLoading"
+            :placeholder="$t('label.datadiskoffering')">
+            <a-select-option v-for="d in diskOfferings" :key="d.id" :label="d.label">{{ d.label }}</a-select-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item
           name="networkid"
           ref="networkid"
           :label="$t('label.networkid')"
@@ -158,6 +178,7 @@ import { mixinForm } from '@/utils/mixin'
 // scripts; the label is only what the user picks from.
 const ENGINE_LABELS = {
   'dbaas-mysql': 'MySQL',
+  'dbaas-mariadb': 'MariaDB',
   'dbaas-postgresql': 'PostgreSQL',
   'dbaas-mongodb': 'MongoDB'
 }
@@ -206,6 +227,7 @@ export default {
       templates: [],
       zones: [],
       offerings: [],
+      diskOfferings: [],
       networks: [],
       keyPairs: [],
       keyPairLoading: false,
@@ -232,6 +254,13 @@ export default {
     needsNetwork () {
       const zone = this.zones.find(z => z.id === this.form.zoneid)
       return !!zone && zone.networktype !== 'Basic'
+    },
+    // A fixed-size compute offering rejects rootdisksize outright, so the
+    // field only appears when the selected offering actually allows a
+    // custom root size -- same rule DeployVM.vue applies.
+    selectedOfferingIsCustomized () {
+      const offering = this.offerings.find(o => o.id === this.form.serviceofferingid)
+      return !!offering && !!offering.iscustomized
     }
   },
   beforeCreate () {
@@ -270,14 +299,19 @@ export default {
         getAPI('listZones', { available: true }),
         // memory and cpuspeed are minimum filters, not exact matches, so this
         // drops every offering below Medium server-side.
-        getAPI('listServiceOfferings', { memory: 1024, cpuspeed: 1000 })
-      ]).then(([tpl, zone, off]) => {
+        getAPI('listServiceOfferings', { memory: 1024, cpuspeed: 1000 }),
+        // Data disk is entirely optional, so this is never in the required
+        // rules -- it only ever adds an extra volume when actually picked.
+        getAPI('listDiskOfferings')
+      ]).then(([tpl, zone, off, diskOff]) => {
         this.templates = (tpl.listtemplatesresponse.template || [])
           .filter(t => t.name && t.name.startsWith('dbaas-') && t.isready)
           .map(t => ({ id: t.id, name: t.name, engineLabel: ENGINE_LABELS[t.name] || t.name }))
         this.zones = zone.listzonesresponse.zone || []
         this.offerings = (off.listserviceofferingsresponse.serviceoffering || [])
-          .map(o => ({ id: o.id, label: `${o.name} (${o.cpunumber} vCPU, ${o.memory} MB)` }))
+          .map(o => ({ id: o.id, label: `${o.name} (${o.cpunumber} vCPU, ${o.memory} MB)`, iscustomized: o.iscustomized }))
+        this.diskOfferings = (diskOff.listdiskofferingsresponse.diskoffering || [])
+          .map(d => ({ id: d.id, label: d.iscustomized ? `${d.name} (${this.$t('label.iscustomized')})` : `${d.name} (${d.disksize} GB)` }))
         if (this.zones.length === 1) {
           this.form.zoneid = this.zones[0].id
           this.fetchNetworks()
@@ -339,6 +373,16 @@ export default {
         }
         if (values.name) {
           params.name = values.name
+        }
+        // Only sent when the offering allows it (the field itself is hidden
+        // otherwise), so this never reaches the API for a fixed-size offering.
+        if (this.selectedOfferingIsCustomized && values.rootdisksize) {
+          params.rootdisksize = values.rootdisksize
+        }
+        // A data disk is optional; omitting diskofferingid deploys with the
+        // root volume only, same as before this field existed.
+        if (values.diskofferingid) {
+          params.diskofferingid = values.diskofferingid
         }
         // deployVirtualMachine takes both `keypair` and `keypairs`; the standard
         // Add Instance wizard sends `keypairs`, so match it.

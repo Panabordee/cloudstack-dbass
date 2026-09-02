@@ -698,6 +698,8 @@
 "label.go.to.instance": "Go to instance",
 "label.reset.database.password": "Reset Database Password",
 "label.database": "Database",
+"label.database.instances.empty": "No database instances yet. Use Create Database Instance to deploy one.",
+"label.datadiskoffering": "Data disk offering (optional)",
 "label.dbname": "Database name",
 "label.dbusername": "Database username",
 "label.engine": "Engine",
