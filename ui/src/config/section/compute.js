@@ -32,6 +32,11 @@ export default {
       docHelp: 'adminguide/virtual_machines.html',
       permission: ['listVirtualMachinesMetrics'],
       resourceType: 'UserVm',
+      // DBaaS instances live in their own Database section; keeping them out
+      // of the generic Instances list here (client-side filter in
+      // AutogenView). Server-side pagination is unaffected, so a page can
+      // show slightly fewer rows than the page size when one is filtered.
+      excludeTemplatePrefix: 'dbaas-',
       params: () => {
         var params = { details: 'group,nics,secgrp,tmpl,servoff,diskoff,iso,volume,affgrp,backoff' }
         if (store.getters.metrics) {

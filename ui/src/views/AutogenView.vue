@@ -1202,6 +1202,15 @@ export default {
         if (!this.items || this.items.length === 0) {
           this.items = []
         }
+        // Section-configured client-side exclusion (e.g. the Instances list
+        // keeps DBaaS instances out of the generic list; they live in the
+        // Database section). Detail views (dataView) are never filtered so a
+        // direct link to a hidden instance still renders. Note the footer
+        // count stays the unfiltered server-side total.
+        const excludePrefix = this.$route.meta.excludeTemplatePrefix
+        if (excludePrefix && !this.dataView && Array.isArray(this.items)) {
+          this.items = this.items.filter(x => !(x.templatename || '').startsWith(excludePrefix))
+        }
         this.itemCount = apiItemCount
 
         if (this.dataView && this.$route.path.includes('/zone/') && 'listVmwareDcs' in this.$store.getters.apis) {

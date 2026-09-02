@@ -18,16 +18,30 @@
 <template>
   <div class="form-layout">
     <a-spin :spinning="loading">
-      <a-alert
-        v-if="!credentials.password"
-        type="info"
-        showIcon
-        :message="$t('message.desc.show.database.password')" />
-      <a-descriptions v-else bordered size="small" :column="1" class="credentials">
+      <a-descriptions v-if="credentials.password" bordered size="small" :column="1" class="credentials">
         <a-descriptions-item :label="$t('label.engine')">{{ credentials.engine }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
       </a-descriptions>
+      <a-alert
+        v-else-if="loaded && noCredential"
+        type="warning"
+        showIcon
+        :message="$t('message.dbaas.no.stored.credential')"
+        class="state-alert" />
+      <a-alert
+        v-else-if="loaded"
+        type="error"
+        showIcon
+        :message="$t('message.dbaas.credential.load.failed')"
+        :description="errorMsg"
+        class="state-alert" />
+      <a-alert
+        v-else
+        type="info"
+        showIcon
+        :message="$t('message.desc.show.database.password')"
+        class="state-alert" />
       <div :span="24" class="action-button">
         <a-button
           v-if="credentials.password"
@@ -36,6 +50,7 @@
           type="primary">
           {{ $t('label.copy.password') }}
         </a-button>
+        <a-button v-if="loaded && !credentials.password" @click="fetchPassword">{{ $t('label.retry') }}</a-button>
         <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
       </div>
     </a-spin>
@@ -56,6 +71,9 @@ export default {
   data () {
     return {
       loading: false,
+      loaded: false,
+      noCredential: false,
+      errorMsg: '',
       credentials: {}
     }
   },
@@ -65,10 +83,23 @@ export default {
   methods: {
     fetchPassword () {
       this.loading = true
+      this.loaded = false
+      this.noCredential = false
+      this.errorMsg = ''
       getAPI('getDatabasePassword', { virtualmachineid: this.resource.id }).then(json => {
         this.credentials = json.getdatabasepasswordresponse?.dbaas || {}
+        this.loaded = true
       }).catch(error => {
-        this.$notifyError(error)
+        // The backend answers "No stored database credential found for this
+        // VM" while a createDatabase is still provisioning (or before the
+        // first one ever ran) -- that is a normal, retryable state, not a
+        // broken fetch, so give it its own message instead of the spinner
+        // hanging on the initial info alert forever.
+        const data = error?.response?.data
+        const text = data ? (data[Object.keys(data).find(k => data[k] && data[k].errortext)]?.errortext || '') : ''
+        this.errorMsg = text || error?.message || String(error)
+        this.noCredential = this.errorMsg.includes('No stored database credential')
+        this.loaded = true
       }).finally(() => {
         this.loading = false
       })
@@ -95,6 +126,11 @@ export default {
   }
 
   .credentials {
+    margin-top: 16px;
+    word-break: break-all;
+  }
+
+  .state-alert {
     margin-top: 16px;
     word-break: break-all;
   }

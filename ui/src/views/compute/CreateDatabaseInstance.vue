@@ -26,6 +26,12 @@
     <!-- step 1: the form -->
     <a-spin :spinning="loading" v-if="step === 'form'">
       <p v-html="$t('message.desc.create.database.instance')"></p>
+      <a-alert
+        type="info"
+        show-icon
+        banner
+        :message="$t('message.dbaas.username.default')"
+        class="form-banner" />
       <a-form
         v-ctrl-enter="handleSubmit"
         :ref="formRef"
@@ -111,7 +117,7 @@
           <a-input v-model:value="form.dbname" :placeholder="$t('label.dbname')" />
         </a-form-item>
         <a-form-item name="dbusername" ref="dbusername" :label="$t('label.dbusername')">
-          <a-input v-model:value="form.dbusername" :placeholder="$t('label.dbusername')" />
+          <a-input v-model:value="form.dbusername" :placeholder="form.dbname || $t('label.dbusername')" />
         </a-form-item>
 
         <div :span="24" class="action-button">
@@ -151,9 +157,16 @@
         <a-descriptions-item :label="$t('label.database')">{{ credentials.database }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
+        <a-descriptions-item :label="$t('label.connect.command')">
+          <span class="connect-command">{{ connectCommand }}</span>
+        </a-descriptions-item>
       </a-descriptions>
+      <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
       <div :span="24" class="action-button">
-        <a-button @click="notifyCopied" v-clipboard:copy="credentials.password" type="primary">
+        <a-button @click="notifyCopied" v-clipboard:copy="connectCommand" type="primary">
+          {{ $t('label.copy.connect.command') }}
+        </a-button>
+        <a-button @click="notifyCopied" v-clipboard:copy="credentials.password">
           {{ $t('label.copy.password') }}
         </a-button>
         <a-button @click="confirmClose(goToInstance)">{{ $t('label.go.to.instance') }}</a-button>
@@ -179,19 +192,11 @@
 </template>
 
 <script>
-import { ref, reactive, toRaw } from 'vue'
-import { Modal } from 'ant-design-vue'
+import { ref, reactive, toRaw, h } from 'vue'
+import { Button, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
-
-// Engine template names are the contract with the backend provisioning
-// scripts; the label is only what the user picks from.
-const ENGINE_LABELS = {
-  'dbaas-mysql': 'MySQL',
-  'dbaas-mariadb': 'MariaDB',
-  'dbaas-postgresql': 'PostgreSQL',
-  'dbaas-mongodb': 'MongoDB'
-}
+import { buildConnectCommand, copyTextToClipboard } from '@/utils/dbaas'
 
 // The provisioning run is only reachable once sshd inside the fresh instance
 // answers. Anything matching these means we were too early and another attempt
@@ -260,6 +265,9 @@ export default {
       if (this.step === 'deploying' || this.step === 'provisioning') return 1
       return 2
     },
+    connectCommand () {
+      return buildConnectCommand(this.credentials)
+    },
     showKeyPairs () {
       return 'listSSHKeyPairs' in this.$store.getters.apis
     },
@@ -305,7 +313,10 @@ export default {
         zoneid: [required],
         serviceofferingid: [required],
         dbname: [required, identifier],
-        dbusername: [required, identifier]
+        // Optional: when left empty the backend defaults the user to the
+        // database name (see the banner above the form). The identifier
+        // pattern still applies to whatever is typed.
+        dbusername: [identifier]
       })
     },
     fetchOptions () {
@@ -324,7 +335,10 @@ export default {
       ]).then(([tpl, zone, off, diskOff]) => {
         this.templates = (tpl.listtemplatesresponse.template || [])
           .filter(t => t.name && t.name.startsWith('dbaas-') && t.isready)
-          .map(t => ({ id: t.id, name: t.name, engineLabel: ENGINE_LABELS[t.name] || t.name }))
+          // Same label source DatabaseInstances uses: the template's own
+          // displaytext ("MySQL Community 8.0 on Debian 12 x86_64"), so a new
+          // engine added to the backend config shows up without UI changes.
+          .map(t => ({ id: t.id, name: t.name, engineLabel: t.displaytext || t.name }))
         this.zones = zone.listzonesresponse.zone || []
         this.offerings = (off.listserviceofferingsresponse.serviceoffering || [])
           .map(o => ({ id: o.id, label: `${o.name} (${o.cpunumber} vCPU, ${o.memory} MB)`, iscustomized: o.iscustomized }))
@@ -474,12 +488,33 @@ export default {
           this.step = 'done'
           this.loading = false
           if (this.closed) {
-            // The user already left via the non-blocking close; the password
-            // is stored server-side, so point them at Show Password instead
-            // of showing a credentials pane nobody is looking at.
+            // The user already left via the non-blocking close; the
+            // notification is their one shot at the credentials, so it
+            // carries username/password/command with copy buttons right on
+            // it. The password is also stored server-side, retrievable via
+            // Show Password.
+            const copyButton = (label, text) => h(Button, {
+              size: 'small',
+              style: { marginRight: '8px' },
+              onClick: () => {
+                if (copyTextToClipboard(text)) {
+                  this.notifyCopied()
+                }
+              }
+            }, { default: () => label })
             this.$notification.success({
               message: this.$t('label.create.database.instance'),
-              description: this.$t('message.desc.created.database'),
+              description: h('div', [
+                h('div', `username: ${this.credentials.username}`),
+                h('div', `password: ${this.credentials.password}`),
+                h('div', {
+                  style: { fontFamily: 'monospace', wordBreak: 'break-all', marginTop: '4px' }
+                }, this.connectCommand)
+              ]),
+              btn: h('div', { style: { marginTop: '8px' } }, [
+                copyButton(this.$t('label.copy.password'), this.credentials.password),
+                copyButton(this.$t('label.copy.connect.command'), this.connectCommand)
+              ]),
               duration: 0
             })
           }
@@ -564,6 +599,10 @@ export default {
     }
   }
 
+  .form-banner {
+    margin-bottom: 16px;
+  }
+
   .steps {
     margin-bottom: 20px;
   }
@@ -584,6 +623,17 @@ export default {
 
   .credentials {
     margin-top: 16px;
+    word-break: break-all;
+  }
+
+  .connect-command {
+    font-family: monospace;
+    word-break: break-all;
+  }
+
+  .connect-hint {
+    margin-top: 4px;
+    color: rgba(0, 0, 0, 0.45);
     word-break: break-all;
   }
 

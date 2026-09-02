@@ -118,7 +118,10 @@ export default {
           this.instances = []
           return
         }
-        return getAPI('listVirtualMachines', { listall: true, details: 'tmpl,nics' }).then(vmResponse => {
+        // pagesize: -1 -- without it the response is capped at the default
+        // page size and every DBaaS VM beyond it silently vanishes from this
+        // list even though the instance exists and is reachable.
+        return getAPI('listVirtualMachines', { listall: true, details: 'tmpl,nics', pagesize: -1 }).then(vmResponse => {
           this.instances = (vmResponse.listvirtualmachinesresponse.virtualmachine || [])
             .filter(vm => templateIds.has(vm.templateid))
         })
