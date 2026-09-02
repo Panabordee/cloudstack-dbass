@@ -273,6 +273,8 @@ known_categories = {
     'Extensions' : 'Extension',
     'CustomAction' : 'Extension',
     'CustomActions' : 'Extension',
+    'Dbaas': 'Database',
+    'Database': 'Database',
     'ImportVmTask': 'Import VM Task',
     'InstanceProxy': 'Reverse Proxy',
     'InstanceProxies': 'Reverse Proxy',
