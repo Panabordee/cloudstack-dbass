@@ -39,8 +39,14 @@ public class CreateDatabaseCmd extends BaseCmd {
             description = "name of the database to create")
     private String dbName;
 
-    @Parameter(name = "dbusername", type = CommandType.STRING, required = true,
-            description = "name of the database user to create")
+    // Optional: the UI lets the database user be omitted (its banner explains
+    // the default), and DbaasManagerImpl.createDatabase() then defaults it to
+    // the database name. This must stay required=false -- the UI strips
+    // undefined params before sending, so an omitted dbusername never reaches
+    // the API layer at all, and required=true would 431 before the defaulting
+    // code ever ran.
+    @Parameter(name = "dbusername", type = CommandType.STRING, required = false,
+            description = "name of the database user to create; defaults to the database name when omitted")
     private String dbUsername;
 
     public Long getVirtualMachineId() {
