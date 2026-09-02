@@ -68,6 +68,7 @@
 <script>
 import { getAPI } from '@/api'
 import Status from '@/components/widgets/Status.vue'
+import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 export default {
   name: 'DatabaseInstances',
@@ -103,12 +104,22 @@ export default {
     },
     fetchData () {
       this.loading = true
-      // Same keyword contract CreateDatabaseInstance.vue's engine picker
-      // uses: the dbaas- prefix on the template name is what actually
-      // decides membership, keyword is just a server-side head start.
-      getAPI('listTemplates', { templatefilter: 'executable', keyword: 'dbaas' }).then(tplResponse => {
+      // listDbaasEngines is the source of truth for membership; the dbaas-
+      // prefix is only the fallback for management servers running an older
+      // plugin build without that API.
+      const hasEnginesApi = 'listDbaasEngines' in this.$store.getters.apis
+      const templateParams = hasEnginesApi
+        ? { templatefilter: 'executable' }
+        : { templatefilter: 'executable', keyword: DBAAS_TEMPLATE_PREFIX }
+      Promise.all([
+        getAPI('listTemplates', templateParams),
+        hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
+      ]).then(([tplResponse, engines]) => {
+        const engineNames = engines
+          ? new Set((engines.listdbaasenginesresponse?.dbaasengine || []).map(e => e.template))
+          : null
         const templates = (tplResponse.listtemplatesresponse.template || [])
-          .filter(t => t.name && t.name.startsWith('dbaas-'))
+          .filter(t => t.name && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
         this.engineLabels = templates.reduce((acc, t) => {
           acc[t.name] = t.displaytext || t.name
           return acc

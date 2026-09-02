@@ -15,6 +15,15 @@
 // specific language governing permissions and limitations
 // under the License.
 
+// The engines map in the extension's config.json -- exposed to the UI through
+// the listDbaasEngines API -- is the source of truth for which templates are
+// DBaaS engines. This prefix remains in only two places: the static section
+// config (compute.js) whose show() hooks cannot await an API call, and the
+// fallback used when the management server runs an older plugin without
+// listDbaasEngines. New engines SHOULD be named with this prefix so those
+// static spots stay correct; see BUILD-DBAAS.md.
+export const DBAAS_TEMPLATE_PREFIX = 'dbaas-'
+
 // Turns a DBaaS credential response (engine/host/port/database/username/
 // password) into a single copy-paste connect command. Passwords are generated
 // alphanumeric-only by the provisioning scripts, so shell quoting is a

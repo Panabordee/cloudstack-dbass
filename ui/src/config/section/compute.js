@@ -19,6 +19,7 @@ import { shallowRef, defineAsyncComponent } from 'vue'
 import store from '@/store'
 import { isZoneCreated } from '@/utils/zone'
 import { escapeHtml } from '@/utils/util'
+import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 export default {
   name: 'compute',
@@ -36,7 +37,7 @@ export default {
       // of the generic Instances list here (client-side filter in
       // AutogenView). Server-side pagination is unaffected, so a page can
       // show slightly fewer rows than the page size when one is filtered.
-      excludeTemplatePrefix: 'dbaas-',
+      excludeTemplatePrefix: DBAAS_TEMPLATE_PREFIX,
       params: () => {
         var params = { details: 'group,nics,secgrp,tmpl,servoff,diskoff,iso,volume,affgrp,backoff' }
         if (store.getters.metrics) {
@@ -423,7 +424,7 @@ export default {
           show: (record) => {
             return record.hypervisor !== 'External' &&
               ['Running'].includes(record.state) &&
-              (record.templatename || '').startsWith('dbaas-')
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
           },
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabase.vue')))
         },
@@ -437,7 +438,7 @@ export default {
           show: (record) => {
             return record.hypervisor !== 'External' &&
               ['Running'].includes(record.state) &&
-              (record.templatename || '').startsWith('dbaas-')
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
           },
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
         },
@@ -450,7 +451,7 @@ export default {
           show: (record) => {
             return record.hypervisor !== 'External' &&
               ['Running', 'Stopped'].includes(record.state) &&
-              (record.templatename || '').startsWith('dbaas-')
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
           },
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ShowDatabasePassword.vue')))
         },

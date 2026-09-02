@@ -196,7 +196,7 @@ import { ref, reactive, toRaw, h } from 'vue'
 import { Button, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
-import { buildConnectCommand, copyTextToClipboard } from '@/utils/dbaas'
+import { buildConnectCommand, copyTextToClipboard, DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 // The provisioning run is only reachable once sshd inside the fresh instance
 // answers. Anything matching these means we were too early and another attempt
@@ -321,20 +321,29 @@ export default {
     },
     fetchOptions () {
       this.optionsLoading = true
+      // listDbaasEngines (from the plugin) is the source of truth for which
+      // templates are engines; the dbaas- keyword/prefix below is only the
+      // fallback for management servers running an older plugin build.
+      const hasEnginesApi = 'listDbaasEngines' in this.$store.getters.apis
+      const templateParams = hasEnginesApi
+        ? { templatefilter: 'executable' }
+        : { templatefilter: 'executable', keyword: DBAAS_TEMPLATE_PREFIX }
       Promise.all([
-        // keyword also matches displaytext, so the dbaas- prefix is what
-        // actually decides — the base image mentions DBaaS in its description.
-        getAPI('listTemplates', { templatefilter: 'executable', keyword: 'dbaas' }),
+        getAPI('listTemplates', templateParams),
         getAPI('listZones', { available: true }),
         // memory and cpuspeed are minimum filters, not exact matches, so this
         // drops every offering below Medium server-side.
         getAPI('listServiceOfferings', { memory: 1024, cpuspeed: 1000 }),
         // Data disk is entirely optional, so this is never in the required
         // rules -- it only ever adds an extra volume when actually picked.
-        getAPI('listDiskOfferings')
-      ]).then(([tpl, zone, off, diskOff]) => {
+        getAPI('listDiskOfferings'),
+        hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
+      ]).then(([tpl, zone, off, diskOff, engines]) => {
+        const engineNames = engines
+          ? new Set((engines.listdbaasenginesresponse?.dbaasengine || []).map(e => e.template))
+          : null
         this.templates = (tpl.listtemplatesresponse.template || [])
-          .filter(t => t.name && t.name.startsWith('dbaas-') && t.isready)
+          .filter(t => t.name && t.isready && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
           // Same label source DatabaseInstances uses: the template's own
           // displaytext ("MySQL Community 8.0 on Debian 12 x86_64"), so a new
           // engine added to the backend config shows up without UI changes.
