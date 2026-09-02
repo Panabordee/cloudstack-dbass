@@ -26,7 +26,9 @@ export function buildConnectCommand (credentials) {
   const engine = (credentials.engine || '').toLowerCase()
   const { host, port, username, password, database } = credentials
   if (engine.includes('postgres')) {
-    return `psql "postgresql://${username}:${password}@${host}:${port}/${database}"`
+    // resetDatabasePassword/getDatabasePassword responses carry no database
+    // field, so fall back to the server's own default database.
+    return `psql "postgresql://${username}:${password}@${host}:${port}/${database || 'postgres'}"`
   }
   if (engine.includes('mongo')) {
     return `mongosh "mongodb://${username}:${password}@${host}:${port}/${database || 'admin'}"`
@@ -37,14 +39,19 @@ export function buildConnectCommand (credentials) {
 
 // navigator.clipboard only exists in secure contexts; the management UI is
 // commonly served over plain http, so fall back to the execCommand textarea
-// trick. Returns true when the copy most likely succeeded.
-export function copyTextToClipboard (text) {
+// trick. Async so the secure-context path can await the write: resolving true
+// before the promise settles would toast "copied" even on a rejected write.
+export async function copyTextToClipboard (text) {
   if (!text) {
     return false
   }
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text)
-    return true
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch (e) {
+      return false
+    }
   }
   const textarea = document.createElement('textarea')
   textarea.value = text

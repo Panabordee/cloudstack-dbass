@@ -496,8 +496,8 @@ export default {
             const copyButton = (label, text) => h(Button, {
               size: 'small',
               style: { marginRight: '8px' },
-              onClick: () => {
-                if (copyTextToClipboard(text)) {
+              onClick: async () => {
+                if (await copyTextToClipboard(text)) {
                   this.notifyCopied()
                 }
               }
