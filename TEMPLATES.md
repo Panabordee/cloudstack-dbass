@@ -134,9 +134,11 @@ so the only thing the key holder controls is `$SSH_ORIGINAL_COMMAND`, which
    server must be able to SSH into VMs on `dbaas-network` at all, for both this
    build process and every real `create_database`/`reset_password` call
    afterwards. On this all-in-one host that requires a secondary IP on
-   `cloudbr0` in the guest subnet (`/etc/netplan/60-dbaas-secondary-ip.yaml`)
-   and a rule dropping rogue DHCP replies from the physical uplink
-   (`dbaas-block-rogue-dhcp.service`) — see the memory note on this if you're
+   `cloudbr0` in the guest subnet (`/etc/netplan/60-dbaas-secondary-ip.yaml`).
+   This lab also relies on an ebtables rule dropping rogue DHCP replies from
+   the physical uplink — installed directly on the host and intentionally not
+   part of this repo (POC-only; a real environment isolates guest traffic on
+   its own VLAN and needs no such rule). See the memory note on this if you're
    re-deriving why SSH from the management server times out against a
    freshly-deployed VM even though ping/console work fine. Not a Debian- or
    template-specific issue; it will bite every engine equally if missing.
