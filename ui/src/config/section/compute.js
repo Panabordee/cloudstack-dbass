@@ -109,29 +109,7 @@ export default {
           docHelp: 'adminguide/virtual_machines.html#creating-vms',
           listView: true,
           show: isZoneCreated,
-          component: () => import('@/views/compute/DeployVM.vue'),
-          // Both entries create an instance, so they share one button rather
-          // than sitting next to each other as two unrelated icons. With only
-          // one of them reachable the menu collapses back to a plain button.
-          subActions: [
-            {
-              api: 'deployVirtualMachine',
-              icon: 'cloud-server-outlined',
-              label: 'label.instance',
-              listView: true,
-              show: isZoneCreated,
-              component: () => import('@/views/compute/DeployVM.vue')
-            },
-            {
-              api: 'createDatabase',
-              icon: 'database-outlined',
-              label: 'label.create.database.instance',
-              listView: true,
-              popup: true,
-              show: isZoneCreated,
-              component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
-            }
-          ]
+          component: () => import('@/views/compute/DeployVM.vue')
         },
         {
           api: 'updateVirtualMachine',
@@ -459,6 +437,19 @@ export default {
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
         },
         {
+          api: 'getDatabasePassword',
+          icon: 'eye-outlined',
+          label: 'label.show.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running', 'Stopped'].includes(record.state) &&
+              (record.templatename || '').startsWith('dbaas-')
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ShowDatabasePassword.vue')))
+        },
+        {
           api: 'assignVirtualMachine',
           icon: 'user-add-outlined',
           label: 'label.assign.instance.another',
@@ -526,6 +517,27 @@ export default {
           groupMap: (selection, values) => { return selection.map(x => { return { id: x, expunge: values.expunge } }) },
           show: (record) => { return ['Running', 'Stopped', 'Error'].includes(record.state) && record.vmtype !== 'sharedfsvm' },
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DestroyVM.vue')))
+        }
+      ]
+    },
+    {
+      name: 'database',
+      title: 'label.database',
+      icon: 'database-outlined',
+      // Gated purely on the createDatabase permission, not on any DBaaS
+      // template existing yet -- a user who can't call the API shouldn't see
+      // an empty page inviting them to try.
+      permission: ['createDatabase'],
+      component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DatabaseInstances.vue'))),
+      actions: [
+        {
+          api: 'createDatabase',
+          icon: 'plus-outlined',
+          label: 'label.create.database.instance',
+          listView: true,
+          popup: true,
+          show: isZoneCreated,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
         }
       ]
     },

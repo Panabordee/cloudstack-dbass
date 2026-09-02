@@ -64,7 +64,7 @@
         <a-button @click="notifyCopied" v-clipboard:copy="credentials.password" type="primary">
           {{ $t('label.copy.password') }}
         </a-button>
-        <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
+        <a-button @click="confirmClose">{{ $t('label.close') }}</a-button>
       </div>
     </div>
   </div>
@@ -72,6 +72,7 @@
 
 <script>
 import { ref, reactive, toRaw } from 'vue'
+import { Modal } from 'ant-design-vue'
 import { postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
 import TooltipLabel from '@/components/widgets/TooltipLabel'
@@ -92,7 +93,8 @@ export default {
     return {
       loading: false,
       isSubmitted: false,
-      credentials: {}
+      credentials: {},
+      passwordCopied: false
     }
   },
   beforeCreate () {
@@ -128,8 +130,8 @@ export default {
         }).then(json => {
           const dbaas = json.createdatabaseresponse?.dbaas
           if (dbaas) {
-            // Shown once: the password is generated on the VM and never
-            // stored anywhere we could read it back from.
+            // Also retrievable afterwards via Show Password -- the backend
+            // stores every successful create/reset, encrypted.
             this.credentials = dbaas
             this.isSubmitted = true
           } else {
@@ -153,8 +155,22 @@ export default {
       })
     },
     notifyCopied () {
+      this.passwordCopied = true
       this.$notification.info({
         message: this.$t('message.success.copy.clipboard')
+      })
+    },
+    confirmClose () {
+      if (this.passwordCopied) {
+        this.closeAction()
+        return
+      }
+      Modal.confirm({
+        title: this.$t('label.close'),
+        content: this.$t('message.confirm.close.database.password'),
+        okText: this.$t('label.yes'),
+        cancelText: this.$t('label.no'),
+        onOk: this.closeAction
       })
     },
     closeAction () {

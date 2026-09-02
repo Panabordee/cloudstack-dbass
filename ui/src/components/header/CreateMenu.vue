@@ -66,7 +66,7 @@ export default {
         title: 'label.database',
         subtitle: 'label.create.database.instance',
         icon: 'database-outlined',
-        route: { path: '/vm', query: { action: 'createDatabase' } }
+        route: { path: '/action/createDatabase' }
       },
       {
         api: 'createKubernetesCluster',
