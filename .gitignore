@@ -104,3 +104,6 @@ waf-*
 #.*
 
 !.gitignore
+
+# Live DBaaS extension config holds real API credentials — keep it host-local.
+extensions/dbaas/config.json

@@ -1,5 +1,23 @@
 # CloudStack DBaaS Extension — Skeleton
 
+> **Merged into the core tree.** The Java plugin builds as
+> `plugins/integrations/dbaas` and ships inside cloudstack-management.deb; the
+> python provisioning scripts ship to `/etc/cloudstack/extensions/dbaas/` from
+> `extensions/dbaas/`. This directory keeps the module source and the engine
+> documentation. Treat the standalone
+> [dbaas-extension-forcloudstack](https://github.com/Panabordee/dbaas-extension-forcloudstack)
+> repo as an archived snapshot.
+>
+> **`register_extension.sh` is optional/legacy**: the shipped plugin registers
+> its API commands through its Spring context and calls extension.py itself;
+> provisioning never goes through the Extensions Framework. Run the script
+> only if you also want the extension to appear under the Extensions
+> Framework UI.
+>
+> **Never hand-edit `/etc/cloudstack/extensions/dbaas/*` on a host**: those
+> files are dpkg conffiles — a locally modified file silently stops receiving
+> updates on every future upgrade.
+
 Self-service "Create Database" action that runs natively inside the CloudStack
 UI (Extensions Framework, CloudStack >= 4.22) on an already-deployed VM,
 provisions MySQL / PostgreSQL / MongoDB on it, and hands the caller back a

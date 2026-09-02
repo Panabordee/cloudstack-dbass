@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# OPTIONAL / LEGACY — you normally do NOT need to run this.
+#
+# The shipped cloud-plugin-dbaas registers its API commands directly through
+# its Spring context (META-INF/cloudstack/dbaas/) and DbaasManagerImpl calls
+# extension.py itself; provisioning never goes through the Extensions
+# Framework. Run this only if you additionally want the extension to appear
+# under the Extensions Framework UI (cmk list extensions), which is cosmetic
+# for this plugin.
+#
 # Run once (per management server cluster) after copying this extension to
 # /usr/share/cloudstack-management/extensions/dbaas/ and setting up config.json.
 # Requires cloudmonkey configured with an admin profile: `cmk set profile <name>`.
