@@ -29,7 +29,7 @@ public class DbaasResponse extends BaseResponse {
     private String username;
 
     @SerializedName("password")
-    @Param(description = "database password — shown once, not retrievable afterwards")
+    @Param(description = "database password")
     private String password;
 
     public void setEngine(String engine) { this.engine = engine; }
@@ -38,4 +38,8 @@ public class DbaasResponse extends BaseResponse {
     public void setDatabase(String database) { this.database = database; }
     public void setUsername(String username) { this.username = username; }
     public void setPassword(String password) { this.password = password; }
+
+    public String getEngine() { return engine; }
+    public String getUsername() { return username; }
+    public String getPassword() { return password; }
 }

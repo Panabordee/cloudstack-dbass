@@ -52,6 +52,17 @@
       <systemPath>${cs.lib}/cloud-server-${cs.version}.jar</systemPath>
     </dependency>
 
+    <!-- TransactionLegacy, for the dbaas_credentials table. This plugin has
+         no DAO/VO framework of its own, so raw JDBC through the same
+         connection pool CloudStack itself uses is the lightest option. -->
+    <dependency>
+      <groupId>org.apache.cloudstack</groupId>
+      <artifactId>cloud-framework-db</artifactId>
+      <version>${cs.version}</version>
+      <scope>system</scope>
+      <systemPath>${cs.lib}/cloud-framework-db-${cs.version}.jar</systemPath>
+    </dependency>
+
     <!-- ConfigKey / Configurable, for tunables exposed in Global Settings -->
     <dependency>
       <groupId>org.apache.cloudstack</groupId>

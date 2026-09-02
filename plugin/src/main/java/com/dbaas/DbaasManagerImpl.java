@@ -3,6 +3,9 @@ package com.dbaas;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -20,7 +23,9 @@ import com.cloud.exception.InvalidParameterValueException;
 import com.cloud.template.VirtualMachineTemplate;
 import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.component.PluggableService;
+import com.cloud.utils.crypt.DBEncryptionUtil;
 import com.cloud.utils.db.EntityManager;
+import com.cloud.utils.db.TransactionLegacy;
 import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.script.OutputInterpreter;
 import com.cloud.utils.script.Script;
@@ -104,6 +109,37 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     }
 
     @Override
+    public boolean start() {
+        ensureCredentialsTableExists();
+        return true;
+    }
+
+    // No DatabaseUpgradeChecker hook for this plugin (see schema-dbaas-credentials.sql),
+    // so every management server start is what stands in for a migration step.
+    // CREATE TABLE IF NOT EXISTS makes repeating it on every start harmless.
+    private void ensureCredentialsTableExists() {
+        String sql = "CREATE TABLE IF NOT EXISTS dbaas_credentials ("
+                + "id bigint unsigned NOT NULL AUTO_INCREMENT,"
+                + "vm_id char(40) NOT NULL,"
+                + "db_username varchar(255) NOT NULL,"
+                + "db_password_encrypted varchar(512) NOT NULL,"
+                + "engine varchar(255) NOT NULL,"
+                + "created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,"
+                + "PRIMARY KEY (id),"
+                + "KEY i_dbaas_credentials__vm_id (vm_id)"
+                + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            PreparedStatement pstmt = txn.prepareStatement(sql);
+            pstmt.executeUpdate();
+        } catch (SQLException e) {
+            // Credential storage degrades gracefully (see storeCredential), so
+            // a management server that can't create this table should still
+            // come up and serve create_database/reset_password normally.
+            logger.error("failed to ensure dbaas_credentials table exists", e);
+        }
+    }
+
+    @Override
     public DbaasResponse createDatabase(CreateDatabaseCmd cmd) {
         JsonObject parameters = new JsonObject();
         parameters.addProperty("db_name", cmd.getDbName());
@@ -119,6 +155,8 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         response.setUsername(details.get("username").getAsString());
         response.setPassword(details.get("password").getAsString());
         response.setObjectName("dbaas");
+
+        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(), response.getEngine());
         return response;
     }
 
@@ -138,7 +176,70 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         response.setUsername(details.get("username").getAsString());
         response.setPassword(details.get("password").getAsString());
         response.setObjectName("dbaas");
+
+        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(), response.getEngine());
         return response;
+    }
+
+    @Override
+    public DbaasResponse getDatabasePassword(GetDatabasePasswordCmd cmd) {
+        // findById + ACL already ran in getEntityOwnerId before execute() was
+        // reached; this just resolves the UUID the table is keyed on.
+        String vmId = vmUuid(cmd.getVirtualMachineId());
+
+        String sql = "SELECT db_username, db_password_encrypted, engine FROM dbaas_credentials WHERE vm_id = ?"
+                + (cmd.getDbUsername() != null ? " AND db_username = ?" : "")
+                + " ORDER BY created_at DESC, id DESC LIMIT 1";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            PreparedStatement pstmt = txn.prepareStatement(sql);
+            pstmt.setString(1, vmId);
+            if (cmd.getDbUsername() != null) {
+                pstmt.setString(2, cmd.getDbUsername());
+            }
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (!rs.next()) {
+                    throw new InvalidParameterValueException("No stored database credential found for this VM"
+                            + (cmd.getDbUsername() != null ? " and username " + cmd.getDbUsername() : ""));
+                }
+                DbaasResponse response = new DbaasResponse();
+                response.setUsername(rs.getString("db_username"));
+                response.setPassword(DBEncryptionUtil.decrypt(rs.getString("db_password_encrypted")));
+                response.setEngine(rs.getString("engine"));
+                response.setObjectName("dbaas");
+                return response;
+            }
+        } catch (SQLException e) {
+            throw new CloudRuntimeException("failed to read stored database credential", e);
+        }
+    }
+
+    private String vmUuid(Long vmId) {
+        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
+        if (vm == null) {
+            throw new InvalidParameterValueException("VM not found: " + vmId);
+        }
+        return vm.getUuid();
+    }
+
+    // create_database/reset_password both call this on every success, so
+    // Show Password always reflects whatever the tenant's credential
+    // actually is right now -- not just what it was the first time.
+    private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine) {
+        String sql = "INSERT INTO dbaas_credentials (vm_id, db_username, db_password_encrypted, engine) VALUES (?, ?, ?, ?)";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            PreparedStatement pstmt = txn.prepareStatement(sql);
+            pstmt.setString(1, vmId);
+            pstmt.setString(2, dbUsername);
+            pstmt.setString(3, DBEncryptionUtil.encrypt(dbPassword));
+            pstmt.setString(4, engine);
+            pstmt.executeUpdate();
+        } catch (SQLException e) {
+            // The provisioning call already succeeded and the tenant already
+            // has the password from the API response -- losing the ability to
+            // show it again later is degraded, not broken, so this does not
+            // fail the whole request.
+            logger.error("failed to store dbaas credential for VM {}", vmId, e);
+        }
     }
 
     @Override
@@ -146,6 +247,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         List<Class<?>> cmdList = new ArrayList<>();
         cmdList.add(CreateDatabaseCmd.class);
         cmdList.add(ResetDatabasePasswordCmd.class);
+        cmdList.add(GetDatabasePasswordCmd.class);
         return cmdList;
     }
 
