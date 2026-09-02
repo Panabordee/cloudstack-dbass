@@ -9,6 +9,22 @@
 --
 -- Keep this in sync with the CREATE TABLE in DbaasManagerImpl.java if either
 -- one changes.
+--
+-- LIFECYCLE / CLEANUP:
+-- Rows are never deleted automatically: the extension has no expunge hook in
+-- 4.22 (the Extensions Framework exposes no VM-lifecycle event to plugins), so
+-- credentials of destroyed VMs accumulate. They are encrypted at rest and
+-- harmless beyond table growth, but a periodic cleanup is recommended on
+-- long-lived deployments. The safe form joins against vm_instance so live VMs
+-- are never touched (uuid keeps matching; removed rows have removed!=NULL):
+--
+--   DELETE c FROM dbaas_credentials c
+--     LEFT JOIN vm_instance v ON v.uuid = c.vm_id
+--     WHERE v.id IS NULL OR v.removed IS NOT NULL;
+--
+-- Run it by hand, or wire it into whatever maintenance scheduling the
+-- deployment already has. An automatic expunge hook is worth adding if the
+-- Extensions Framework grows a VM-lifecycle event.
 CREATE TABLE IF NOT EXISTS `dbaas_credentials` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   -- vm_template.uuid / vm_instance.uuid are CHAR(40) elsewhere in the cloud

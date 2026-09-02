@@ -5,7 +5,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -131,10 +130,13 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.executeUpdate();
-        } catch (SQLException e) {
+        } catch (Exception e) {
             // Credential storage degrades gracefully (see storeCredential), so
             // a management server that can't create this table should still
             // come up and serve create_database/reset_password normally.
+            // Exception, not SQLException: TransactionLegacy.open() throws
+            // unchecked CloudRuntimeException (DB down / pool exhausted) that
+            // a SQLException catch would let escape and fail management start.
             logger.error("failed to ensure dbaas_credentials table exists", e);
         }
     }
@@ -143,7 +145,16 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     public DbaasResponse createDatabase(CreateDatabaseCmd cmd) {
         JsonObject parameters = new JsonObject();
         parameters.addProperty("db_name", cmd.getDbName());
-        parameters.addProperty("db_username", cmd.getDbUsername());
+        // The username is optional: the form banner advertises that an empty
+        // one defaults to the database name. Both share one identifier shape,
+        // so the provisioning script's validation accepts either, and a
+        // name-derived user makes a retry on the same VM fail loudly on the
+        // duplicate user instead of stacking anonymous users.
+        String dbUsername = cmd.getDbUsername();
+        if (dbUsername == null || dbUsername.trim().isEmpty()) {
+            dbUsername = cmd.getDbName();
+        }
+        parameters.addProperty("db_username", dbUsername);
 
         JsonObject details = runExtensionAction("create_database", cmd.getVirtualMachineId(), parameters);
 
@@ -208,7 +219,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 response.setObjectName("dbaas");
                 return response;
             }
-        } catch (SQLException e) {
+        } catch (Exception e) {
             throw new CloudRuntimeException("failed to read stored database credential", e);
         }
     }
@@ -233,11 +244,12 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             pstmt.setString(3, DBEncryptionUtil.encrypt(dbPassword));
             pstmt.setString(4, engine);
             pstmt.executeUpdate();
-        } catch (SQLException e) {
+        } catch (Exception e) {
             // The provisioning call already succeeded and the tenant already
             // has the password from the API response -- losing the ability to
             // show it again later is degraded, not broken, so this does not
-            // fail the whole request.
+            // fail the whole request. Exception, not SQLException, for the
+            // same unchecked-exception reason as ensureCredentialsTableExists.
             logger.error("failed to store dbaas credential for VM {}", vmId, e);
         }
     }
