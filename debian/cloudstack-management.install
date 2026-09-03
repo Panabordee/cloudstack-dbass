@@ -25,6 +25,12 @@
 /etc/cloudstack/extensions/Proxmox/proxmox.sh
 /etc/cloudstack/extensions/HyperV/hyperv.py
 /etc/cloudstack/extensions/MaaS/maas.py
+/etc/cloudstack/extensions/dbaas/extension.py
+/etc/cloudstack/extensions/dbaas/cs_api.py
+/etc/cloudstack/extensions/dbaas/config.example.json
+/etc/cloudstack/extensions/dbaas/requirements.txt
+/etc/cloudstack/extensions/dbaas/actions/*
+/etc/cloudstack/extensions/dbaas/provisioning/*
 /etc/default/cloudstack-management
 /etc/security/limits.d/cloudstack-limits.conf
 /etc/sudoers.d/cloudstack
