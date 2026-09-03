@@ -40,11 +40,6 @@ CREATE TABLE IF NOT EXISTS `dbaas_credentials` (
   -- exactly.
   `db_password_encrypted` varchar(512) NOT NULL,
   `engine` varchar(255) NOT NULL,
-  -- The tenant's instance login credentials, set by vmaccess.sh on the first
-  -- create and inherited by later rows. NULL for pre-vmaccess rows and for
-  -- calls that never touched the OS password.
-  `vm_username` varchar(255) NULL,
-  `vm_password_encrypted` varchar(512) NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `i_dbaas_credentials__vm_id` (`vm_id`)

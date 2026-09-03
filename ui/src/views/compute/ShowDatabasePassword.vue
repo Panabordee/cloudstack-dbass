@@ -26,21 +26,11 @@
           <span class="connect-command">{{ connectCommand }}</span>
         </a-descriptions-item>
       </a-descriptions>
-      <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
-      <template v-if="credentials.password && credentials.vmusername">
-        <a-descriptions bordered size="small" :column="1" class="credentials">
-          <a-descriptions-item :label="$t('label.vm.username')">{{ credentials.vmusername }}</a-descriptions-item>
-          <a-descriptions-item :label="$t('label.vm.password')">{{ credentials.vmpassword }}</a-descriptions-item>
-          <a-descriptions-item :label="$t('label.ssh.command')">
-            <span class="connect-command">{{ sshCommand }}</span>
-          </a-descriptions-item>
-        </a-descriptions>
-      </template>
       <a-alert
-        v-else-if="loaded && noCredential"
-        type="warning"
+        v-else-if="loaded && noCredential && autoChecking"
+        type="info"
         showIcon
-        :message="$t('message.dbaas.no.stored.credential')"
+        :message="$t('message.dbaas.provisioning.inprogress', { count: autoChecks, total: maxAutoChecks })"
         class="state-alert" />
       <a-alert
         v-else-if="loaded"
@@ -55,6 +45,7 @@
         showIcon
         :message="$t('message.desc.show.database.password')"
         class="state-alert" />
+      <p v-if="credentials.password" class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
       <div :span="24" class="action-button">
         <a-button
           v-if="credentials.password"
@@ -70,18 +61,6 @@
           type="primary">
           {{ $t('label.copy.connect.command') }}
         </a-button>
-        <a-button
-          v-if="credentials.vmpassword"
-          @click="notifyCopied"
-          v-clipboard:copy="credentials.vmpassword">
-          {{ $t('label.copy.vm.password') }}
-        </a-button>
-        <a-button
-          v-if="sshCommand"
-          @click="notifyCopied"
-          v-clipboard:copy="sshCommand">
-          {{ $t('label.copy.ssh.command') }}
-        </a-button>
         <a-button v-if="loaded && !credentials.password" @click="fetchPassword">{{ $t('label.retry') }}</a-button>
         <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
       </div>
@@ -91,7 +70,7 @@
 
 <script>
 import { getAPI } from '@/api'
-import { buildConnectCommand, buildSshCommand } from '@/utils/dbaas'
+import { buildConnectCommand } from '@/utils/dbaas'
 
 export default {
   name: 'ShowDatabasePassword',
@@ -107,6 +86,8 @@ export default {
       loaded: false,
       noCredential: false,
       errorMsg: '',
+      autoChecks: 0,
+      maxAutoChecks: 12,
       credentials: {}
     }
   },
@@ -114,11 +95,11 @@ export default {
     this.fetchPassword()
   },
   computed: {
-    sshCommand () {
-      return buildSshCommand(this.credentials)
-    },
     connectCommand () {
       return buildConnectCommand(this.credentials)
+    },
+    autoChecking () {
+      return this.noCredential && this.autoChecks > 0 && this.autoChecks < this.maxAutoChecks
     }
   },
   methods: {
@@ -134,13 +115,19 @@ export default {
         // The backend answers "No stored database credential found for this
         // VM" while a createDatabase is still provisioning (or before the
         // first one ever ran) -- that is a normal, retryable state, not a
-        // broken fetch, so give it its own message instead of the spinner
-        // hanging on the initial info alert forever.
+        // broken fetch. While provisioning may still be running, check again
+        // automatically every 10s so the user sees progress instead of an
+        // error; after the budget the static warning with a Retry button
+        // takes over.
         const data = error?.response?.data
         const text = data ? (data[Object.keys(data).find(k => data[k] && data[k].errortext)]?.errortext || '') : ''
         this.errorMsg = text || error?.message || String(error)
         this.noCredential = this.errorMsg.includes('No stored database credential')
         this.loaded = true
+        if (this.noCredential && this.autoChecks < this.maxAutoChecks) {
+          this.autoChecks++
+          setTimeout(() => this.fetchPassword(), 10000)
+        }
       }).finally(() => {
         this.loading = false
       })

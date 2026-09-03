@@ -3376,6 +3376,7 @@
 "message.dbaas.waiting.engine": "Waiting for the database engine to start...",
 "message.dbaas.close.early": "The instance is already created. You can close this window now and check the password later with Show Password.",
 "message.dbaas.no.stored.credential": "No stored database credential for this instance yet. If the database is still being provisioned, try again in a minute.",
+"message.dbaas.provisioning.inprogress": "The database for this instance is still being provisioned. Checking again automatically ({count}/{total})...",
 "message.dbaas.credential.load.failed": "Could not load the stored database credential.",
 "message.dbaas.connect.command": "Connect from any machine that can reach the instance:",
 "message.dbaas.vm.access": "SSH access to the instance itself (the password is prompted for on login):",
