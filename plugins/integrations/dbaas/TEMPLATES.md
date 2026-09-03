@@ -141,20 +141,73 @@ so the only thing the key holder controls is `$SSH_ORIGINAL_COMMAND`, which
   `Illegal instruction (core dumped)`. Verified present and working on this
   install.
 
+## Prerequisites
+
+One build host (can be the management server itself) and one CloudStack
+management server, with:
+
+- `root` on the build host, and enough free disk for the raw base image plus
+  the qcow2 overlay of the VM you build (~10 GB is comfortable per engine).
+- `qemu-utils` (`qemu-nbd`, `qemu-img`) and the `nbd` kernel module loaded
+  (`modprobe nbd max_part=16`) for offline disk patching.
+- `cloudmonkey` (`cmk`) configured against the target CloudStack with an admin
+  profile — template registration goes through it.
+- CloudStack >= 4.22 management server with this repository's plugin deployed
+  (the `dbaas-*` API commands must be reachable, since the extension reads the
+  engines map at runtime).
+- A guest network the management server can reach: provisioning SSHes from
+  the management server into the guest on TCP 22. If SSH from the management
+  server to a freshly deployed VM times out while ping and the console work,
+  the guest subnet is typically not routed/shared to the management host yet —
+  fix that before building anything (a secondary address for the management
+  host inside the guest subnet is the usual trick).
+
+## Step 1 — fetch the base image and verify it
+
+Download `debian-12-genericcloud-amd64.qcow2` from the official Debian cloud
+image directory and verify it against the `SHA512SUMS` file published at the
+same path **at the time you download** (the checksums change with each point
+release — for reference, the file this branch was built against had
+`c602f42a374c097bafcbc77c2d034fb06cb8a831d791bcbaa5d043f029874b0c32d41cb72ba8b6d50ccfd64c9b4b0dc9ade5b6e4065712f3eb152338e532721f`):
+
+```
+BASE_URL=https://cloud.debian.org/images/cloud/bookworm/latest
+wget "$BASE_URL/debian-12-genericcloud-amd64.qcow2" "$BASE_URL/SHA512SUMS"
+sha512sum -c SHA512SUMS 2>/dev/null | grep genericcloud-amd64.qcow2
+```
+
+**Do not let CloudStack's SSVM download from `cloud.debian.org` directly:**
+the directory always answers with a 302 redirect to a mirror, and the
+secondary storage VM does not follow redirects — the download fails or lands
+on an error page. Either resolve the final mirror URL first (`curl -sI` and
+take the `Location:` header, confirm it answers 200), or use a
+redirect-free mirror such as CloudStack's own
+`https://download.cloudstack.org/templates/cloud-images/debian/debian-12-genericcloud-amd64.qcow2`.
+
 ## Rebuilding a template
 
-0. **Prerequisite for this specific host (`cloudstackcve`):** the management
-   server must be able to SSH into VMs on `dbaas-network` at all, for both this
-   build process and every real `create_database`/`reset_password` call
-   afterwards. On this all-in-one host that requires a secondary IP on
-   `cloudbr0` in the guest subnet (`/etc/netplan/60-dbaas-secondary-ip.yaml`).
-   This lab also relies on an ebtables rule dropping rogue DHCP replies from
-   the physical uplink — installed directly on the host and intentionally not
-   part of this repo (POC-only; a real environment isolates guest traffic on
-   its own VLAN and needs no such rule). See the memory note on this if you're
-   re-deriving why SSH from the management server times out against a
-   freshly-deployed VM even though ping/console work fine. Not a Debian- or
-   template-specific issue; it will bite every engine equally if missing.
+Each engine is built **separately** — four builds, four registrations. The
+per-engine contract:
+
+| Template name | Engine script | Reset script | Banner files | Port |
+| --- | --- | --- | --- | --- |
+| `dbaas-mysql` | `mysql.sh` | `mysql_reset.sh` | `dbaas-engine-mysql` + `motd-mysql` + `issue-mysql` | 3306 |
+| `dbaas-mariadb` | `mariadb.sh` | `mariadb_reset.sh` | `dbaas-engine-mariadb` + `motd-mariadb` + `issue-mariadb` | 3306 |
+| `dbaas-postgresql` | `postgresql.sh` | `postgresql_reset.sh` | `dbaas-engine-postgresql` + `motd-postgresql` + `issue-postgresql` | 5432 |
+| `dbaas-mongodb` | `mongodb.sh` | `mongodb_reset.sh` | `dbaas-engine-mongodb` + `motd-mongodb` + `issue-mongodb` | 27017 |
+
+The template name is the engine key: it must match the key in `config.json`'s
+`"engines"` map **exactly**, and (see "Adding a new engine") must be lowercase
+alphanumerics — no `-` or `_` except the `_reset` script suffix.
+
+Step 0 is one generic requirement: **the management server must be able to
+reach TCP 22 of every guest it will provision.** On an all-in-one install the
+management host usually needs its own address inside the guest subnet (e.g. a
+secondary IP on the guest bridge); set that up for your network however it is
+laid out, and verify with `ssh -i <provisioner-key> <user>@<guest-ip>` from
+the management server before going further. It will bite every engine
+equally if missing.
+
 1. Deploy a VM from `debian-12-base` with a keypair you hold. Debian's
    `genericcloud` image sets its cloud-init default user to `debian`, not
    `ubuntu` — SSH in as `debian@<ip>` and `sudo -i` from there.
@@ -241,6 +294,29 @@ rm -f /home/debian/.ssh/authorized_keys /root/.ssh/authorized_keys
 ```
 
 The last line removes your build key, so run it last — you cannot SSH back in.
+
+### Registering the template
+
+Stop the VM, take its ROOT volume's volume id from CloudStack, and register it
+with `cmk` — the `name` must equal the engine key in `config.json`'s
+`"engines"` map exactly (this is how `detect_engine` resolves the template):
+
+```
+cmk create template volumeid=<volume-uuid> \
+    name=dbaas-postgresql \
+    displaytext="PostgreSQL 15 on Debian 12 x86_64" \
+    ostypeid=<debian-12-64bit-os-type-id> \
+    ispublic=false format=QCOW2 \
+    requireshvm=true passwordenabled=false
+```
+
+- `passwordenabled=false` is deliberate: login credentials are provisioned by
+  `vmaccess.sh` through the extension, not by CloudStack's password server.
+- Repeat per engine; the four template names are exactly the four keys of the
+  `engines` map (`dbaas-mysql`, `dbaas-mariadb`, `dbaas-postgresql`,
+  `dbaas-mongodb`).
+- After the first boot of an instance from the new template, confirm the
+  engine listens on its port from outside (see the engine table above).
 
 ## Patching an existing template in place
 

@@ -201,3 +201,12 @@ The following provides more details on the included cryptographic software:
 ## Building this branch
 
 See [BUILD-DBAAS.md](BUILD-DBAAS.md) for the DBaaS build steps and gotchas.
+
+## Building DBaaS templates
+
+The `dbaas-*` template images (MySQL / MariaDB / PostgreSQL / MongoDB engines)
+are built outside this repository but documented in it:
+[plugins/integrations/dbaas/TEMPLATES.md](plugins/integrations/dbaas/TEMPLATES.md)
+is the standalone runbook — prerequisites, base image verification, per-engine
+build steps, template registration and the engine/`config.json` naming
+contract. Start there when you need a new engine image or a fresh install.
