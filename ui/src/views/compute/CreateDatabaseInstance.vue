@@ -659,9 +659,10 @@ export default {
     color: rgba(0, 0, 0, 0.45);
   }
 
+  // No word-break here: labels wrap at spaces; only the value spans
+  // (.connect-command) break-all, since commands have no spaces to wrap on.
   .credentials {
     margin-top: 16px;
-    word-break: break-all;
   }
 
   .connect-command {
