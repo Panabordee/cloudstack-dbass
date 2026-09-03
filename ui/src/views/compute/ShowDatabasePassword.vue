@@ -51,17 +51,17 @@
         showIcon
         :message="$t('message.desc.show.database.password')"
         class="state-alert" />
-      <p v-if="credentials.password" class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
+      <p v-if="credentials.found && credentials.password" class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
       <div :span="24" class="action-button">
         <a-button
-          v-if="credentials.password"
+          v-if="credentials.found && credentials.password"
           @click="notifyCopied"
           v-clipboard:copy="credentials.password"
           type="primary">
           {{ $t('label.copy.password') }}
         </a-button>
         <a-button
-          v-if="connectCommand"
+          v-if="credentials.found && connectCommand"
           @click="notifyCopied"
           v-clipboard:copy="connectCommand"
           type="primary">
@@ -93,6 +93,7 @@ export default {
       errorMsg: '',
       autoChecks: 0,
       maxAutoChecks: 12,
+      retryTimerId: null,
       credentials: {}
     }
   },
@@ -122,9 +123,18 @@ export default {
   },
   methods: {
     fetchPassword () {
+      if (this.retryTimerId) {
+        // A pending auto-check would keep firing alongside this request --
+        // two chains interleaving API calls and state writes.
+        clearTimeout(this.retryTimerId)
+        this.retryTimerId = null
+      }
       this.loading = true
       this.loaded = false
       this.errorMsg = ''
+      // Drop stale credentials up front: if this fetch fails, showing an old
+      // password next to the red alert would be misleading.
+      this.credentials = {}
       getAPI('getDatabasePassword', { virtualmachineid: this.resource.id }).then(json => {
         this.credentials = json.getdatabasepasswordresponse?.dbaas || {}
         this.loaded = true
