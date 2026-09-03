@@ -193,6 +193,14 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         response.setDatabase(details.get("database").getAsString());
         response.setUsername(details.get("username").getAsString());
         response.setPassword(details.get("password").getAsString());
+        // VM access is best-effort on the extension side: templates built
+        // before vmaccess.sh existed report no vm_* fields at all.
+        if (details.has("vm_username")) {
+            response.setVmUsername(details.get("vm_username").getAsString());
+        }
+        if (details.has("vm_password")) {
+            response.setVmPassword(details.get("vm_password").getAsString());
+        }
         response.setObjectName("dbaas");
 
         storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(), response.getEngine());

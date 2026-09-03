@@ -32,6 +32,14 @@ public class DbaasResponse extends BaseResponse {
     @Param(description = "database password")
     private String password;
 
+    @SerializedName("vmusername")
+    @Param(description = "login user on the instance, when VM access was set up")
+    private String vmUsername;
+
+    @SerializedName("vmpassword")
+    @Param(description = "login password on the instance, when VM access was set up")
+    private String vmPassword;
+
     public void setEngine(String engine) { this.engine = engine; }
     public void setHost(String host) { this.host = host; }
     public void setPort(Integer port) { this.port = port; }
@@ -42,4 +50,6 @@ public class DbaasResponse extends BaseResponse {
     public String getEngine() { return engine; }
     public String getUsername() { return username; }
     public String getPassword() { return password; }
+    public void setVmUsername(String vmUsername) { this.vmUsername = vmUsername; }
+    public void setVmPassword(String vmPassword) { this.vmPassword = vmPassword; }
 }

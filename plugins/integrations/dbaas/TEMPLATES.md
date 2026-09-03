@@ -61,6 +61,7 @@ images keep working untouched.
 | --- | --- | --- |
 | `/opt/dbaas/provision.sh` | `root:root` 755 | `provisioning/provision.sh` verbatim |
 | `/opt/dbaas/<engine>.sh` | `root:root` 755 | `provisioning/mysql.sh`, `mariadb.sh`, `postgresql.sh` or `mongodb.sh` |
+| `/opt/dbaas/vmaccess.sh` | `root:root` 755 | `provisioning/vmaccess.sh` — sets the tenant login user's password and enables sshd password logins. Images without it still provision databases fine; the extension then reports no VM credentials (the UI hides its VM access block) |
 | `/home/dbaas-provisioner/.ssh/authorized_keys` | `root:root` 644 | `provisioning/authorized_keys.example` — root-owned so the user cannot edit its own forced command |
 | `/etc/sudoers.d/dbaas-provisioner` | `root:root` 440 | `provisioning/sudoers.d-dbaas-provisioner` |
 
@@ -294,6 +295,11 @@ Nothing about engine selection is hardcoded in the Python extension or in
 `provision.sh` — both read the mapping or the filesystem at runtime. To add
 engine `foo`:
 
+0. Engine script names must match `^[a-z0-9]+(_reset)?\.sh$` — lowercase
+   alphanumerics only, the only `_` allowed is the `_reset` suffix. Names with
+   `-`, `_` elsewhere or capitals are rejected by `provision.sh` even though
+   `config.json` would accept them; this is the forced-command path guard, and
+   it is deliberate. `vmaccess.sh` (below) honours the same shape.
 1. Write `provisioning/foo.sh` and `provisioning/foo_reset.sh` (same stdin/JSON
    contract as the existing engines) and, if it needs one, a
    `provisioning/banner/dbaas-engine-foo` + `motd-foo` + `issue-foo` set.

@@ -91,6 +91,24 @@ def run(payload, config):
         logging.exception("provisioning script failed")
         return {"status": "failed", "message": f"provisioning failed: {e}"}
 
+    # Best-effort tenant shell access: the login user comes from config.json
+    # (vm_ssh_user, default "debian" — the Debian cloud image user) and the
+    # password is generated here. vmaccess.sh only exists in templates built
+    # after it was added, and a chpasswd failure must never fail the database
+    # that was just provisioned successfully — on any problem the vm_*
+    # fields are simply left out of the response and the warning is logged.
+    vm_user = config.get("vm_ssh_user", "debian")
+    vm_password = generate_password()
+    vm_access = {}
+    try:
+        _run_provisioning_script(vm_ip, "vmaccess.sh", config, {
+            "vm_user": vm_user,
+            "vm_password": vm_password,
+        })
+        vm_access = {"vm_username": vm_user, "vm_password": vm_password}
+    except Exception as e:
+        logging.warning("vm access setup skipped: %s", e)
+
     # Never log db_password — everything above/below this line must stay silent on it.
     connection_info = {
         "engine": template_name,
@@ -100,6 +118,7 @@ def run(payload, config):
         "username": db_username,
         "password": db_password,
     }
+    connection_info.update(vm_access)
     return {
         "status": "success",
         "message": json.dumps(connection_info),

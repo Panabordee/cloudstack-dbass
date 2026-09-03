@@ -95,6 +95,14 @@ export function buildConnectCommand (credentials) {
   return `mysql -h ${host} -P ${port || 3306} -u ${username} -p'${password}'${database ? ' ' + database : ''}`
 }
 
+// The interactive form: the password is prompted for, not embedded.
+export function buildSshCommand (credentials) {
+  if (!credentials || !credentials.host || !credentials.vmusername) {
+    return ''
+  }
+  return `ssh ${credentials.vmusername}@${credentials.host}`
+}
+
 // navigator.clipboard only exists in secure contexts; the management UI is
 // commonly served over plain http, so fall back to the execCommand textarea
 // trick. Async so the secure-context path can await the write: resolving true

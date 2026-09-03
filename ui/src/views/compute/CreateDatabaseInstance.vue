@@ -162,6 +162,24 @@
         </a-descriptions-item>
       </a-descriptions>
       <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
+      <template v-if="credentials.vmusername">
+        <a-descriptions bordered size="small" :column="1" class="credentials">
+          <a-descriptions-item :label="$t('label.vm.username')">{{ credentials.vmusername }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.vm.password')">{{ credentials.vmpassword }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.ssh.command')">
+            <span class="connect-command">{{ sshCommand }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+        <p class="connect-hint">{{ $t('message.dbaas.vm.access') }}</p>
+        <div :span="24" class="action-button">
+          <a-button @click="notifyCopied" v-clipboard:copy="sshCommand" type="primary">
+            {{ $t('label.copy.ssh.command') }}
+          </a-button>
+          <a-button @click="notifyCopied" v-clipboard:copy="credentials.vmpassword">
+            {{ $t('label.copy.vm.password') }}
+          </a-button>
+        </div>
+      </template>
       <div :span="24" class="action-button">
         <a-button @click="notifyCopied" v-clipboard:copy="connectCommand" type="primary">
           {{ $t('label.copy.connect.command') }}
@@ -198,6 +216,7 @@ import { getAPI, postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
 import {
   buildConnectCommand,
+  buildSshCommand,
   copyTextToClipboard,
   DBAAS_TEMPLATE_PREFIX,
   DBAAS_IDENTIFIER_PATTERN,
@@ -241,6 +260,9 @@ export default {
     },
     connectCommand () {
       return buildConnectCommand(this.credentials)
+    },
+    sshCommand () {
+      return buildSshCommand(this.credentials)
     },
     showKeyPairs () {
       return 'listSSHKeyPairs' in this.$store.getters.apis
@@ -502,15 +524,30 @@ export default {
             this.$notification.success({
               message: this.$t('label.create.database.instance'),
               description: h('div', [
-                h('div', `username: ${this.credentials.username}`),
-                h('div', `password: ${this.credentials.password}`),
+                h('div', `db username: ${this.credentials.username}`),
+                h('div', `db password: ${this.credentials.password}`),
                 h('div', {
                   style: { fontFamily: 'monospace', wordBreak: 'break-all', marginTop: '4px' }
-                }, this.connectCommand)
+                }, this.connectCommand),
+                this.credentials.vmusername
+                  ? h('div', { style: { marginTop: '8px' } }, `vm username: ${this.credentials.vmusername}`)
+                  : null,
+                this.credentials.vmpassword
+                  ? h('div', `vm password: ${this.credentials.vmpassword}`)
+                  : null,
+                this.sshCommand
+                  ? h('div', {
+                    style: { fontFamily: 'monospace', wordBreak: 'break-all' }
+                  }, this.sshCommand)
+                  : null
               ]),
               btn: h('div', { style: { marginTop: '8px' } }, [
                 copyButton(this.$t('label.copy.password'), this.credentials.password),
-                copyButton(this.$t('label.copy.connect.command'), this.connectCommand)
+                copyButton(this.$t('label.copy.connect.command'), this.connectCommand),
+                this.credentials.vmpassword
+                  ? copyButton(this.$t('label.copy.vm.password'), this.credentials.vmpassword)
+                  : null,
+                this.sshCommand ? copyButton(this.$t('label.copy.ssh.command'), this.sshCommand) : null
               ]),
               duration: 0
             })

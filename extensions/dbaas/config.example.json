@@ -4,6 +4,8 @@
   "cloudstack_secret_key": "REPLACE_ME",
   "ssh_private_key_path": "/etc/dbaas-extension/dbaas_provisioner_id_ed25519",
   "ssh_user": "dbaas-provisioner",
+  "_comment_vm_ssh_user": "Login user the tenant gets on the instance (Debian cloud images ship \"debian\"). vmaccess.sh sets this user's password and enables sshd password logins; templates built before vmaccess.sh existed simply report no VM credentials.",
+  "vm_ssh_user": "debian",
   "_comment_dbaas_dir": "Where the provisioning scripts live inside the template image. Only change it if you build images that install them elsewhere; the scripts themselves honour a DBAAS_DIR environment variable with the same default.",
   "dbaas_dir": "/opt/dbaas",
   "_comment_ssh_connect_timeout_seconds": "Applied to paramiko's timeout, banner_timeout AND auth_timeout together. Setting only timeout is not enough: banner_timeout and auth_timeout keep their own 15s defaults, so a slow-to-answer sshd still fails at 15s no matter how large this is. See TEMPLATES.md for the offering sizing that makes those timeouts matter.",

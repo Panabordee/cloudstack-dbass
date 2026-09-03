@@ -31,6 +31,19 @@ def setup_logging(log_file):
     )
 
 
+def redact_passwords(value):
+    """Passwords used to reach the log in plaintext via the raw payload dump;
+    anything whose key mentions one is masked before logging."""
+    if isinstance(value, dict):
+        return {
+            k: ("***" if "password" in k.lower() else redact_passwords(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_passwords(v) for v in value]
+    return value
+
+
 def fail(message):
     print(json.dumps({"status": "failed", "message": message}))
     sys.exit(0)  # CloudStack reads the JSON body for success/failure, not exit code
@@ -62,7 +75,7 @@ def main():
 
     # Log the raw payload once so you can confirm real field names for your
     # CloudStack version before trusting the parser in actions/*.py.
-    logging.info("action=%s payload=%s", action_name, json.dumps(payload))
+    logging.info("action=%s payload=%s", action_name, json.dumps(redact_passwords(payload)))
 
     if action_name == "create_database":
         from actions.create_database import run as run_create_database
