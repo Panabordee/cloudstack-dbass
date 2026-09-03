@@ -48,10 +48,13 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "Filesystem path to the DBaaS extension.py entrypoint.", true);
 
     public static final ConfigKey<Integer> DbaasProvisionTimeout = new ConfigKey<>(
-            "Advanced", Integer.class, "dbaas.provision.timeout", "300",
-            // 300s: the extension retries transient SSH failures internally
-            // (3 attempts with sleeps), so the budget must cover the whole
-            // retry loop, not a single attempt.
+            "Advanced", Integer.class, "dbaas.provision.timeout", "600",
+            // 600s: the extension retries transient SSH failures internally
+            // (3 attempts, 15s apart, each up to ssh timeout + the engine's
+            // own internal wait -- MongoDB's rotation marker alone is 120s),
+            // so the budget must cover the whole retry loop (~570s worst
+            // case), not a single attempt. The python loop checks a 400s
+            // wall-clock budget on top and stops itself first.
             "Timeout in seconds passed through to extension.py for provisioning.", true);
 
     @Inject
@@ -358,19 +361,27 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     @Override
     public List<DbaasEngineResponse> listEngines() {
-        JsonObject engines = readEnginesConfig().getAsJsonObject("engines");
+        // A broken config.json must not take the whole API down: the UI's
+        // engine picker and the Database section both call this, so a failure
+        // here degrades to "no engines available" (logged loudly) instead of
+        // erroring every page that touches the plugin.
         List<DbaasEngineResponse> result = new ArrayList<>();
-        for (Map.Entry<String, JsonElement> entry : engines.entrySet()) {
-            JsonObject cfg = entry.getValue().getAsJsonObject();
-            DbaasEngineResponse engine = new DbaasEngineResponse();
-            engine.setTemplate(entry.getKey());
-            engine.setScript(cfg.get("script").getAsString());
-            if (cfg.has("reset_script")) {
-                engine.setResetScript(cfg.get("reset_script").getAsString());
+        try {
+            JsonObject engines = readEnginesConfig().getAsJsonObject("engines");
+            for (Map.Entry<String, JsonElement> entry : engines.entrySet()) {
+                JsonObject cfg = entry.getValue().getAsJsonObject();
+                DbaasEngineResponse engine = new DbaasEngineResponse();
+                engine.setTemplate(entry.getKey());
+                engine.setScript(cfg.get("script").getAsString());
+                if (cfg.has("reset_script")) {
+                    engine.setResetScript(cfg.get("reset_script").getAsString());
+                }
+                engine.setPort(cfg.get("port").getAsInt());
+                engine.setObjectName("dbaasengine");
+                result.add(engine);
             }
-            engine.setPort(cfg.get("port").getAsInt());
-            engine.setObjectName("dbaasengine");
-            result.add(engine);
+        } catch (Exception e) {
+            logger.error("failed to read dbaas engines from config.json -- reporting no engines", e);
         }
         return result;
     }

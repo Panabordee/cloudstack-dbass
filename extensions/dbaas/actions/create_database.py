@@ -34,6 +34,15 @@ TRANSIENT_CONNECT_ERRORS = (
 )
 PROVISION_ATTEMPTS = 3
 PROVISION_RETRY_SLEEP_SECONDS = 15
+# Wall-clock budget for the whole retry loop, checked before starting another
+# attempt. Java kills the python process at dbaas.provision.timeout (600s via
+# Global Settings). Worst per-attempt cost is ssh_connect_timeout_seconds
+# (config.json, 60) plus the engine's own internal wait (MongoDB's rotation
+# marker: up to 120s) = ~180s, and the sleep between attempts is 15s:
+# worst case 3 attempts = 3x180 + 2x15 = 570s -- so the budget must be tight
+# enough that the loop stops ITSELF before 600s. 400s caps the loop while
+# leaving the full first attempt untouched.
+PROVISION_TIME_BUDGET_SECONDS = 400
 
 # Template name -> provisioning script / port comes entirely from config.json's
 # "engines" map (see config.example.json) — never hardcode it here. Adding a
@@ -103,7 +112,11 @@ def run(payload, config):
 
     provisioned = False
     last_error = None
+    loop_start = time.monotonic()
     for attempt in range(1, PROVISION_ATTEMPTS + 1):
+        if attempt > 1 and time.monotonic() - loop_start > PROVISION_TIME_BUDGET_SECONDS:
+            logging.warning("provisioning budget (%ss) exhausted after %d attempts", PROVISION_TIME_BUDGET_SECONDS, attempt - 1)
+            break
         try:
             _run_provisioning_script(vm_ip, engine["script"], config, {
                 "db_name": db_name,
