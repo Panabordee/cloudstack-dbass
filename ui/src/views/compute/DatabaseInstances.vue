@@ -67,11 +67,54 @@
                 @click="confirmDestroy(record)">
                 <template #icon><delete-outlined /></template>
               </a-button>
+              <a-dropdown v-if="rowActions(record).length > 0">
+                <a-button type="text" size="small" :title="$t('label.actions')">
+                  <template #icon><more-outlined /></template>
+                </a-button>
+                <template #overlay>
+                  <a-menu @click="({ key }) => runRowAction(key, record)">
+                    <a-menu-item v-for="action in rowActions(record)" :key="action.key">
+                      {{ $t(action.label) }}
+                    </a-menu-item>
+                  </a-menu>
+                </template>
+              </a-dropdown>
             </template>
           </template>
         </a-table>
         <a-empty v-if="!loading && instances.length === 0" :description="$t('label.database.instances.empty')" />
       </a-card>
+      <!-- Row actions that open a dialog reuse the exact components the
+           /vm/<id> dataView actions render, receiving the same resource
+           shape. closeModal refreshes the list so state changes made inside
+           them are reflected immediately. -->
+      <a-modal
+        :visible="activeRowAction !== ''"
+        :footer="null"
+        :title="$t(activeRowAction === 'createDatabase'
+          ? 'label.create.database'
+          : activeRowAction === 'resetDatabasePassword'
+            ? 'label.reset.database.password'
+            : 'label.show.database.password')"
+        :width="activeRowAction === 'createDatabase' ? '500px' : '450px'"
+        :closable="true"
+        @cancel="closeModal">
+        <create-database
+          v-if="activeRowAction === 'createDatabase'"
+          :resource="activeRecord"
+          @close-action="closeModal"
+          @refresh-data="fetchData" />
+        <reset-database-password
+          v-else-if="activeRowAction === 'resetDatabasePassword'"
+          :resource="activeRecord"
+          @close-action="closeModal"
+          @refresh-data="fetchData" />
+        <show-database-password
+          v-else-if="activeRowAction === 'getDatabasePassword'"
+          :resource="activeRecord"
+          @close-action="closeModal"
+          @refresh-data="fetchData" />
+      </a-modal>
     </a-col>
   </a-row>
 </template>
@@ -81,11 +124,14 @@ import { h, ref } from 'vue'
 import { Checkbox, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import Status from '@/components/widgets/Status.vue'
+import CreateDatabase from '@/views/compute/CreateDatabase.vue'
+import ResetDatabasePassword from '@/views/compute/ResetDatabasePassword.vue'
+import ShowDatabasePassword from '@/views/compute/ShowDatabasePassword.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 export default {
   name: 'DatabaseInstances',
-  components: { Status },
+  components: { Status, CreateDatabase, ResetDatabasePassword, ShowDatabasePassword },
   data () {
     return {
       loading: false,
@@ -94,13 +140,16 @@ export default {
       // of -- if it doesn't recognize a template name, neither would the
       // backend, so falling back to the raw name here is the honest answer.
       engineLabels: {},
+      engineNames: new Set(),
+      activeRowAction: '',
+      activeRecord: null,
       columns: [
         { key: 'name', title: this.$t('label.name'), dataIndex: 'name' },
         { key: 'engine', title: this.$t('label.engine'), dataIndex: 'templatename' },
         { key: 'state', title: this.$t('label.state'), dataIndex: 'state' },
         { key: 'ipaddress', title: this.$t('label.ipaddress'), dataIndex: 'ipaddress' },
         { key: 'zonename', title: this.$t('label.zonename'), dataIndex: 'zonename' },
-        { key: 'actions', title: '', dataIndex: 'actions', width: 60 }
+        { key: 'actions', title: this.$t('label.actions'), dataIndex: 'actions', width: 100 }
       ]
     }
   },
@@ -123,6 +172,76 @@ export default {
     this.fetchData()
   },
   methods: {
+    rowActions (record) {
+      // Same conditions and permission gates the /vm/<id> dataView actions
+      // use (compute.js) -- the Database page just carries them here, since
+      // DBaaS instances are hidden from the Instances list.
+      const isRunning = record.state === 'Running'
+      const isStopped = record.state === 'Stopped'
+      const apis = this.$store.getters.apis
+      const actions = []
+      if (isRunning && 'createDatabase' in apis && this.isEngineMember(record)) {
+        actions.push({ key: 'createDatabase', label: 'label.create.database' })
+      }
+      if (isRunning && 'resetDatabasePassword' in apis && this.isEngineMember(record)) {
+        actions.push({ key: 'resetDatabasePassword', label: 'label.reset.database.password' })
+      }
+      if ((isRunning || isStopped) && 'getDatabasePassword' in apis && this.isEngineMember(record)) {
+        actions.push({ key: 'getDatabasePassword', label: 'label.show.database.password' })
+      }
+      if (isStopped && 'startVirtualMachine' in apis) {
+        actions.push({ key: 'startVirtualMachine', label: 'label.action.start.instance' })
+      }
+      if (isRunning && 'stopVirtualMachine' in apis) {
+        actions.push({ key: 'stopVirtualMachine', label: 'label.action.stop.instance' })
+      }
+      if (isRunning && 'rebootVirtualMachine' in apis) {
+        actions.push({ key: 'rebootVirtualMachine', label: 'label.action.reboot.instance' })
+      }
+      return actions
+    },
+    isEngineMember (record) {
+      // Engine membership follows listDbaasEngines when the management server
+      // provides it; the dbaas- prefix is the fallback for older builds.
+      if (this.engineNames.size > 0) {
+        return this.engineNames.has(record.templatename)
+      }
+      return (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+    },
+    runRowAction (key, record) {
+      if (key === 'createDatabase' || key === 'resetDatabasePassword' || key === 'getDatabasePassword') {
+        this.activeRecord = record
+        this.activeRowAction = key
+        return
+      }
+      // start / stop / reboot: async jobs, same flow the destroy action uses.
+      postAPI(key, { id: record.id }).then(json => {
+        const jobId = json[key.toLowerCase() + 'response']?.jobid
+        if (!jobId) {
+          this.fetchData()
+          return
+        }
+        this.$pollJob({
+          jobId,
+          title: this.$t(key === 'startVirtualMachine'
+            ? 'label.action.start.instance'
+            : key === 'stopVirtualMachine' ? 'label.action.stop.instance' : 'label.action.reboot.instance'),
+          description: record.displayname || record.name,
+          successMethod: () => this.fetchData(),
+          errorMethod: () => this.fetchData(),
+          loadingMessage: `${this.$t('label.in.progress')} ${record.displayname || record.name}`,
+          catchMessage: this.$t('error.fetching.async.job.result'),
+          action: { isFetchData: false }
+        })
+      }).catch(error => {
+        this.$notifyError(error)
+      })
+    },
+    closeModal () {
+      this.activeRowAction = ''
+      this.activeRecord = null
+      this.fetchData()
+    },
     engineLabel (templatename) {
       return this.engineLabels[templatename] || templatename
     },
@@ -163,7 +282,13 @@ export default {
           jobId,
           title: this.$t('label.action.destroy.instance'),
           description: record.displayname || record.name,
-          successMethod: () => this.fetchData(),
+          // The stored credentials belong to the destroyed instance: wipe
+          // them server-side once the destroy job succeeds, so the rows the
+          // schema docs call out for manual cleanup stop accumulating.
+          successMethod: () => {
+            postAPI('deleteDbaasCredentials', { virtualmachineid: record.id }).catch(() => {})
+            this.fetchData()
+          },
           errorMethod: () => this.fetchData(),
           loadingMessage: `${this.$t('label.action.destroy.instance')} ${this.$t('label.in.progress')}`,
           catchMessage: this.$t('error.fetching.async.job.result'),
@@ -189,6 +314,7 @@ export default {
         const engineNames = engines
           ? new Set((engines.listdbaasenginesresponse?.dbaasengine || []).map(e => e.template))
           : null
+        this.engineNames = engineNames
         const templates = (tplResponse.listtemplatesresponse.template || [])
           .filter(t => t.name && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
         this.engineLabels = templates.reduce((acc, t) => {

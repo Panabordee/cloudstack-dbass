@@ -10,4 +10,6 @@ public interface DbaasManager {
     DbaasResponse getDatabasePassword(GetDatabasePasswordCmd cmd);
 
     List<DbaasEngineResponse> listEngines();
+
+    int deleteCredentialsForVm(Long vmId);
 }

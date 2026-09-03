@@ -391,12 +391,29 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     }
 
     @Override
+    public int deleteCredentialsForVm(Long vmId) {
+        String vmIdUuid = vmUuid(vmId);
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement("DELETE FROM dbaas_credentials WHERE vm_id = ?")) {
+                pstmt.setString(1, vmIdUuid);
+                return pstmt.executeUpdate();
+            }
+        } catch (Exception e) {
+            // Cleanup is best-effort: the instance is already gone, the rows
+            // only linger until the documented manual cleanup runs.
+            logger.warn("failed to delete dbaas credentials for VM {}", vmIdUuid, e);
+            return 0;
+        }
+    }
+
+    @Override
     public List<Class<?>> getCommands() {
         List<Class<?>> cmdList = new ArrayList<>();
         cmdList.add(CreateDatabaseCmd.class);
         cmdList.add(ResetDatabasePasswordCmd.class);
         cmdList.add(GetDatabasePasswordCmd.class);
         cmdList.add(ListDbaasEnginesCmd.class);
+        cmdList.add(DeleteDbaasCredentialsCmd.class);
         return cmdList;
     }
 
