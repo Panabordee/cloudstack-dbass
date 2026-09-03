@@ -27,7 +27,8 @@ if [[ ! -e "$MARKER" ]]; then
   exit 1
 fi
 
-ADMIN_CRED_FILE="/opt/dbaas/admin_credentials.json"
+DBAAS_DIR="${DBAAS_DIR:-/opt/dbaas}"
+ADMIN_CRED_FILE="${DBAAS_DIR}/admin_credentials.json"
 if [[ ! -r "$ADMIN_CRED_FILE" ]]; then
   echo "admin credentials file missing or unreadable: $ADMIN_CRED_FILE" >&2
   exit 1

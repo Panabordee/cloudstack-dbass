@@ -20,7 +20,7 @@ done
 # the file still holds the old one. Wait for the marker it writes on success:
 # no marker means the rotation never finished, and the file would still carry
 # the password every image built from this template ships with.
-MARKER=/var/lib/dbaas/admin-password-rotated
+MARKER="${DBAAS_STATE_DIR:-/var/lib/dbaas}/admin-password-rotated"
 for _ in $(seq 1 60); do
   [[ -e "$MARKER" ]] && break
   sleep 2
@@ -30,7 +30,8 @@ if [[ ! -e "$MARKER" ]]; then
   exit 1
 fi
 
-ADMIN_CRED_FILE="/opt/dbaas/admin_credentials.json"
+DBAAS_DIR="${DBAAS_DIR:-/opt/dbaas}"
+ADMIN_CRED_FILE="${DBAAS_DIR}/admin_credentials.json"
 if [[ ! -r "$ADMIN_CRED_FILE" ]]; then
   echo "admin credentials file missing or unreadable: $ADMIN_CRED_FILE" >&2
   exit 1

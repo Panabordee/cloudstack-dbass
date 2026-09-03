@@ -7,9 +7,10 @@
 # per VM (guarded by a marker file) and replaces it with a fresh random one.
 set -euo pipefail
 
-CRED_FILE="/opt/dbaas/admin_credentials.json"
-NEW_FILE="/opt/dbaas/.admin_credentials.json.new"
-MARKER_DIR="/var/lib/dbaas"
+DBAAS_DIR="${DBAAS_DIR:-/opt/dbaas}"
+CRED_FILE="${DBAAS_DIR}/admin_credentials.json"
+NEW_FILE="${DBAAS_DIR}/.admin_credentials.json.new"
+MARKER_DIR="${DBAAS_STATE_DIR:-/var/lib/dbaas}"
 MARKER="${MARKER_DIR}/admin-password-rotated"
 
 if [[ -e "$MARKER" ]]; then

@@ -7,8 +7,12 @@
 --
 --   mysql -u cloud -p cloud < schema-dbaas-credentials.sql
 --
--- Keep this in sync with the CREATE TABLE in DbaasManagerImpl.java if either
--- one changes.
+-- This file is the single definition of the table:
+-- DbaasManagerImpl.ensureCredentialsTableExists() reads it from the
+-- classpath (it is packaged into the plugin jar) rather than repeating the
+-- DDL in Java, so there is nothing to keep in sync. The reader strips
+-- `--` comment lines and one trailing semicolon, so keep the file to a
+-- single statement.
 --
 -- LIFECYCLE / CLEANUP:
 -- Rows are never deleted automatically: the extension has no expunge hook in

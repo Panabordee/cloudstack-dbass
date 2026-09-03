@@ -4,8 +4,12 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -116,21 +120,42 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         return true;
     }
 
+    static final String SCHEMA_RESOURCE = "db/schema-dbaas-credentials.sql";
+
+    /**
+     * The one definition of the table lives in the .sql resource bundled into
+     * this jar, so the DDL cannot drift between a Java string and a file
+     * nobody runs. Read from the classpath rather than the filesystem: the
+     * resource travels inside the jar, with no deployment path to get wrong.
+     */
+    static String readSchemaStatement() throws IOException {
+        try (InputStream in = DbaasManagerImpl.class.getClassLoader().getResourceAsStream(SCHEMA_RESOURCE)) {
+            if (in == null) {
+                throw new IOException("schema resource not found on the classpath: " + SCHEMA_RESOURCE);
+            }
+            String contents = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            // The file is one statement wrapped in explanatory comments; strip
+            // the comments and the trailing semicolon so it can be prepared.
+            String sql = Arrays.stream(contents.split("\n"))
+                    .filter(line -> !line.trim().startsWith("--"))
+                    .collect(Collectors.joining("\n"))
+                    .trim();
+            if (sql.endsWith(";")) {
+                sql = sql.substring(0, sql.length() - 1);
+            }
+            if (sql.isEmpty()) {
+                throw new IOException("schema resource contained no statement: " + SCHEMA_RESOURCE);
+            }
+            return sql;
+        }
+    }
+
     // No DatabaseUpgradeChecker hook for this plugin (see schema-dbaas-credentials.sql),
     // so every management server start is what stands in for a migration step.
     // CREATE TABLE IF NOT EXISTS makes repeating it on every start harmless.
     private void ensureCredentialsTableExists() {
-        String sql = "CREATE TABLE IF NOT EXISTS dbaas_credentials ("
-                + "id bigint unsigned NOT NULL AUTO_INCREMENT,"
-                + "vm_id char(40) NOT NULL,"
-                + "db_username varchar(255) NOT NULL,"
-                + "db_password_encrypted varchar(512) NOT NULL,"
-                + "engine varchar(255) NOT NULL,"
-                + "created_at datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-                + "PRIMARY KEY (id),"
-                + "KEY i_dbaas_credentials__vm_id (vm_id)"
-                + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            String sql = readSchemaStatement();
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.executeUpdate();
         } catch (Exception e) {

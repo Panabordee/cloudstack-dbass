@@ -128,10 +128,13 @@ def _run_provisioning_script(vm_ip, script_name, config, db_payload):
             auth_timeout=connect_timeout,
         )
         # authorized_keys on the VM forces this connection straight into
-        # /opt/dbaas/provision.sh regardless of what command we "request" here,
-        # so exec_command's argument is effectively ignored server-side — but
-        # we still pass it for clarity / local testing against a non-forced host.
-        stdin, stdout, stderr = client.exec_command(f"/opt/dbaas/provision.sh {script_name}")
+        # <dbaas_dir>/provision.sh regardless of what command we "request"
+        # here, so exec_command's argument is effectively ignored server-side
+        # — but we still pass it for clarity / local testing against a
+        # non-forced host. dbaas_dir only needs changing for an image that
+        # installs the scripts somewhere other than the default.
+        dbaas_dir = config.get("dbaas_dir", "/opt/dbaas").rstrip("/")
+        stdin, stdout, stderr = client.exec_command(f"{dbaas_dir}/provision.sh {script_name}")
         stdin.write(json.dumps(db_payload))
         stdin.channel.shutdown_write()
         exit_status = stdout.channel.recv_exit_status()

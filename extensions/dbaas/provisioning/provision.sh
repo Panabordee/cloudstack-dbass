@@ -11,7 +11,7 @@ if [[ -z "$SCRIPT_NAME" && -n "${SSH_ORIGINAL_COMMAND:-}" ]]; then
   SCRIPT_NAME="$(awk '{print $NF}' <<< "$SSH_ORIGINAL_COMMAND")"
 fi
 
-DBAAS_DIR="/opt/dbaas"
+DBAAS_DIR="${DBAAS_DIR:-/opt/dbaas}"
 
 if [[ -z "$SCRIPT_NAME" ]]; then
   echo "missing script name (checked \$1 and \$SSH_ORIGINAL_COMMAND)" >&2

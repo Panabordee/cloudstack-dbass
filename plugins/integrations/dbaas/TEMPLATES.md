@@ -50,6 +50,13 @@ larger than MariaDB's.
 
 ## What is inside every image
 
+`/opt/dbaas` is the default, not a constant: the scripts read `DBAAS_DIR`
+(and `DBAAS_STATE_DIR` for MongoDB's rotation marker, default
+`/var/lib/dbaas`) from the environment, and the extension takes `dbaas_dir`
+from `config.json`. Build images somewhere else if you like — just set both
+sides, since `authorized_keys`' forced command names the path too. Existing
+images keep working untouched.
+
 | Path | Owner / mode | Contents |
 | --- | --- | --- |
 | `/opt/dbaas/provision.sh` | `root:root` 755 | `provisioning/provision.sh` verbatim |
@@ -90,17 +97,22 @@ so the only thing the key holder controls is `$SSH_ORIGINAL_COMMAND`, which
   (`EXPKEYSIG`) by the time this was last rebuilt; check
   `https://repo.mysql.com/` for the current one. `gnupg` is not preinstalled on
   the Debian cloud image and must be installed before this step.
-  The official package ships **no `bind-address` line at all** in
-  `/etc/mysql/mysql.conf.d/mysqld.cnf` (unlike Ubuntu's repackaged
-  `mysql-server`, which explicitly sets `127.0.0.1`), so it already listens on
-  every interface by default — `mysql.sh`'s bind-address rewrite is a no-op
-  here and that's fine, it exists for defense in depth. `/var/lib/mysql/auto.cnf`
-  is deleted before templating so each VM generates its own `server_uuid`.
+  The official package ships **no `bind-address` line at all** (unlike
+  Ubuntu's repackaged `mysql-server`, which explicitly sets `127.0.0.1`), so
+  it already listens on every interface by default — `mysql.sh`'s
+  bind-address rewrite finds nothing to change and that's fine, it exists for
+  defense in depth. `/var/lib/mysql/auto.cnf` is deleted before templating so
+  each VM generates its own `server_uuid`.
 - **MariaDB** — Debian's native `mariadb-server`, no external repo needed.
-  Unlike the MySQL package, this one *does* ship `bind-address = 127.0.0.1` in
-  `/etc/mysql/mariadb.conf.d/50-server.cnf`, so `mariadb.sh`'s rewrite to
-  `0.0.0.0` (service name `mariadb`, not `mysql`) actually fires here.
-  `auto.cnf` cleanup applies here too.
+  Unlike the MySQL package, this one *does* ship `bind-address = 127.0.0.1`,
+  so `mariadb.sh`'s rewrite to `0.0.0.0` actually fires here. `auto.cnf`
+  cleanup applies here too.
+
+  Neither script names a config path or a service unit: they locate the file
+  that actually sets `bind-address` under `/etc/mysql`, `/etc/my.cnf` or
+  `/etc/my.cnf.d`, and restart whichever of `mysql`/`mysqld`/`mariadb` is
+  running. An image built from a different packaging (RHEL, Percona) works
+  without editing the scripts.
 - **PostgreSQL** — Debian's native `postgresql` package, no external repo
   needed. Unlike the MySQL/MariaDB engines, **nothing in `postgresql.sh` (or
   any runtime script) opens this up to the network** — `listen_addresses = '*'`

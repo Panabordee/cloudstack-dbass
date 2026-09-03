@@ -45,14 +45,25 @@ SQL
 # Only touch bind-address (and restart) the first time — repeat provisioning
 # calls on a VM that already has other tenants' databases must not disrupt
 # their live connections with an unnecessary restart.
-CURRENT_BIND=$(grep '^bind-address' /etc/mysql/mariadb.conf.d/50-server.cnf 2>/dev/null || true)
-if [[ -n "$CURRENT_BIND" && "$CURRENT_BIND" != *"0.0.0.0"* ]]; then
-  sed -i 's/^bind-address.*/bind-address = 0.0.0.0/' /etc/mysql/mariadb.conf.d/50-server.cnf
-  systemctl restart mariadb
-  for i in $(seq 1 10); do
-    mysqladmin --protocol=socket -uroot ping >/dev/null 2>&1 && break
-    sleep 1
-  done
+# Same discovery as mysql.sh: locate the file that actually sets
+# bind-address rather than hardcoding one packaging's layout, and restart
+# whichever unit is really running.
+CONF_FILE=$(grep -rls '^bind-address' /etc/mysql /etc/my.cnf /etc/my.cnf.d 2>/dev/null | head -1)
+if [[ -n "$CONF_FILE" ]]; then
+  CURRENT_BIND=$(grep '^bind-address' "$CONF_FILE" | head -1)
+  if [[ "$CURRENT_BIND" != *"0.0.0.0"* ]]; then
+    sed -i 's/^bind-address.*/bind-address = 0.0.0.0/' "$CONF_FILE"
+    for unit in mariadb mysql mysqld; do
+      if systemctl is-active --quiet "$unit"; then
+        systemctl restart "$unit"
+        break
+      fi
+    done
+    for i in $(seq 1 10); do
+      mysqladmin --protocol=socket -uroot ping >/dev/null 2>&1 && break
+      sleep 1
+    done
+  fi
 fi
 
 # Don't trust exit code alone — verify the new credential actually
