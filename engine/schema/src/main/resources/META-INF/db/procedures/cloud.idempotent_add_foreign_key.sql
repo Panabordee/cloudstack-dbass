@@ -25,4 +25,4 @@ CREATE PROCEDURE `cloud`.`IDEMPOTENT_ADD_FOREIGN_KEY` (
 )
 BEGIN
 
-    DECLARE CONTINUE HANDLER FOR 1061 BEGIN END; SET @ddl = CONCAT_WS(' ', 'ALTER TABLE ', in_table_name, ' ADD CONSTRAINT ', in_key_name, ' FOREIGN KEY ', in_foreign_key, ' REFERENCES ', in_references, ' ON DELETE CASCADE'); PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt; END;
+    DECLARE CONTINUE HANDLER FOR 1061, 1826 BEGIN END; SET @ddl = CONCAT_WS(' ', 'ALTER TABLE ', in_table_name, ' ADD CONSTRAINT ', in_key_name, ' FOREIGN KEY ', in_foreign_key, ' REFERENCES ', in_references, ' ON DELETE CASCADE'); PREPARE stmt FROM @ddl; EXECUTE stmt; DEALLOCATE PREPARE stmt; END;
