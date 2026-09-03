@@ -82,13 +82,13 @@ public class KeycloakOAuth2ProviderTest {
 
     @Test(expected = CloudAuthenticationException.class)
     public void testVerifyUserProviderNotFound() {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(null);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(null);
         provider.verifyUser("test@example.com", "code123");
     }
 
     @Test(expected = CloudRuntimeException.class)
     public void testVerifyCodeAndFetchEmailHttpError() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
 
         CloseableHttpResponse response = mock(CloseableHttpResponse.class);
         StatusLine statusLine = mock(StatusLine.class);
@@ -102,20 +102,20 @@ public class KeycloakOAuth2ProviderTest {
 
         when(httpClient.execute(any(HttpPost.class))).thenReturn(response);
 
-        provider.verifyCodeAndFetchEmail("invalid-code");
+        provider.verifySecretCodeAndFetchEmail("invalid-code");
     }
 
     @Test(expected = CloudRuntimeException.class)
     public void testVerifyCodeAndFetchEmailNetworkFailure() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
         when(httpClient.execute(any(HttpPost.class))).thenThrow(new IOException("Connection refused"));
 
-        provider.verifyCodeAndFetchEmail("code");
+        provider.verifySecretCodeAndFetchEmail("code");
     }
 
     @Test(expected = CloudRuntimeException.class)
     public void testVerifyUserWithMismatchedEmail() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
 
         String testEmail = "anotheruser@example.com";
         String secretCode = "valid-auth-code";
@@ -150,7 +150,7 @@ public class KeycloakOAuth2ProviderTest {
 
     @Test(expected = CloudRuntimeException.class)
     public void testVerifyUserWithMismatchedClient() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
 
         String testEmail = "anotheruser@example.com";
         String secretCode = "valid-auth-code";
@@ -185,7 +185,7 @@ public class KeycloakOAuth2ProviderTest {
 
     @Test
     public void testVerifyUserEmail() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
 
         String testEmail = "user@example.com";
         String secretCode = "valid-auth-code";
@@ -256,14 +256,14 @@ public class KeycloakOAuth2ProviderTest {
 
     @Test
     public void testVerifyCodeAndFetchEmailUsesCacheForSameCode() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
 
         String testEmail = "user@example.com";
         CloseableHttpResponse response = mockSuccessfulTokenResponse(buildFakeIdToken(testEmail, "test-client"));
         when(httpClient.execute(any(HttpPost.class))).thenReturn(response);
 
-        String firstEmail = provider.verifyCodeAndFetchEmail("valid-auth-code");
-        String secondEmail = provider.verifyCodeAndFetchEmail("valid-auth-code");
+        String firstEmail = provider.verifySecretCodeAndFetchEmail("valid-auth-code");
+        String secondEmail = provider.verifySecretCodeAndFetchEmail("valid-auth-code");
 
         assertEquals("First call should return the email from the id_token", testEmail, firstEmail);
         assertEquals("Same code should be served from the cache", testEmail, secondEmail);
@@ -272,7 +272,7 @@ public class KeycloakOAuth2ProviderTest {
 
     @Test
     public void testSecondCodeReturnsFreshEmail() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
 
         String firstEmail = "first.user@example.com";
         String secondEmail = "second.user@example.com";
@@ -280,8 +280,9 @@ public class KeycloakOAuth2ProviderTest {
         CloseableHttpResponse secondResponse = mockSuccessfulTokenResponse(buildFakeIdToken(secondEmail, "test-client"));
         when(httpClient.execute(any(HttpPost.class))).thenReturn(firstResponse).thenReturn(secondResponse);
 
-        String first = provider.verifyCodeAndFetchEmail("first-auth-code");
-        String second = provider.verifyCodeAndFetchEmail("second-auth-code");
+        String first = provider.verifySecretCodeAndFetchEmail("first-auth-code");
+        provider.clearIdToken();
+        String second = provider.verifySecretCodeAndFetchEmail("second-auth-code");
 
         assertEquals("First code should return the email of its own token", firstEmail, first);
         assertEquals("Second code must not be served a stale cached email", secondEmail, second);
@@ -290,7 +291,7 @@ public class KeycloakOAuth2ProviderTest {
 
     @Test(expected = CloudRuntimeException.class)
     public void testVerifyCodeAndFetchEmailWithoutEmailClaim() throws IOException {
-        when(oauthProviderDao.findByProvider("keycloak")).thenReturn(mockProviderVO);
+        when(oauthProviderDao.findByProviderAndDomainWithGlobalFallback("keycloak", null)).thenReturn(mockProviderVO);
 
         String header = "{\"alg\":\"none\"}";
         String payload = "{" +
@@ -306,6 +307,6 @@ public class KeycloakOAuth2ProviderTest {
         CloseableHttpResponse response = mockSuccessfulTokenResponse(fakeJwt);
         when(httpClient.execute(any(HttpPost.class))).thenReturn(response);
 
-        provider.verifyCodeAndFetchEmail("valid-auth-code");
+        provider.verifySecretCodeAndFetchEmail("valid-auth-code");
     }
 }

@@ -33,6 +33,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.mockito.Spy;
 
@@ -78,33 +79,33 @@ public class GoogleOAuth2ProviderTest {
 
     @Test(expected = CloudAuthenticationException.class)
     public void testVerifyUserWithUnregisteredProvider() {
-        when(_oauthProviderDao.findByProvider(anyString())).thenReturn(null);
+        when(_oauthProviderDao.findByProviderAndDomainWithGlobalFallback(anyString(), Mockito.isNull())).thenReturn(null);
         _googleOAuth2Provider.verifyUser("email@example.com", "secretCode");
     }
 
     @Test(expected = CloudRuntimeException.class)
     public void testVerifyUserWithInvalidSecretCode() {
-        when(_oauthProviderDao.findByProvider(anyString())).thenReturn(mockProvider);
+        when(_oauthProviderDao.findByProviderAndDomainWithGlobalFallback(anyString(), Mockito.isNull())).thenReturn(mockProvider);
         doReturn(null).when(_googleOAuth2Provider).verifyCodeAndFetchEmailInternal(
-                "secretCode", mockProvider);
+                "secretCode", null, mockProvider);
 
         _googleOAuth2Provider.verifyUser("email@example.com", "secretCode");
     }
 
     @Test(expected = CloudRuntimeException.class)
     public void testVerifyUserWithMismatchedEmail() {
-        when(_oauthProviderDao.findByProvider(anyString())).thenReturn(mockProvider);
+        when(_oauthProviderDao.findByProviderAndDomainWithGlobalFallback(anyString(), Mockito.isNull())).thenReturn(mockProvider);
         doReturn("otheremail@example.com").when(_googleOAuth2Provider).verifyCodeAndFetchEmailInternal(
-                "secretCode", mockProvider);
+                "secretCode", null, mockProvider);
 
         _googleOAuth2Provider.verifyUser("email@example.com", "secretCode");
     }
 
     @Test
     public void testVerifyUserEmail() {
-        when(_oauthProviderDao.findByProvider(anyString())).thenReturn(mockProvider);
+        when(_oauthProviderDao.findByProviderAndDomainWithGlobalFallback(anyString(), Mockito.isNull())).thenReturn(mockProvider);
         doReturn("email@example.com").when(_googleOAuth2Provider).verifyCodeAndFetchEmailInternal(
-                "secretCode", mockProvider);
+                "secretCode", null, mockProvider);
 
         boolean result = _googleOAuth2Provider.verifyUser("email@example.com", "secretCode");
 
@@ -121,7 +122,7 @@ public class GoogleOAuth2ProviderTest {
     @Test
     public void testNoSensitiveDataInErrorMessages() {
         // Verifies that error messages don't expose sensitive information
-        when(_oauthProviderDao.findByProvider(anyString())).thenReturn(mockProvider);
+        when(_oauthProviderDao.findByProviderAndDomainWithGlobalFallback(anyString(), Mockito.isNull())).thenReturn(mockProvider);
         String testSecret = "secret_key";
         String testEmail = "email@example.com";
 
@@ -140,10 +141,10 @@ public class GoogleOAuth2ProviderTest {
     @Test
     public void testVerifyUserErrorHandlingAndCleanup() {
         // Tests that any authentication error properly cleans up
-        when(_oauthProviderDao.findByProvider(anyString())).thenReturn(mockProvider);
+        when(_oauthProviderDao.findByProviderAndDomainWithGlobalFallback(anyString(), Mockito.isNull())).thenReturn(mockProvider);
 
         doReturn("error@example.com").when(_googleOAuth2Provider).verifyCodeAndFetchEmailInternal(
-                "bad_code", mockProvider);
+                "bad_code", null, mockProvider);
 
         try {
             _googleOAuth2Provider.verifyUser("expected@example.com", "bad_code");
@@ -158,13 +159,13 @@ public class GoogleOAuth2ProviderTest {
     @Test
     public void testMultipleFailedVerificationAttempts() {
         // Tests that multiple failures are handled gracefully without cache pollution
-        when(_oauthProviderDao.findByProvider(anyString())).thenReturn(mockProvider);
+        when(_oauthProviderDao.findByProviderAndDomainWithGlobalFallback(anyString(), Mockito.isNull())).thenReturn(mockProvider);
 
         // Multiple failed attempts
         for (int i = 0; i < 5; i++) {
             try {
                 doReturn("wrong@example.com").when(_googleOAuth2Provider)
-                    .verifyCodeAndFetchEmailInternal("code_" + i, mockProvider);
+                    .verifyCodeAndFetchEmailInternal("code_" + i, null, mockProvider);
                 _googleOAuth2Provider.verifyUser("correct@example.com", "code_" + i);
                 fail("Should fail on attempt " + i);
             } catch (CloudRuntimeException e) {

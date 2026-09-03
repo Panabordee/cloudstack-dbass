@@ -57,6 +57,9 @@ public class OauthProviderVO implements Identity, InternalIdentity {
     @Column(name = "redirect_uri")
     private String redirectUri;
 
+    @Column(name = "domain_id")
+    private Long domainId;
+
     @Column(name = "authorize_url")
     private String authorizeUrl;
 
@@ -151,6 +154,14 @@ public class OauthProviderVO implements Identity, InternalIdentity {
 
     public void setLogo(String logo) {
         this.logo = logo;
+    }
+
+    public Long getDomainId() {
+        return domainId;
+    }
+
+    public void setDomainId(Long domainId) {
+        this.domainId = domainId;
     }
 
     public boolean isEnabled() {

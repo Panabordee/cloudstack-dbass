@@ -24,9 +24,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import javax.inject.Inject;
 
+import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.auth.UserOAuth2Authenticator;
 import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
@@ -38,11 +40,17 @@ import org.apache.cloudstack.oauth2.api.command.UpdateOAuthProviderCmd;
 import org.apache.cloudstack.oauth2.api.command.VerifyOAuthCodeAndGetUserCmd;
 import org.apache.cloudstack.oauth2.dao.OauthProviderDao;
 import org.apache.cloudstack.oauth2.vo.OauthProviderVO;
+import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 
+import com.cloud.domain.Domain;
+import com.cloud.domain.DomainVO;
+import com.cloud.user.DomainManager;
+import com.cloud.user.DomainService;
 import com.cloud.utils.component.Manager;
 import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.exception.CloudRuntimeException;
+import org.apache.cloudstack.framework.messagebus.MessageBus;
 
 public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthManager, Manager, Configurable {
 
@@ -50,6 +58,12 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
 
     @Inject
     protected OauthProviderDao _oauthProviderDao;
+
+    @Inject
+    private DomainService _domainService;
+
+    @Inject
+    private MessageBus _messageBus;
 
     protected static Map<String, UserOAuth2Authenticator> userOAuth2AuthenticationProvidersMap = new HashMap<>();
 
@@ -66,17 +80,29 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
 
     @Override
     public boolean start() {
-        if (isOAuthPluginEnabled()) {
-            logger.info("OAUTH plugin loaded");
-            initializeUserOAuth2AuthenticationProvidersMap();
-        } else {
-            logger.info("OAUTH plugin not enabled so not loading");
-        }
+        initializeUserOAuth2AuthenticationProvidersMap();
+        addDomainRemovalListener();
+        logger.info("OAUTH plugin loaded");
         return true;
     }
 
-    protected boolean isOAuthPluginEnabled() {
-        return OAuth2IsPluginEnabled.value();
+    private void addDomainRemovalListener() {
+        _messageBus.subscribe(DomainManager.MESSAGE_PRE_REMOVE_DOMAIN_EVENT, (senderAddress, subject, args) -> {
+            try {
+                long domainId = ((DomainVO) args).getId();
+                List<OauthProviderVO> providers = _oauthProviderDao.listByDomain(domainId);
+                for (OauthProviderVO provider : providers) {
+                    _oauthProviderDao.expunge(provider.getId());
+                    logger.debug("Removed OAuth provider {} for deleted domain {}", provider.getProvider(), domainId);
+                }
+            } catch (Exception e) {
+                logger.error("Failed to remove OAuth providers for deleted domain", e);
+            }
+        });
+    }
+
+    protected boolean isOAuthPluginEnabled(Long domainId) {
+        return OAuth2AuthManager.isPluginEnabledForDomain(domainId);
     }
 
     @Override
@@ -127,9 +153,11 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
     }
 
     @Override
-    public String verifyCodeAndFetchEmail(String code, String provider) {
+    public String verifySecretCodeAndFetchEmail(String code, String provider, Long domainId) {
         UserOAuth2Authenticator authenticator = getUserOAuth2AuthenticationProvider(provider);
-        return authenticator.verifyCodeAndFetchEmail(code);
+        String email = authenticator.verifySecretCodeAndFetchEmail(code, domainId);
+
+        return email;
     }
 
     @Override
@@ -139,29 +167,40 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         String clientId = StringUtils.trim(cmd.getClientId());
         String redirectUri = StringUtils.trim(cmd.getRedirectUri());
         String secretKey = StringUtils.trim(cmd.getSecretKey());
+        Long domainId = normalizeGlobalScope(resolveDomainIdFromIdOrPath(cmd.getDomainId(), cmd.getDomainPath()));
         String authorizeUrl = StringUtils.trim(cmd.getAuthorizeUrl());
         String tokenUrl = StringUtils.trim(cmd.getTokenUrl());
         String logo = StringUtils.trimToEmpty(cmd.getLogo());
         validateLogo(logo);
 
-        if (!isOAuthPluginEnabled()) {
+        if (!isOAuthPluginEnabled(domainId)) {
             throw new CloudRuntimeException("OAuth is not enabled, please enable to register");
         }
-        OauthProviderVO providerVO = _oauthProviderDao.findByProvider(provider);
+
+        // Check for existing provider with same name and domain
+        OauthProviderVO providerVO = _oauthProviderDao.findByProviderAndDomain(provider, domainId);
         if (providerVO != null) {
-            throw new CloudRuntimeException(String.format("Provider with the name %s is already registered", provider));
+            if (domainId == null) {
+                throw new CloudRuntimeException(String.format("Global provider with the name %s is already registered", provider));
+            } else {
+                throw new CloudRuntimeException(String.format("Provider with the name %s is already registered for domain %d", provider, domainId));
+            }
         }
 
-        return saveOauthProvider(provider, description, clientId, secretKey, redirectUri, authorizeUrl, tokenUrl, logo);
+        return saveOauthProvider(provider, description, clientId, secretKey, redirectUri, authorizeUrl, tokenUrl, domainId, logo);
     }
 
     @Override
-    public List<OauthProviderVO> listOauthProviders(String provider, String uuid) {
+    public List<OauthProviderVO> listOauthProviders(String provider, String uuid, Long domainId) {
         List<OauthProviderVO> providers;
         if (uuid != null) {
             providers = Collections.singletonList(_oauthProviderDao.findByUuid(uuid));
+        } else if (StringUtils.isNotBlank(provider) && domainId != null) {
+            providers = Collections.singletonList(_oauthProviderDao.findByProviderAndDomain(provider, domainId));
         } else if (StringUtils.isNotBlank(provider)) {
-            providers = Collections.singletonList(_oauthProviderDao.findByProvider(provider));
+            providers = Collections.singletonList(_oauthProviderDao.findByProviderAndDomain(provider, null));
+        } else if (domainId != null) {
+            providers = _oauthProviderDao.listByDomainIncludingGlobal(domainId);
         } else {
             providers = _oauthProviderDao.listAll();
         }
@@ -186,6 +225,30 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         OauthProviderVO providerVO = _oauthProviderDao.findById(id);
         if (providerVO == null) {
             throw new CloudRuntimeException("Provider with the given id is not there");
+        }
+
+        Long targetDomainId = providerVO.getDomainId();
+        if (cmd.getDomainId() != null || StringUtils.isNotEmpty(cmd.getDomainPath())) {
+            Long resolved = resolveDomainIdFromIdOrPath(cmd.getDomainId(), cmd.getDomainPath());
+            if (resolved == null) {
+                throw new CloudRuntimeException("Unable to resolve the supplied domain. Provide a valid domain id or path.");
+            }
+            resolved = normalizeGlobalScope(resolved);
+            if (!Objects.equals(resolved, providerVO.getDomainId())) {
+                OauthProviderVO existing = _oauthProviderDao.findByProviderAndDomain(providerVO.getProvider(), resolved);
+                if (existing != null) {
+                    throw new CloudRuntimeException(String.format(
+                            "Provider with the name %s is already registered for domain %s", providerVO.getProvider(),
+                            resolved == null ? "ROOT (global)" : resolved));
+                }
+            }
+            targetDomainId = resolved;
+        }
+
+        if (Boolean.TRUE.equals(enabled) && !isOAuthPluginEnabled(targetDomainId)) {
+            throw new CloudRuntimeException(String.format(
+                    "OAuth plugin is not enabled %s. Enable oauth2.enabled at that scope before enabling this provider.",
+                    targetDomainId == null ? "globally" : "for this domain"));
         }
 
         if (StringUtils.isNotEmpty(description)) {
@@ -213,13 +276,14 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         if (enabled != null) {
             providerVO.setEnabled(enabled);
         }
+        providerVO.setDomainId(targetDomainId);
 
         _oauthProviderDao.update(id, providerVO);
 
         return _oauthProviderDao.findById(id);
     }
 
-    private OauthProviderVO saveOauthProvider(String provider, String description, String clientId, String secretKey, String redirectUri, String authorizeUrl, String tokenUrl, String logo) {
+    private OauthProviderVO saveOauthProvider(String provider, String description, String clientId, String secretKey, String redirectUri, String authorizeUrl, String tokenUrl, Long domainId, String logo) {
         final OauthProviderVO oauthProviderVO = new OauthProviderVO();
 
         oauthProviderVO.setProvider(provider);
@@ -227,6 +291,7 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
         oauthProviderVO.setClientId(clientId);
         oauthProviderVO.setSecretKey(secretKey);
         oauthProviderVO.setRedirectUri(redirectUri);
+        oauthProviderVO.setDomainId(domainId);
         oauthProviderVO.setAuthorizeUrl(authorizeUrl);
         oauthProviderVO.setTokenUrl(tokenUrl);
         if (StringUtils.isNotEmpty(logo)) {
@@ -261,7 +326,66 @@ public class OAuth2AuthManagerImpl extends ManagerBase implements OAuth2AuthMana
 
     @Override
     public boolean deleteOauthProvider(Long id) {
-        return _oauthProviderDao.remove(id);
+        return _oauthProviderDao.expunge(id);
+    }
+
+    @Override
+    public Long resolveDomainId(Map<String, Object[]> params) {
+        final String[] domainIdArray = (String[])params.get(ApiConstants.DOMAIN_ID);
+        if (ArrayUtils.isNotEmpty(domainIdArray)) {
+            String domainUuid = domainIdArray[0];
+            if (GLOBAL_DOMAIN_FILTER.equals(domainUuid)) {
+                return GLOBAL_DOMAIN_ID;
+            }
+            Domain domain = _domainService.getDomain(domainUuid);
+            if (Objects.nonNull(domain)) {
+                return domain.getId();
+            }
+        }
+        final String[] domainArray = (String[])params.get(ApiConstants.DOMAIN);
+        if (ArrayUtils.isNotEmpty(domainArray)) {
+            String path = normalizeDomainPath(domainArray[0]);
+            if (StringUtils.isNotEmpty(path)) {
+                Domain domain = _domainService.findDomainByIdOrPath(null, path);
+                if (Objects.nonNull(domain)) {
+                    return domain.getId();
+                }
+            }
+        }
+        return null;
+    }
+
+    protected Long resolveDomainIdFromIdOrPath(Long domainId, String domainPath) {
+        if (domainId != null) {
+            return domainId;
+        }
+        String path = normalizeDomainPath(domainPath);
+        if (StringUtils.isNotEmpty(path)) {
+            Domain domain = _domainService.findDomainByIdOrPath(null, path);
+            if (Objects.nonNull(domain)) {
+                return domain.getId();
+            }
+        }
+        return null;
+    }
+
+    // The ROOT domain is the top of the tree, so a provider scoped to it is equivalent
+    // to a global provider; treat it as global so the global oauth2.enabled config applies.
+    protected Long normalizeGlobalScope(Long domainId) {
+        return (domainId != null && Domain.ROOT_DOMAIN == domainId) ? null : domainId;
+    }
+
+    protected String normalizeDomainPath(String path) {
+        if (StringUtils.isEmpty(path)) {
+            return null;
+        }
+        if (!path.startsWith("/")) {
+            path = "/" + path;
+        }
+        if (!path.endsWith("/")) {
+            path += "/";
+        }
+        return path;
     }
 
     @Override

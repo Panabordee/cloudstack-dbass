@@ -86,6 +86,7 @@ fill="currentColor"
           </a-form-item>
           <a-tabs
             class="tab-center"
+            :key="$i18n.locale"
             :activeKey="customActiveKey"
             size="large"
             :tabBarStyle="{ textAlign: 'center', borderBottom: 'unset' }"
@@ -225,6 +226,25 @@ fill="currentColor"
             <p class="or">{{ $t('label.or.sign.in.with') }}</p>
           </div>
           <div v-if="socialLogin" class="oauth-section">
+            <a-form-item name="oauthDomain">
+              <a-input
+                size="large"
+                type="text"
+                :placeholder="$t('label.domain')"
+                v-model:value="form.oauthDomain"
+                @pressEnter="handleOauthDomainSubmit"
+                @blur="handleOauthDomainSubmit"
+              >
+                <template #prefix>
+                  <project-outlined />
+                </template>
+              </a-input>
+            </a-form-item>
+            <div
+              v-if="(oauthGithubProvider || oauthGoogleProvider || oauthKeycloakProvider) && !form.oauthDomain"
+              style="text-align: center; color: #999; font-size: 12px; margin-bottom: 8px;">
+              {{ $t('label.oauth.domain.hint') }}
+            </div>
             <a-button
               v-for="(btn, idx) in oauthButtons"
               :key="btn.key"
@@ -288,6 +308,22 @@ export default {
       githubclientid: '',
       keycloakclientid: '',
       keycloakauthorizeurl: '',
+      oauthGoogleProvider: false,
+      oauthGithubProvider: false,
+      oauthKeycloakProvider: false,
+      oauthGoogleClientId: '',
+      oauthGithubClientId: '',
+      oauthKeycloakClientId: '',
+      oauthGoogleRedirectUri: '',
+      oauthGithubRedirectUri: '',
+      oauthKeycloakRedirectUri: '',
+      oauthKeycloakAuthorizeUrl: '',
+      oauthGoogleLogo: '',
+      oauthGithubLogo: '',
+      oauthKeycloakLogo: '',
+      oauthKeycloakName: '',
+      oauthLoading: false,
+      oauthDomainQueried: false,
       loginType: 0,
       state: {
         time: 60,
@@ -324,29 +360,29 @@ export default {
     },
     oauthButtons () {
       const buttons = []
-      if (this.keycloakprovider) {
+      if (this.oauthKeycloakProvider) {
         buttons.push({
           key: 'keycloak',
-          label: this.$t('label.login.with.name', { name: this.keycloakname || 'Keycloak' }),
-          img: this.keycloaklogo || '',
+          label: this.$t('label.login.with.name', { name: this.oauthKeycloakName || this.keycloakname || 'Keycloak' }),
+          img: this.oauthKeycloakLogo || this.keycloaklogo || '',
           url: this.getKeycloakUrl(this.from),
           click: this.handleKeycloakProviderAndDomain
         })
       }
-      if (this.googleprovider) {
+      if (this.oauthGoogleProvider) {
         buttons.push({
           key: 'google',
           label: this.$t('label.login.with.name', { name: 'Google' }),
-          img: this.googlelogo || '/assets/google.svg',
+          img: this.oauthGoogleLogo || this.googlelogo || '/assets/google.svg',
           url: this.getGoogleUrl(),
           click: this.handleGoogleProviderAndDomain
         })
       }
-      if (this.githubprovider) {
+      if (this.oauthGithubProvider) {
         buttons.push({
           key: 'github',
           label: this.$t('label.login.with.name', { name: 'GitHub' }),
-          img: this.githublogo || '/assets/github.svg',
+          img: this.oauthGithubLogo || this.githublogo || '/assets/github.svg',
           url: this.getGitHubUrl(this.from),
           click: this.handleGithubProviderAndDomain
         })
@@ -409,6 +445,7 @@ export default {
         server: (this.server.apiHost || '') + this.server.apiBase,
         username: this.$route.query?.username || '',
         domain: this.$route.query?.domain || savedDomain || '',
+        oauthDomain: '',
         project: null
       })
       this.rules = reactive({})
@@ -494,34 +531,7 @@ export default {
           this.form.idp = this.idps[0].id || ''
         }
       })
-      getAPI('listOauthProvider', {}).then(response => {
-        if (response) {
-          const oauthproviders = response.listoauthproviderresponse.oauthprovider || []
-          oauthproviders.forEach(item => {
-            if (item.provider === 'google') {
-              this.googleprovider = item.enabled
-              this.googleclientid = item.clientid
-              this.googleredirecturi = item.redirecturi
-              this.googlelogo = item.logo || ''
-            }
-            if (item.provider === 'github') {
-              this.githubprovider = item.enabled
-              this.githubclientid = item.clientid
-              this.githubredirecturi = item.redirecturi
-              this.githublogo = item.logo || ''
-            }
-            if (item.provider === 'keycloak') {
-              this.keycloakprovider = item.enabled
-              this.keycloakclientid = item.clientid
-              this.keycloakredirecturi = item.redirecturi
-              this.keycloakauthorizeurl = item.authorizeurl
-              this.keycloakname = item.description || 'Keycloak'
-              this.keycloaklogo = item.logo || ''
-            }
-          })
-          this.socialLogin = this.googleprovider || this.githubprovider || this.keycloakprovider
-        }
-      })
+      this.fetchOauthProviders()
       postAPI('forgotPassword', {}).then(response => {
         this.forgotPasswordEnabled = response.forgotpasswordresponse.enabled
       }).catch((err) => {
@@ -530,6 +540,89 @@ export default {
         } else {
           this.forgotPasswordEnabled = false
         }
+      })
+    },
+    fetchOauthProviders (domain) {
+      const params = {}
+      if (domain) {
+        params.domain = domain
+        this.oauthLoading = true
+      }
+      getAPI('listOauthProvider', params).then(response => {
+        if (response) {
+          const oauthproviders = response.listoauthproviderresponse.oauthprovider || []
+          if (!domain) {
+            oauthproviders.forEach(item => {
+              if (item.provider === 'google') {
+                this.googleprovider = item.enabled
+                this.googleclientid = item.clientid
+                this.googleredirecturi = item.redirecturi
+                this.googlelogo = item.logo || ''
+              }
+              if (item.provider === 'github') {
+                this.githubprovider = item.enabled
+                this.githubclientid = item.clientid
+                this.githubredirecturi = item.redirecturi
+                this.githublogo = item.logo || ''
+              }
+              if (item.provider === 'keycloak') {
+                this.keycloakprovider = item.enabled
+                this.keycloakclientid = item.clientid
+                this.keycloakredirecturi = item.redirecturi
+                this.keycloakauthorizeurl = item.authorizeurl
+                this.keycloakname = item.description || 'Keycloak'
+                this.keycloaklogo = item.logo || ''
+              }
+            })
+            this.socialLogin = this.googleprovider || this.githubprovider || this.keycloakprovider
+            this.oauthGithubProvider = this.githubprovider
+            this.oauthGoogleProvider = this.googleprovider
+            this.oauthKeycloakProvider = this.keycloakprovider
+            this.oauthGithubClientId = this.githubclientid
+            this.oauthGoogleClientId = this.googleclientid
+            this.oauthKeycloakClientId = this.keycloakclientid
+            this.oauthGithubRedirectUri = this.githubredirecturi
+            this.oauthGoogleRedirectUri = this.googleredirecturi
+            this.oauthKeycloakRedirectUri = this.keycloakredirecturi
+            this.oauthKeycloakAuthorizeUrl = this.keycloakauthorizeurl
+            this.oauthGithubLogo = this.githublogo
+            this.oauthGoogleLogo = this.googlelogo
+            this.oauthKeycloakLogo = this.keycloaklogo
+            this.oauthKeycloakName = this.keycloakname
+          } else {
+            this.oauthGithubProvider = false
+            this.oauthGoogleProvider = false
+            this.oauthKeycloakProvider = false
+            this.oauthGithubLogo = ''
+            this.oauthGoogleLogo = ''
+            this.oauthKeycloakLogo = ''
+            this.oauthKeycloakName = ''
+            oauthproviders.forEach(item => {
+              if (item.provider === 'google') {
+                this.oauthGoogleProvider = item.enabled
+                this.oauthGoogleClientId = item.clientid
+                this.oauthGoogleRedirectUri = item.redirecturi
+                this.oauthGoogleLogo = item.logo || ''
+              }
+              if (item.provider === 'github') {
+                this.oauthGithubProvider = item.enabled
+                this.oauthGithubClientId = item.clientid
+                this.oauthGithubRedirectUri = item.redirecturi
+                this.oauthGithubLogo = item.logo || ''
+              }
+              if (item.provider === 'keycloak') {
+                this.oauthKeycloakProvider = item.enabled
+                this.oauthKeycloakClientId = item.clientid
+                this.oauthKeycloakRedirectUri = item.redirecturi
+                this.oauthKeycloakAuthorizeUrl = item.authorizeurl
+                this.oauthKeycloakName = item.description || 'Keycloak'
+                this.oauthKeycloakLogo = item.logo || ''
+              }
+            })
+          }
+        }
+      }).finally(() => {
+        this.oauthLoading = false
       })
     },
     // handler
@@ -545,7 +638,38 @@ export default {
     },
     handleTabClick (key) {
       this.customActiveKey = key
+      if (key === 'oauth') {
+        this.oauthGithubProvider = this.githubprovider
+        this.oauthGoogleProvider = this.googleprovider
+        this.oauthKeycloakProvider = this.keycloakprovider
+        this.oauthGithubClientId = this.githubclientid
+        this.oauthGoogleClientId = this.googleclientid
+        this.oauthKeycloakClientId = this.keycloakclientid
+        this.oauthGithubRedirectUri = this.githubredirecturi
+        this.oauthGoogleRedirectUri = this.googleredirecturi
+        this.oauthKeycloakRedirectUri = this.keycloakredirecturi
+        this.oauthKeycloakAuthorizeUrl = this.keycloakauthorizeurl
+      }
       this.setRules()
+    },
+    handleOauthDomainSubmit () {
+      const domain = this.form.oauthDomain
+      if (domain) {
+        this.oauthDomainQueried = true
+        this.fetchOauthProviders(domain)
+      } else {
+        this.oauthDomainQueried = false
+        this.oauthGithubProvider = this.githubprovider
+        this.oauthGoogleProvider = this.googleprovider
+        this.oauthKeycloakProvider = this.keycloakprovider
+        this.oauthGithubClientId = this.githubclientid
+        this.oauthGoogleClientId = this.googleclientid
+        this.oauthKeycloakClientId = this.keycloakclientid
+        this.oauthGithubRedirectUri = this.githubredirecturi
+        this.oauthGoogleRedirectUri = this.googleredirecturi
+        this.oauthKeycloakRedirectUri = this.keycloakredirecturi
+        this.oauthKeycloakAuthorizeUrl = this.keycloakauthorizeurl
+      }
     },
     handleGithubProviderAndDomain () {
       this.handleDomain()
@@ -561,16 +685,31 @@ export default {
     },
     handleDomain () {
       const values = toRaw(this.form)
-      if (!values.domain) {
+      const domain = this.customActiveKey === 'oauth' ? values.oauthDomain : values.domain
+      if (!domain) {
         this.$store.commit('SET_DOMAIN_USED_TO_LOGIN', '/')
       } else {
-        this.$store.commit('SET_DOMAIN_USED_TO_LOGIN', this.resolveDomain(values.domain))
+        this.$store.commit('SET_DOMAIN_USED_TO_LOGIN', this.getLoginDomain(domain))
       }
+    },
+    getLoginDomain (domain) {
+      const resolved = this.resolveDomain(domain)
+      if (this.$config.loginBaseDomain) {
+        if (resolved) {
+          return this.$config.loginBaseDomain + '/' + resolved
+        }
+        return this.$config.loginBaseDomain
+      }
+      if (resolved) {
+        return resolved
+      }
+      return '/'
     },
     getGitHubUrl (from) {
       const rootURl = 'https://github.com/login/oauth/authorize'
+      const clientId = this.oauthGithubClientId || this.githubclientid
       const options = {
-        client_id: this.githubclientid,
+        client_id: clientId,
         scope: 'user:email',
         state: 'cloudstack'
       }
@@ -581,9 +720,11 @@ export default {
     },
     getGoogleUrl (from) {
       const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth'
+      const redirectUri = this.oauthGoogleRedirectUri || this.googleredirecturi
+      const clientId = this.oauthGoogleClientId || this.googleclientid
       const options = {
-        redirect_uri: this.googleredirecturi,
-        client_id: this.googleclientid,
+        redirect_uri: redirectUri,
+        client_id: clientId,
         access_type: 'offline',
         response_type: 'code',
         prompt: 'consent',
@@ -599,10 +740,12 @@ export default {
       return `${rootUrl}?${qs.toString()}`
     },
     getKeycloakUrl (from) {
-      const rootURl = this.keycloakauthorizeurl
+      const rootURl = this.oauthKeycloakAuthorizeUrl || this.keycloakauthorizeurl
+      const redirectUri = this.oauthKeycloakRedirectUri || this.keycloakredirecturi
+      const clientId = this.oauthKeycloakClientId || this.keycloakclientid
       const options = {
-        redirect_uri: this.keycloakredirecturi,
-        client_id: this.keycloakclientid,
+        redirect_uri: redirectUri,
+        client_id: clientId,
         response_type: 'code',
         scope: 'openid email',
         state: 'cloudstack'
@@ -628,10 +771,7 @@ export default {
           delete loginParams.username
           loginParams[!this.state.loginType ? 'email' : 'username'] = values.username
           loginParams.password = values.password
-          loginParams.domain = this.resolveDomain(values.domain)
-          if (!loginParams.domain) {
-            loginParams.domain = '/'
-          }
+          loginParams.domain = this.getLoginDomain(values.domain)
           this.Login(loginParams)
             .then((res) => this.loginSuccess(res))
             .catch(err => {
@@ -660,10 +800,7 @@ export default {
         loginParams.email = this.email
         loginParams.provider = provider
         loginParams.secretcode = this.secretcode
-        loginParams.domain = this.resolveDomain(values.domain)
-        if (!loginParams.domain) {
-          loginParams.domain = '/'
-        }
+        loginParams.domain = this.getLoginDomain(values.domain)
         this.OauthLogin(loginParams)
           .then((res) => this.loginSuccess(res))
           .catch(err => {

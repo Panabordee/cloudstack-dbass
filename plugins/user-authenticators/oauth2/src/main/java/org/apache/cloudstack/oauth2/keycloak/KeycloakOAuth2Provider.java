@@ -58,6 +58,8 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
 
     public static final String KEYCLOAK_PROVIDER = "keycloak";
 
+    protected String idToken = null;
+
     @Inject
     OauthProviderDao oauthProviderDao;
 
@@ -112,39 +114,89 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
 
     @Override
     public boolean verifyUser(String email, String secretCode) {
+        return verifyUser(email, secretCode, null);
+    }
+
+    @Override
+    public boolean verifyUser(String email, String secretCode, Long domainId) {
         if (StringUtils.isAnyEmpty(email, secretCode)) {
             throw new CloudAuthenticationException("Either email or secret code should not be null/empty");
         }
 
-        OauthProviderVO providerVO = oauthProviderDao.findByProvider(getName());
+        OauthProviderVO providerVO = oauthProviderDao.findByProviderAndDomainWithGlobalFallback(getName(), domainId);
         if (providerVO == null) {
             throw new CloudAuthenticationException("Keycloak provider is not registered, so user cannot be verified");
         }
 
         String verifiedEmail = consumeValidatedEmailFromCache(secretCode);
         if (StringUtils.isEmpty(verifiedEmail)) {
-            verifiedEmail = verifyCodeAndFetchEmail(secretCode);
+            verifiedEmail = verifySecretCodeAndFetchEmail(secretCode, domainId);
         }
-        if (!email.equals(verifiedEmail)) {
+        if (StringUtils.isBlank(verifiedEmail) || !email.equals(verifiedEmail)) {
             throw new CloudRuntimeException("Unable to verify the email address with the provided secret");
         }
+        clearIdToken();
 
         return true;
     }
 
     @Override
-    public String verifyCodeAndFetchEmail(String secretCode) {
-        OauthProviderVO provider = oauthProviderDao.findByProvider(getName());
-        if (provider == null) {
-            throw new CloudAuthenticationException("Keycloak provider is not registered, so user cannot be verified");
-        }
+    public String verifySecretCodeAndFetchEmail(String secretCode) {
+        return verifySecretCodeAndFetchEmail(secretCode, null);
+    }
 
+    @Override
+    public String verifySecretCodeAndFetchEmail(String secretCode, Long domainId) {
         String cachedEmail = getValidatedEmailFromCache(secretCode);
         if (StringUtils.isNotEmpty(cachedEmail)) {
             return cachedEmail;
         }
 
-        String verifiedEmail = exchangeCodeForEmail(secretCode, provider);
+        OauthProviderVO provider = oauthProviderDao.findByProviderAndDomainWithGlobalFallback(getName(), domainId);
+        if (provider == null) {
+            throw new CloudAuthenticationException("Keycloak provider is not registered, so user cannot be verified");
+        }
+
+        if (StringUtils.isBlank(idToken)) {
+            String auth = provider.getClientId() + ":" + provider.getSecretKey();
+            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+
+            List<NameValuePair> params = new ArrayList<>();
+            params.add(new BasicNameValuePair("grant_type", "authorization_code"));
+            params.add(new BasicNameValuePair("code", secretCode));
+            params.add(new BasicNameValuePair("redirect_uri", provider.getRedirectUri()));
+
+            HttpPost post = new HttpPost(provider.getTokenUrl());
+            post.setHeader(HttpHeaders.AUTHORIZATION, "Basic " + encodedAuth);
+
+            try {
+                post.setEntity(new UrlEncodedFormEntity(params));
+            } catch (UnsupportedEncodingException e) {
+                throw new CloudRuntimeException("Unable to generate URL parameters: " + e.getMessage());
+            }
+
+            try (CloseableHttpResponse response = httpClient.execute(post)) {
+                String body = EntityUtils.toString(response.getEntity());
+
+                if (response.getStatusLine().getStatusCode() != 200) {
+                    throw new CloudRuntimeException("Keycloak error during token generation: " + body);
+                }
+
+                JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+                JsonElement fetchedIdToken = json.get("id_token");
+                if (fetchedIdToken == null) {
+                    throw new CloudRuntimeException("No id_token found in token");
+                }
+                String idTokenAsString = fetchedIdToken.getAsString();
+                validateIdToken(idTokenAsString , provider);
+
+                this.idToken = idTokenAsString ;
+            } catch (IOException e) {
+                throw new CloudRuntimeException("Unable to connect to Keycloak server", e);
+            }
+        }
+
+        String verifiedEmail = obtainEmail(idToken, provider);
         addValidatedEmailToCache(secretCode, verifiedEmail);
         return verifiedEmail;
     }
@@ -154,44 +206,16 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
         return null;
     }
 
-    private String exchangeCodeForEmail(String secretCode, OauthProviderVO provider) {
-        String auth = provider.getClientId() + ":" + provider.getSecretKey();
-        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+    private void validateIdToken(String idTokenStr, OauthProviderVO provider) {
+        JwsJwtCompactConsumer jwtConsumer = new JwsJwtCompactConsumer(idTokenStr);
+        JwtClaims claims = jwtConsumer.getJwtToken().getClaims();
 
-        List<NameValuePair> params = new ArrayList<>();
-        params.add(new BasicNameValuePair("grant_type", "authorization_code"));
-        params.add(new BasicNameValuePair("code", secretCode));
-        params.add(new BasicNameValuePair("redirect_uri", provider.getRedirectUri()));
-
-        HttpPost post = new HttpPost(provider.getTokenUrl());
-        post.setHeader(HttpHeaders.AUTHORIZATION, "Basic " + encodedAuth);
-
-        try {
-            post.setEntity(new UrlEncodedFormEntity(params));
-        } catch (UnsupportedEncodingException e) {
-            throw new CloudRuntimeException("Unable to generate URL parameters: " + e.getMessage());
-        }
-
-        try (CloseableHttpResponse response = httpClient.execute(post)) {
-            String body = EntityUtils.toString(response.getEntity());
-
-            if (response.getStatusLine().getStatusCode() != 200) {
-                throw new CloudRuntimeException("Keycloak error during token generation: " + body);
-            }
-
-            JsonObject json = JsonParser.parseString(body).getAsJsonObject();
-            JsonElement fetchedIdToken = json.get("id_token");
-            if (fetchedIdToken == null) {
-                throw new CloudRuntimeException("No id_token found in token");
-            }
-            String idTokenAsString = fetchedIdToken.getAsString();
-            return extractVerifiedEmail(idTokenAsString, provider);
-        } catch (IOException e) {
-            throw new CloudRuntimeException("Unable to connect to Keycloak server", e);
+        if (!claims.getAudiences().contains(provider.getClientId())) {
+            throw new CloudAuthenticationException("Audience mismatch");
         }
     }
 
-    private String extractVerifiedEmail(String idTokenStr, OauthProviderVO provider) {
+    private String obtainEmail(String idTokenStr, OauthProviderVO provider) {
         JwsJwtCompactConsumer jwtConsumer = new JwsJwtCompactConsumer(idTokenStr);
         JwtClaims claims = jwtConsumer.getJwtToken().getClaims();
 
@@ -204,6 +228,10 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
             throw new CloudRuntimeException("No email claim found in id_token");
         }
         return email;
+    }
+
+    protected void clearIdToken() {
+        idToken = null;
     }
 
     public void setHttpClient(CloseableHttpClient httpClient) {

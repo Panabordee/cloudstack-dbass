@@ -48,6 +48,9 @@ import com.google.api.services.oauth2.model.Userinfo;
 
 public class GoogleOAuth2Provider extends AdapterBase implements UserOAuth2Authenticator {
 
+    protected String accessToken = null;
+    protected String refreshToken = null;
+
     @Inject
     OauthProviderDao _oauthProviderDao;
 
@@ -88,29 +91,54 @@ public class GoogleOAuth2Provider extends AdapterBase implements UserOAuth2Authe
 
     @Override
     public boolean verifyUser(String email, String secretCode) {
+        return verifyUser(email, secretCode, null);
+    }
+
+    @Override
+    public String verifySecretCodeAndFetchEmail(String secretCode) {
+        return verifySecretCodeAndFetchEmail(secretCode, null);
+    }
+
+    @Override
+    public String verifySecretCodeAndFetchEmail(String secretCode, Long domainId) {
+        return verifyCodeAndFetchEmailInternal(secretCode, domainId, null);
+    }
+
+    protected void clearAccessAndRefreshTokens() {
+        accessToken = null;
+        refreshToken = null;
+    }
+
+    @Override
+    public String getUserEmailAddress() throws CloudRuntimeException {
+        return null;
+    }
+
+    @Override
+    public boolean verifyUser(String email, String secretCode, Long domainId) {
         if (StringUtils.isAnyEmpty(email, secretCode)) {
             throw new CloudAuthenticationException("Either email or secret code should not be null/empty");
         }
 
-        OauthProviderVO providerVO = _oauthProviderDao.findByProvider(getName());
+        OauthProviderVO providerVO = _oauthProviderDao.findByProviderAndDomainWithGlobalFallback(getName(), domainId);
         if (providerVO == null) {
             throw new CloudAuthenticationException("Google provider is not registered, so user cannot be verified");
         }
 
         String verifiedEmail = consumeValidatedEmailFromCache(secretCode);
         if (StringUtils.isEmpty(verifiedEmail)) {
-            verifiedEmail = verifyCodeAndFetchEmailInternal(secretCode, providerVO);
+            verifiedEmail = verifyCodeAndFetchEmailInternal(secretCode, domainId, providerVO);
         }
-        if (!email.equals(verifiedEmail)) {
+        if (verifiedEmail == null || !email.equals(verifiedEmail)) {
             throw new CloudRuntimeException("Unable to verify the email address with the provided secret");
         }
 
         return true;
     }
 
-    protected String verifyCodeAndFetchEmailInternal(String secretCode, OauthProviderVO googleProvider) {
+    protected String verifyCodeAndFetchEmailInternal(String secretCode, Long domainId, OauthProviderVO googleProvider) {
         if (googleProvider == null) {
-            googleProvider = _oauthProviderDao.findByProvider(getName());
+            googleProvider = _oauthProviderDao.findByProviderAndDomainWithGlobalFallback(getName(), domainId);
         }
         String clientId = googleProvider.getClientId();
         String secret = googleProvider.getSecretKey();
@@ -160,15 +188,5 @@ public class GoogleOAuth2Provider extends AdapterBase implements UserOAuth2Authe
         String verifiedEmail = userinfo.getEmail();
         addValidatedEmailToCache(secretCode, verifiedEmail);
         return verifiedEmail;
-    }
-
-    @Override
-    public String verifyCodeAndFetchEmail(String secretCode) {
-        return verifyCodeAndFetchEmailInternal(secretCode, null);
-    }
-
-    @Override
-    public String getUserEmailAddress() throws CloudRuntimeException {
-        return null;
     }
 }

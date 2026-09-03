@@ -68,6 +68,9 @@ public class WebhookDeliveryDaoImpl extends GenericDaoBase<WebhookDeliveryVO, Lo
         SearchCriteria<WebhookDeliveryVO> sc = sb.create();
         sc.setParameters("webhookId", webhookId);
         List<WebhookDeliveryVO> keep = listBy(sc, searchFilter);
+        if (CollectionUtils.isEmpty(keep)) {
+            return;
+        }
         SearchBuilder<WebhookDeliveryVO> sbDelete = createSearchBuilder();
         sbDelete.and("id", sbDelete.entity().getId(), SearchCriteria.Op.NOTIN);
         SearchCriteria<WebhookDeliveryVO> scDelete = sbDelete.create();

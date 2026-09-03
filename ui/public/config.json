@@ -84,6 +84,7 @@
     ]
   },
   "plugins": [],
+  "allowMakingRouterRedundant": false,
   "apidocs": true,
   "basicZoneEnabled": true,
   "multipleServer": false,
@@ -104,5 +105,6 @@
     "message": "🫃 <strong>Warning</strong>: This platform is currently in development. Your instances may be unstable and can be lost at any time.",
     "startDate": "2025-06-01T00:00:00Z",
     "endDate": "2030-07-16T00:00:00Z"
-  }
+  },
+  "defaultLanguage": "en"
 }

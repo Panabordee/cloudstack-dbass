@@ -79,8 +79,8 @@ export default {
       icon: 'login-outlined',
       docHelp: 'adminguide/accounts.html#using-an-ldap-server-for-user-authentication',
       permission: ['listOauthProvider'],
-      columns: ['provider', 'enabled', 'description', 'clientid', 'secretkey', 'redirecturi'],
-      details: ['provider', 'description', 'enabled', 'clientid', 'secretkey', 'redirecturi', 'authorizeurl', 'tokenurl'],
+      columns: ['provider', 'enabled', 'description', 'clientid', 'secretkey', 'redirecturi', 'domainpath'],
+      details: ['provider', 'description', 'enabled', 'clientid', 'secretkey', 'redirecturi', 'authorizeurl', 'tokenurl', 'domainpath'],
       actions: [
         {
           api: 'registerOauthProvider',
@@ -90,7 +90,7 @@ export default {
           dataView: false,
           component: shallowRef(defineAsyncComponent(() => import('@/views/iam/RegisterOauthProvider.vue'))),
           args: [
-            'provider', 'description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl', 'logo'
+            'provider', 'description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl', 'logo', 'domainid'
           ],
           mapping: {
             provider: {
@@ -104,7 +104,7 @@ export default {
           label: 'label.edit',
           dataView: true,
           popup: true,
-          args: ['description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl', 'logo']
+          args: ['description', 'clientid', 'redirecturi', 'secretkey', 'authorizeurl', 'tokenurl', 'logo', 'domainid']
         },
         {
           api: 'updateOauthProvider',
