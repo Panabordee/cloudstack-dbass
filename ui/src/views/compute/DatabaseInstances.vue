@@ -57,6 +57,17 @@
             <template v-else-if="column.key === 'engine'">
               {{ engineLabel(record.templatename) }}
             </template>
+            <template v-else-if="column.key === 'actions'">
+              <a-button
+                v-if="canDestroy"
+                type="text"
+                danger
+                size="small"
+                :title="$t('label.action.destroy.instance')"
+                @click="confirmDestroy(record)">
+                <template #icon><delete-outlined /></template>
+              </a-button>
+            </template>
           </template>
         </a-table>
         <a-empty v-if="!loading && instances.length === 0" :description="$t('label.database.instances.empty')" />
@@ -66,7 +77,9 @@
 </template>
 
 <script>
-import { getAPI } from '@/api'
+import { h, ref } from 'vue'
+import { Checkbox, Modal } from 'ant-design-vue'
+import { getAPI, postAPI } from '@/api'
 import Status from '@/components/widgets/Status.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
@@ -86,13 +99,24 @@ export default {
         { key: 'engine', title: this.$t('label.engine'), dataIndex: 'templatename' },
         { key: 'state', title: this.$t('label.state'), dataIndex: 'state' },
         { key: 'ipaddress', title: this.$t('label.ipaddress'), dataIndex: 'ipaddress' },
-        { key: 'zonename', title: this.$t('label.zonename'), dataIndex: 'zonename' }
+        { key: 'zonename', title: this.$t('label.zonename'), dataIndex: 'zonename' },
+        { key: 'actions', title: '', dataIndex: 'actions', width: 60 }
       ]
     }
   },
   computed: {
     canCreateDatabase () {
       return 'createDatabase' in this.$store.getters.apis
+    },
+    // These instances are hidden from the generic Instances list, so this
+    // page has to carry the destroy action itself -- otherwise the only way
+    // to remove one is to open its detail page and find it there.
+    canDestroy () {
+      return 'destroyVirtualMachine' in this.$store.getters.apis
+    },
+    canExpunge () {
+      return this.$store.getters.userInfo.roletype === 'Admin' ||
+        this.$store.getters.features.allowuserexpungerecovervm
     }
   },
   created () {
@@ -101,6 +125,53 @@ export default {
   methods: {
     engineLabel (templatename) {
       return this.engineLabels[templatename] || templatename
+    },
+    confirmDestroy (record) {
+      const expungeRef = ref(false)
+      Modal.confirm({
+        title: this.$t('label.action.destroy.instance'),
+        okText: this.$t('label.yes'),
+        cancelText: this.$t('label.no'),
+        okButtonProps: { danger: true },
+        content: () => h('div', [
+          h('p', `${record.displayname || record.name} (${this.engineLabel(record.templatename)})`),
+          h('p', this.$t('message.action.destroy.instance')),
+          // Same option the Instances list offers, gated the same way: a
+          // destroyed-but-not-expunged instance is recoverable, an expunged
+          // one is not.
+          this.canExpunge
+            ? h(Checkbox, {
+              onChange: e => { expungeRef.value = e.target.checked }
+            }, { default: () => this.$t('label.expunge') })
+            : null
+        ]),
+        onOk: () => this.destroyInstance(record, expungeRef.value)
+      })
+    },
+    destroyInstance (record, expunge) {
+      const params = { id: record.id }
+      if (expunge) {
+        params.expunge = true
+      }
+      return postAPI('destroyVirtualMachine', params).then(json => {
+        const jobId = json.destroyvirtualmachineresponse?.jobid
+        if (!jobId) {
+          this.fetchData()
+          return
+        }
+        this.$pollJob({
+          jobId,
+          title: this.$t('label.action.destroy.instance'),
+          description: record.displayname || record.name,
+          successMethod: () => this.fetchData(),
+          errorMethod: () => this.fetchData(),
+          loadingMessage: `${this.$t('label.action.destroy.instance')} ${this.$t('label.in.progress')}`,
+          catchMessage: this.$t('error.fetching.async.job.result'),
+          action: { isFetchData: false }
+        })
+      }).catch(error => {
+        this.$notifyError(error)
+      })
     },
     fetchData () {
       this.loading = true
