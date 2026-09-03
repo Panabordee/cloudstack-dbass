@@ -10,10 +10,30 @@ import json
 import logging
 import secrets
 import string
+import time
 
 import paramiko
 
 from cs_api import CloudStackAPI
+
+# A freshly deployed instance needs time before sshd answers (Debian cloud
+# images: roughly 45-60s to first ssh banner). The retry lives HERE, on the
+# server, so it survives whatever the browser does -- closing the dialog,
+# navigating away or even a full page refresh -- instead of depending on a
+# javascript timer in a component that may already be unmounted.
+TRANSIENT_CONNECT_ERRORS = (
+    "NoValidConnectionsError",
+    "Unable to connect to port 22",
+    "Connection refused",
+    "No route to host",
+    "Error reading SSH protocol banner",
+    "No existing session",
+    "No existing session",
+    "timed out",
+    "timeout",
+)
+PROVISION_ATTEMPTS = 3
+PROVISION_RETRY_SLEEP_SECONDS = 15
 
 # Template name -> provisioning script / port comes entirely from config.json's
 # "engines" map (see config.example.json) — never hardcode it here. Adding a
@@ -81,15 +101,30 @@ def run(payload, config):
 
     db_password = generate_password()
 
-    try:
-        _run_provisioning_script(vm_ip, engine["script"], config, {
-            "db_name": db_name,
-            "db_user": db_username,
-            "db_password": db_password,
-        })
-    except Exception as e:
-        logging.exception("provisioning script failed")
-        return {"status": "failed", "message": f"provisioning failed: {e}"}
+    provisioned = False
+    last_error = None
+    for attempt in range(1, PROVISION_ATTEMPTS + 1):
+        try:
+            _run_provisioning_script(vm_ip, engine["script"], config, {
+                "db_name": db_name,
+                "db_user": db_username,
+                "db_password": db_password,
+            })
+            provisioned = True
+            break
+        except Exception as e:
+            last_error = e
+            message = str(e)
+            if attempt < PROVISION_ATTEMPTS and any(t in message for t in TRANSIENT_CONNECT_ERRORS):
+                logging.warning("provisioning attempt %d/%d failed (transient): %s",
+                                attempt, PROVISION_ATTEMPTS, message)
+                time.sleep(PROVISION_RETRY_SLEEP_SECONDS)
+                continue
+            logging.exception("provisioning script failed")
+            return {"status": "failed", "message": f"provisioning failed: {e}"}
+    if not provisioned:
+        logging.exception("provisioning failed after %d attempts", PROVISION_ATTEMPTS)
+        return {"status": "failed", "message": f"provisioning failed: {last_error}"}
 
     # Best-effort tenant shell access, and deliberately gated: the login
     # password is only set when the caller asked for it (reset_vm_password,

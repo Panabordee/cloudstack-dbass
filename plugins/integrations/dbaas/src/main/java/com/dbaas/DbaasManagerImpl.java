@@ -46,7 +46,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "Filesystem path to the DBaaS extension.py entrypoint.", true);
 
     public static final ConfigKey<Integer> DbaasProvisionTimeout = new ConfigKey<>(
-            "Advanced", Integer.class, "dbaas.provision.timeout", "120",
+            "Advanced", Integer.class, "dbaas.provision.timeout", "300",
+            // 300s: the extension retries transient SSH failures internally
+            // (3 attempts with sleeps), so the budget must cover the whole
+            // retry loop, not a single attempt.
             "Timeout in seconds passed through to extension.py for provisioning.", true);
 
     @Inject

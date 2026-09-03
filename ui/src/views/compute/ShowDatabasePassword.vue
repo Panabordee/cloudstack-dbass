@@ -22,7 +22,11 @@
         <a-descriptions-item :label="$t('label.engine')">{{ credentials.engine }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
+        <a-descriptions-item :label="$t('label.connect.command')">
+          <span class="connect-command">{{ connectCommand }}</span>
+        </a-descriptions-item>
       </a-descriptions>
+      <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
       <template v-if="credentials.password && credentials.vmusername">
         <a-descriptions bordered size="small" :column="1" class="credentials">
           <a-descriptions-item :label="$t('label.vm.username')">{{ credentials.vmusername }}</a-descriptions-item>
@@ -60,6 +64,13 @@
           {{ $t('label.copy.password') }}
         </a-button>
         <a-button
+          v-if="connectCommand"
+          @click="notifyCopied"
+          v-clipboard:copy="connectCommand"
+          type="primary">
+          {{ $t('label.copy.connect.command') }}
+        </a-button>
+        <a-button
           v-if="credentials.vmpassword"
           @click="notifyCopied"
           v-clipboard:copy="credentials.vmpassword">
@@ -80,7 +91,7 @@
 
 <script>
 import { getAPI } from '@/api'
-import { buildSshCommand } from '@/utils/dbaas'
+import { buildConnectCommand, buildSshCommand } from '@/utils/dbaas'
 
 export default {
   name: 'ShowDatabasePassword',
@@ -105,6 +116,9 @@ export default {
   computed: {
     sshCommand () {
       return buildSshCommand(this.credentials)
+    },
+    connectCommand () {
+      return buildConnectCommand(this.credentials)
     }
   },
   methods: {
@@ -154,6 +168,17 @@ export default {
 
   .credentials {
     margin-top: 16px;
+    word-break: break-all;
+  }
+
+  .connect-command {
+    font-family: monospace;
+    word-break: break-all;
+  }
+
+  .connect-hint {
+    margin-top: 4px;
+    color: rgba(0, 0, 0, 0.45);
     word-break: break-all;
   }
 

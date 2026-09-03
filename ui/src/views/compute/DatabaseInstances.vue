@@ -18,7 +18,7 @@
 <template>
   <a-row :gutter="12">
     <a-col :md="24" :lg="24">
-      <a-card class="database-instances-card">
+      <a-card class="database-instances-card" :bordered="false">
         <template #title>
           {{ $t('label.database') }}
           <a-button
@@ -44,7 +44,8 @@
           :loading="loading"
           class="database-instances-table"
           size="middle"
-          :pagination="false"
+          :pagination="{ pageSize: 10, showSizeChanger: false }"
+          :scroll="{ x: 800 }"
           :columns="columns"
           rowKey="id">
           <template #bodyCell="{ column, record }">
@@ -346,5 +347,11 @@ export default {
 <style scoped lang="less">
   .database-instances-card {
     width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .database-instances-table :deep(.ant-table) {
+    overflow-x: auto;
   }
 </style>
