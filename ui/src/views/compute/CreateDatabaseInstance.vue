@@ -196,38 +196,15 @@ import { ref, reactive, toRaw, h } from 'vue'
 import { Button, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
-import { buildConnectCommand, copyTextToClipboard, DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
-
-// The provisioning run is only reachable once sshd inside the fresh instance
-// answers. Anything matching these means we were too early and another attempt
-// is worth it; a rejection from the engine itself (duplicate user, invalid
-// identifier) will never succeed on a retry and must surface immediately.
-const TRANSIENT_ERRORS = [
-  // paramiko, when sshd accepts the socket but cannot finish the handshake
-  'No existing session',
-  'Error reading SSH protocol banner',
-  // the NIC has no address in the CloudStack API yet
-  'could not resolve VM IP',
-  // sshd is not listening yet, or the guest has not brought the NIC up
-  'Connection refused',
-  'No route to host',
-  'Unable to connect to port 22',
-  'NoValidConnectionsError',
-  // SSH is up but the engine behind it is not listening yet. Each engine says
-  // this differently and none of them overlaps with the refusals the scripts
-  // raise themselves ("user already exists", "invalid identifier"), which must
-  // still fail on the first attempt.
-  "Can't connect to local MySQL server",
-  'connection to server on socket',
-  'MongoNetworkError',
-  'ECONNREFUSED',
-  // 'timed out' covers ssh/paramiko, 'timeout' covers axios' own
-  // "timeout of 600000ms exceeded"
-  'timed out',
-  'timeout',
-  // the request never reached the management server
-  'Network Error'
-]
+import {
+  buildConnectCommand,
+  copyTextToClipboard,
+  DBAAS_TEMPLATE_PREFIX,
+  DBAAS_IDENTIFIER_PATTERN,
+  DBAAS_MIN_OFFERING,
+  DBAAS_PROVISION_RETRIES,
+  DBAAS_TRANSIENT_ERRORS
+} from '@/utils/dbaas'
 
 export default {
   name: 'CreateDatabaseInstance',
@@ -252,11 +229,8 @@ export default {
       closed: false,
       deployedVmId: null,
       attempt: 0,
-      // A fresh instance needs about 48s before sshd answers, and each failed
-      // attempt burns ~15s of connect timeout on top of the delay, so eight
-      // attempts cover roughly three minutes of slow boot.
-      maxAttempts: 8,
-      retryDelayMs: 10000
+      maxAttempts: DBAAS_PROVISION_RETRIES.maxAttempts,
+      retryDelayMs: DBAAS_PROVISION_RETRIES.retryDelayMs
     }
   },
   computed: {
@@ -301,10 +275,8 @@ export default {
     initForm () {
       this.formRef = ref()
       this.form = reactive({})
-      // Same shape the provisioning scripts accept, so an identifier the
-      // backend would reject is caught here instead of after a round trip.
       const identifier = {
-        pattern: /^[A-Za-z][A-Za-z0-9_]{0,31}$/,
+        pattern: DBAAS_IDENTIFIER_PATTERN,
         message: this.$t('message.error.database.identifier')
       }
       const required = { required: true, message: this.$t('message.error.required.input') }
@@ -332,8 +304,10 @@ export default {
         getAPI('listTemplates', templateParams),
         getAPI('listZones', { available: true }),
         // memory and cpuspeed are minimum filters, not exact matches, so this
-        // drops every offering below Medium server-side.
-        getAPI('listServiceOfferings', { memory: 1024, cpuspeed: 1000 }),
+        // drops every offering below Medium server-side. A zone with nothing
+        // that large falls back to the full list below rather than showing an
+        // empty dropdown.
+        getAPI('listServiceOfferings', { ...DBAAS_MIN_OFFERING }),
         // Data disk is entirely optional, so this is never in the required
         // rules -- it only ever adds an extra volume when actually picked.
         getAPI('listDiskOfferings'),
@@ -349,8 +323,22 @@ export default {
           // engine added to the backend config shows up without UI changes.
           .map(t => ({ id: t.id, name: t.name, engineLabel: t.displaytext || t.name }))
         this.zones = zone.listzonesresponse.zone || []
-        this.offerings = (off.listserviceofferingsresponse.serviceoffering || [])
-          .map(o => ({ id: o.id, label: `${o.name} (${o.cpunumber} vCPU, ${o.memory} MB)`, iscustomized: o.iscustomized }))
+        const mapOffering = o => ({
+          id: o.id,
+          label: `${o.name} (${o.cpunumber} vCPU, ${o.memory} MB)`,
+          iscustomized: o.iscustomized
+        })
+        this.offerings = (off.listserviceofferingsresponse.serviceoffering || []).map(mapOffering)
+        if (this.offerings.length === 0) {
+          // Nothing meets the recommended minimum in this zone. Offering a
+          // full list (with the sizing caveat in the docs) beats a dropdown
+          // the user cannot pick anything from and no reason why.
+          getAPI('listServiceOfferings').then(all => {
+            this.offerings = (all.listserviceofferingsresponse.serviceoffering || []).map(mapOffering)
+          }).catch(error => {
+            this.$notifyError(error)
+          })
+        }
         this.diskOfferings = (diskOff.listdiskofferingsresponse.diskoffering || [])
           .map(d => ({ id: d.id, label: d.iscustomized ? `${d.name} (${this.$t('label.iscustomized')})` : `${d.name} (${d.disksize} GB)` }))
         if (this.zones.length === 1) {
@@ -400,7 +388,7 @@ export default {
       return error?.message || String(error)
     },
     isTransient (message) {
-      return TRANSIENT_ERRORS.some(m => message.includes(m))
+      return DBAAS_TRANSIENT_ERRORS.some(m => message.includes(m))
     },
     handleSubmit (e) {
       if (this.loading) return

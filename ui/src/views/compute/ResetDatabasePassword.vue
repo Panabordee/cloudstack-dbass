@@ -66,6 +66,7 @@ import { ref, reactive, toRaw } from 'vue'
 import { Modal } from 'ant-design-vue'
 import { postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
+import { DBAAS_IDENTIFIER_PATTERN } from '@/utils/dbaas'
 import TooltipLabel from '@/components/widgets/TooltipLabel'
 
 export default {
@@ -102,7 +103,7 @@ export default {
         dbusername: [
           { required: true, message: this.$t('message.error.required.input') },
           {
-            pattern: /^[A-Za-z][A-Za-z0-9_]{0,31}$/,
+            pattern: DBAAS_IDENTIFIER_PATTERN,
             message: this.$t('message.error.database.identifier')
           }
         ]

@@ -24,6 +24,55 @@
 // static spots stay correct; see BUILD-DBAAS.md.
 export const DBAAS_TEMPLATE_PREFIX = 'dbaas-'
 
+// Same identifier shape the provisioning scripts validate against, so a name
+// the backend would reject is caught in the form instead of after a round
+// trip. Kept here rather than repeated per dialog: three views validate the
+// same two fields and they must not drift apart.
+export const DBAAS_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/
+
+// The engines starve a small vCPU badly enough that sshd cannot answer the
+// SSH banner in time, so the offering picker filters to at least this much.
+// These are minimums the API filters on, not exact matches -- and the picker
+// falls back to the unfiltered list when a zone has nothing this large, since
+// an empty dropdown with no explanation is worse than a slow instance.
+export const DBAAS_MIN_OFFERING = { memory: 1024, cpuspeed: 1000 }
+
+// A fresh instance needs roughly 48s before sshd answers, and each failed
+// attempt burns its own connect timeout on top of the delay, so this covers
+// about three minutes of slow boot.
+export const DBAAS_PROVISION_RETRIES = { maxAttempts: 8, retryDelayMs: 10000 }
+
+// The provisioning run is only reachable once sshd inside the fresh instance
+// answers. Anything matching these means we were too early and another
+// attempt is worth it; a rejection from the engine itself (duplicate user,
+// invalid identifier) will never succeed on a retry and must surface
+// immediately. Engine-specific entries are unavoidable -- each engine words
+// "not listening yet" differently -- so a new engine needs its own phrase
+// added here or its first attempt is treated as a hard failure.
+export const DBAAS_TRANSIENT_ERRORS = [
+  // paramiko, when sshd accepts the socket but cannot finish the handshake
+  'No existing session',
+  'Error reading SSH protocol banner',
+  // the NIC has no address in the CloudStack API yet
+  'could not resolve VM IP',
+  // sshd is not listening yet, or the guest has not brought the NIC up
+  'Connection refused',
+  'No route to host',
+  'Unable to connect to port 22',
+  'NoValidConnectionsError',
+  // SSH is up but the engine behind it is not listening yet
+  "Can't connect to local MySQL server",
+  'connection to server on socket',
+  'MongoNetworkError',
+  'ECONNREFUSED',
+  // 'timed out' covers ssh/paramiko, 'timeout' covers axios' own
+  // "timeout of 600000ms exceeded"
+  'timed out',
+  'timeout',
+  // the request never reached the management server
+  'Network Error'
+]
+
 // Turns a DBaaS credential response (engine/host/port/database/username/
 // password) into a single copy-paste connect command. Passwords are generated
 // alphanumeric-only by the provisioning scripts, so shell quoting is a
