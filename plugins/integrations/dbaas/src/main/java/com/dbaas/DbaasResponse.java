@@ -40,6 +40,10 @@ public class DbaasResponse extends BaseResponse {
     @Param(description = "login password on the instance, when VM access was set up")
     private String vmPassword;
 
+    @SerializedName("found")
+    @Param(description = "true when a stored database credential exists for the instance", since = "4.22.2.0")
+    private Boolean found;
+
     public void setEngine(String engine) { this.engine = engine; }
     public void setHost(String host) { this.host = host; }
     public void setPort(Integer port) { this.port = port; }
@@ -54,4 +58,5 @@ public class DbaasResponse extends BaseResponse {
     public void setVmPassword(String vmPassword) { this.vmPassword = vmPassword; }
     public String getVmUsername() { return vmUsername; }
     public String getVmPassword() { return vmPassword; }
+    public void setFound(Boolean found) { this.found = found; }
 }

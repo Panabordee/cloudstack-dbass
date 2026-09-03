@@ -18,7 +18,7 @@
 <template>
   <div class="form-layout">
     <a-spin :spinning="loading">
-      <a-descriptions v-if="credentials.password" bordered size="small" :column="1" class="credentials">
+      <a-descriptions v-if="credentials.found && credentials.password" bordered size="small" :column="1" class="credentials">
         <a-descriptions-item :label="$t('label.engine')">{{ credentials.engine }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
@@ -27,10 +27,16 @@
         </a-descriptions-item>
       </a-descriptions>
       <a-alert
-        v-else-if="loaded && noCredential && autoChecking"
+        v-else-if="loaded && miss && autoChecking"
         type="info"
         showIcon
         :message="$t('message.dbaas.provisioning.inprogress', { count: autoChecks, total: maxAutoChecks })"
+        class="state-alert" />
+      <a-alert
+        v-else-if="loaded && miss"
+        type="warning"
+        showIcon
+        :message="$t('message.dbaas.no.stored.credential')"
         class="state-alert" />
       <a-alert
         v-else-if="loaded"
@@ -61,7 +67,7 @@
           type="primary">
           {{ $t('label.copy.connect.command') }}
         </a-button>
-        <a-button v-if="loaded && !credentials.password" @click="fetchPassword">{{ $t('label.retry') }}</a-button>
+        <a-button v-if="loaded && miss" @click="retry">{{ $t('label.retry') }}</a-button>
         <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
       </div>
     </a-spin>
@@ -84,7 +90,6 @@ export default {
     return {
       loading: false,
       loaded: false,
-      noCredential: false,
       errorMsg: '',
       autoChecks: 0,
       maxAutoChecks: 12,
@@ -94,43 +99,52 @@ export default {
   created () {
     this.fetchPassword()
   },
+  beforeUnmount () {
+    // The auto-check timer keeps firing against a dead dialog otherwise.
+    if (this.retryTimerId) {
+      clearTimeout(this.retryTimerId)
+      this.retryTimerId = null
+    }
+  },
   computed: {
     connectCommand () {
       return buildConnectCommand(this.credentials)
     },
+    // Machine-readable miss (backend responds 200 with found=false while the
+    // database is still being provisioned); anything else that failed to load
+    // is a hard error.
+    miss () {
+      return this.loaded && this.credentials.found === false
+    },
     autoChecking () {
-      return this.noCredential && this.autoChecks > 0 && this.autoChecks < this.maxAutoChecks
+      return this.miss && this.autoChecks > 0 && this.autoChecks < this.maxAutoChecks
     }
   },
   methods: {
     fetchPassword () {
       this.loading = true
       this.loaded = false
-      this.noCredential = false
       this.errorMsg = ''
       getAPI('getDatabasePassword', { virtualmachineid: this.resource.id }).then(json => {
         this.credentials = json.getdatabasepasswordresponse?.dbaas || {}
         this.loaded = true
+        if (this.credentials.found === false && this.autoChecks < this.maxAutoChecks) {
+          this.autoChecks++
+          this.retryTimerId = setTimeout(() => this.fetchPassword(), 10000)
+        }
       }).catch(error => {
-        // The backend answers "No stored database credential found for this
-        // VM" while a createDatabase is still provisioning (or before the
-        // first one ever ran) -- that is a normal, retryable state, not a
-        // broken fetch. While provisioning may still be running, check again
-        // automatically every 10s so the user sees progress instead of an
-        // error; after the budget the static warning with a Retry button
-        // takes over.
         const data = error?.response?.data
         const text = data ? (data[Object.keys(data).find(k => data[k] && data[k].errortext)]?.errortext || '') : ''
         this.errorMsg = text || error?.message || String(error)
-        this.noCredential = this.errorMsg.includes('No stored database credential')
         this.loaded = true
-        if (this.noCredential && this.autoChecks < this.maxAutoChecks) {
-          this.autoChecks++
-          setTimeout(() => this.fetchPassword(), 10000)
-        }
       }).finally(() => {
         this.loading = false
       })
+    },
+    retry () {
+      // A manual retry restarts the auto-check budget as well.
+      this.autoChecks = 0
+      this.fetchPassword()
     },
     notifyCopied () {
       this.$notification.info({

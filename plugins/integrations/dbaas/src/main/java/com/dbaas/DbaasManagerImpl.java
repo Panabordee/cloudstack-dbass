@@ -280,15 +280,21 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 pstmt.setString(2, cmd.getDbUsername());
             }
             try (ResultSet rs = pstmt.executeQuery()) {
-                if (!rs.next()) {
-                    throw new InvalidParameterValueException("No stored database credential found for this VM"
-                            + (cmd.getDbUsername() != null ? " and username " + cmd.getDbUsername() : ""));
-                }
                 DbaasResponse response = new DbaasResponse();
+                response.setObjectName("dbaas");
+                // A miss (no row yet -- the database is still being
+                // provisioned, or was never created) is not an error: respond
+                // 200 with found=false so the UI can drive its auto-check UX
+                // from a machine-readable flag instead of parsing error text.
+                // Only genuine database failures are thrown as errors.
+                if (!rs.next()) {
+                    response.setFound(false);
+                    return response;
+                }
+                response.setFound(true);
                 response.setUsername(rs.getString("db_username"));
                 response.setPassword(DBEncryptionUtil.decrypt(rs.getString("db_password_encrypted")));
                 response.setEngine(rs.getString("engine"));
-                response.setObjectName("dbaas");
                 // The connection command needs a reachable host and the
                 // engine's port: resolve the instance's current IP live (it
                 // may have changed since provisioning) and take the port from
