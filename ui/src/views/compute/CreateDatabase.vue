@@ -43,6 +43,12 @@
             v-model:value="form.dbusername"
             :placeholder="apiParams.dbusername.description"/>
         </a-form-item>
+        <a-form-item name="resetvmpassword">
+          <a-checkbox v-model:checked="form.resetvmpassword">
+            {{ $t('label.reset.vm.password') }}
+          </a-checkbox>
+          <p class="checkbox-warning">{{ $t('message.warning.reset.vm.password') }}</p>
+        </a-form-item>
 
         <div :span="24" class="action-button">
           <a-button @click="closeAction">{{ $t('label.cancel') }}</a-button>
@@ -60,6 +66,23 @@
         <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
       </a-descriptions>
+      <template v-if="credentials.vmusername">
+        <a-descriptions bordered size="small" :column="1" class="credentials">
+          <a-descriptions-item :label="$t('label.vm.username')">{{ credentials.vmusername }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.vm.password')">{{ credentials.vmpassword }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.ssh.command')">
+            <span class="connect-command">{{ sshCommand }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+        <div :span="24" class="action-button">
+          <a-button @click="notifyCopiedVm" v-clipboard:copy="sshCommand" type="primary">
+            {{ $t('label.copy.ssh.command') }}
+          </a-button>
+          <a-button @click="notifyCopiedVm" v-clipboard:copy="credentials.vmpassword">
+            {{ $t('label.copy.vm.password') }}
+          </a-button>
+        </div>
+      </template>
       <div :span="24" class="action-button">
         <a-button @click="notifyCopied" v-clipboard:copy="credentials.password" type="primary">
           {{ $t('label.copy.password') }}
@@ -75,7 +98,7 @@ import { ref, reactive, toRaw } from 'vue'
 import { Modal } from 'ant-design-vue'
 import { postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
-import { DBAAS_IDENTIFIER_PATTERN } from '@/utils/dbaas'
+import { buildSshCommand, DBAAS_IDENTIFIER_PATTERN } from '@/utils/dbaas'
 import TooltipLabel from '@/components/widgets/TooltipLabel'
 
 export default {
@@ -101,6 +124,11 @@ export default {
   beforeCreate () {
     this.apiParams = this.$getApiParams('createDatabase')
   },
+  computed: {
+    sshCommand () {
+      return buildSshCommand(this.credentials)
+    }
+  },
   created () {
     this.initForm()
   },
@@ -124,11 +152,18 @@ export default {
       this.formRef.value.validate().then(() => {
         const values = toRaw(this.form)
         this.loading = true
-        postAPI('createDatabase', {
+        // resetvmpassword is opt-in: the key is sent only when the checkbox
+        // was ticked (postAPI drops undefined keys), so an unticked form
+        // never rotates the instance login password.
+        const params = {
           virtualmachineid: this.resource.id,
           dbname: values.dbname,
           dbusername: values.dbusername
-        }).then(json => {
+        }
+        if (values.resetvmpassword) {
+          params.resetvmpassword = true
+        }
+        postAPI('createDatabase', params).then(json => {
           const dbaas = json.createdatabaseresponse?.dbaas
           if (dbaas) {
             // Also retrievable afterwards via Show Password -- the backend
@@ -157,6 +192,13 @@ export default {
     },
     notifyCopied () {
       this.passwordCopied = true
+      this.$notification.info({
+        message: this.$t('message.success.copy.clipboard')
+      })
+    },
+    // VM credentials are not stored server-side, so copying them must not
+    // satisfy the database-password close warning.
+    notifyCopiedVm () {
       this.$notification.info({
         message: this.$t('message.success.copy.clipboard')
       })
@@ -190,8 +232,23 @@ export default {
     }
   }
 
+  // No word-break here: labels wrap at spaces. The only long unbroken value
+  // (the password) is short enough to fit; a dedicated break-all span exists
+  // for connect commands wherever they are rendered.
+  // No word-break here: labels wrap at spaces. The only long unbroken value
+  // (the password) is short enough to fit; a dedicated break-all span exists
+  // for connect commands wherever they are rendered.
   .credentials {
     margin-top: 16px;
+  }
+
+  .checkbox-warning {
+    margin-top: 4px;
+    color: rgba(0, 0, 0, 0.45);
+  }
+
+  .connect-command {
+    font-family: monospace;
     word-break: break-all;
   }
 </style>
