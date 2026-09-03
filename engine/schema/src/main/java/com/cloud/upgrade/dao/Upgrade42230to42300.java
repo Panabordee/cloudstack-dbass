@@ -16,10 +16,25 @@
 // under the License.
 package com.cloud.upgrade.dao;
 
+import java.io.InputStream;
+
+import com.cloud.utils.exception.CloudRuntimeException;
+
 public class Upgrade42230to42300 extends Upgrade42210to42300 {
 
     @Override
     public String[] getUpgradableVersionRange() {
         return new String[] {"4.22.3.0", "4.23.0.0"};
+    }
+
+    @Override
+    public InputStream[] getCleanupScripts() {
+        final String scriptFile = "META-INF/db/schema-42210to42300-cleanup.sql";
+        final InputStream script = Thread.currentThread().getContextClassLoader().getResourceAsStream(scriptFile);
+        if (script == null) {
+            throw new CloudRuntimeException("Unable to find " + scriptFile);
+        }
+
+        return new InputStream[] {script};
     }
 }
