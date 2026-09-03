@@ -284,6 +284,8 @@ known_categories = {
     'ImportVmTask': 'Import VM Task',
     'Dns': 'DNS',
     'downloadValidationScreenshot': 'Backup and Recovery',
+    'Announcement': 'Announcements',
+    'Announcements': 'Announcements',
     'InstanceProxy': 'Reverse Proxy',
     'InstanceProxies': 'Reverse Proxy',
     'ReverseProxyHosts': 'Reverse Proxy',
