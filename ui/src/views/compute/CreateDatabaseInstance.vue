@@ -510,52 +510,51 @@ export default {
           this.credentials = dbaas
           this.step = 'done'
           this.loading = false
-          if (this.closed) {
-            // The user already left via the non-blocking close; the
-            // notification is their one shot at the credentials, so it
-            // carries username/password/command with copy buttons right on
-            // it. The password is also stored server-side, retrievable via
-            // Show Password.
-            const copyButton = (label, text) => h(Button, {
-              size: 'small',
-              style: { marginRight: '8px' },
-              onClick: async () => {
-                if (await copyTextToClipboard(text)) {
-                  this.notifyCopied()
-                }
+          // The notification is the user's one shot at the credentials --
+          // especially the instance login password, which is never stored
+          // anywhere -- so it fires on EVERY successful creation, whether
+          // the dialog is still open or was closed early. The database
+          // password is additionally stored server-side, retrievable via
+          // Show Password.
+          const copyButton = (label, text) => h(Button, {
+            size: 'small',
+            style: { marginRight: '8px' },
+            onClick: async () => {
+              if (await copyTextToClipboard(text)) {
+                this.notifyCopied()
               }
-            }, { default: () => label })
-            this.$notification.success({
-              message: this.$t('label.create.database.instance'),
-              description: h('div', [
-                h('div', `db username: ${this.credentials.username}`),
-                h('div', `db password: ${this.credentials.password}`),
-                h('div', {
-                  style: { fontFamily: 'monospace', wordBreak: 'break-all', marginTop: '4px' }
-                }, this.connectCommand),
-                this.credentials.vmusername
-                  ? h('div', { style: { marginTop: '8px' } }, `vm username: ${this.credentials.vmusername}`)
-                  : null,
-                this.credentials.vmpassword
-                  ? h('div', `vm password: ${this.credentials.vmpassword}`)
-                  : null,
-                this.sshCommand
-                  ? h('div', {
-                    style: { fontFamily: 'monospace', wordBreak: 'break-all' }
-                  }, this.sshCommand)
-                  : null
-              ]),
-              btn: h('div', { style: { marginTop: '8px' } }, [
-                copyButton(this.$t('label.copy.password'), this.credentials.password),
-                copyButton(this.$t('label.copy.connect.command'), this.connectCommand),
-                this.credentials.vmpassword
-                  ? copyButton(this.$t('label.copy.vm.password'), this.credentials.vmpassword)
-                  : null,
-                this.sshCommand ? copyButton(this.$t('label.copy.ssh.command'), this.sshCommand) : null
-              ]),
-              duration: 0
-            })
-          }
+            }
+          }, { default: () => label })
+          this.$notification.success({
+            message: this.$t('label.create.database.instance'),
+            description: h('div', [
+              h('div', `db username: ${this.credentials.username}`),
+              h('div', `db password: ${this.credentials.password}`),
+              h('div', {
+                style: { fontFamily: 'monospace', wordBreak: 'break-all', marginTop: '4px' }
+              }, this.connectCommand),
+              this.credentials.vmusername
+                ? h('div', { style: { marginTop: '8px' } }, `vm username: ${this.credentials.vmusername}`)
+                : null,
+              this.credentials.vmpassword
+                ? h('div', `vm password: ${this.credentials.vmpassword}`)
+                : null,
+              this.sshCommand
+                ? h('div', {
+                  style: { fontFamily: 'monospace', wordBreak: 'break-all' }
+                }, this.sshCommand)
+                : null
+            ]),
+            btn: h('div', { style: { marginTop: '8px' } }, [
+              copyButton(this.$t('label.copy.password'), this.credentials.password),
+              copyButton(this.$t('label.copy.connect.command'), this.connectCommand),
+              this.credentials.vmpassword
+                ? copyButton(this.$t('label.copy.vm.password'), this.credentials.vmpassword)
+                : null,
+              this.sshCommand ? copyButton(this.$t('label.copy.ssh.command'), this.sshCommand) : null
+            ]),
+            duration: 0
+          })
           this.$emit('refresh-data')
         } else {
           this.failStep(this.$t('message.error.database.response'))
