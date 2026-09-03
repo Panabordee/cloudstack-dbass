@@ -39,6 +39,21 @@ public class CreateDatabaseCmd extends BaseCmd {
             description = "name of the database to create")
     private String dbName;
 
+    // Only the first creation (from the wizard, on a freshly deployed
+    // instance) may set the tenant login password: every later
+    // createDatabase on the same VM runs without this flag, so a database
+    // added to an existing instance never rotates the OS password the tenant
+    // may already be using -- the old value would otherwise be overwritten by
+    // a generated one with no way to learn it.
+    @Parameter(name = "resetvmpassword", type = CommandType.BOOLEAN, required = false,
+            description = "set the instance login user's password as part of this call; "
+                    + "only the initial wizard deployment should send true")
+    private Boolean resetVmPassword;
+
+    public Boolean isResetVmPassword() {
+        return resetVmPassword;
+    }
+
     // Optional: the UI lets the database user be omitted (its banner explains
     // the default), and DbaasManagerImpl.createDatabase() then defaults it to
     // the database name. This must stay required=false -- the UI strips

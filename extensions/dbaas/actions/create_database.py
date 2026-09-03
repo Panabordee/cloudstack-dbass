@@ -91,23 +91,27 @@ def run(payload, config):
         logging.exception("provisioning script failed")
         return {"status": "failed", "message": f"provisioning failed: {e}"}
 
-    # Best-effort tenant shell access: the login user comes from config.json
-    # (vm_ssh_user, default "debian" — the Debian cloud image user) and the
-    # password is generated here. vmaccess.sh only exists in templates built
-    # after it was added, and a chpasswd failure must never fail the database
-    # that was just provisioned successfully — on any problem the vm_*
-    # fields are simply left out of the response and the warning is logged.
-    vm_user = config.get("vm_ssh_user", "debian")
-    vm_password = generate_password()
+    # Best-effort tenant shell access, and deliberately gated: the login
+    # password is only set when the caller asked for it (reset_vm_password,
+    # sent by the first wizard deployment on a fresh instance). A later
+    # createDatabase on the same VM must never rotate the OS password the
+    # tenant may already be using -- the generated replacement would leave
+    # them locked out with no way to learn it. vmaccess.sh also only exists
+    # in templates built after it was added, and any vm-access failure must
+    # never fail the database that provisioned successfully: on any problem
+    # the vm_* fields are left out of the response and the warning is logged.
     vm_access = {}
-    try:
-        _run_provisioning_script(vm_ip, "vmaccess.sh", config, {
-            "vm_user": vm_user,
-            "vm_password": vm_password,
-        })
-        vm_access = {"vm_username": vm_user, "vm_password": vm_password}
-    except Exception as e:
-        logging.warning("vm access setup skipped: %s", e)
+    if str(extract_param(payload, "reset_vm_password") or "").lower() in ("true", "1"):
+        vm_user = config.get("vm_ssh_user", "debian")
+        vm_password = generate_password()
+        try:
+            _run_provisioning_script(vm_ip, "vmaccess.sh", config, {
+                "vm_user": vm_user,
+                "vm_password": vm_password,
+            })
+            vm_access = {"vm_username": vm_user, "vm_password": vm_password}
+        except Exception as e:
+            logging.warning("vm access setup skipped: %s", e)
 
     # Never log db_password — everything above/below this line must stay silent on it.
     connection_info = {

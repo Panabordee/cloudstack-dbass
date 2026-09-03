@@ -52,4 +52,6 @@ public class DbaasResponse extends BaseResponse {
     public String getPassword() { return password; }
     public void setVmUsername(String vmUsername) { this.vmUsername = vmUsername; }
     public void setVmPassword(String vmPassword) { this.vmPassword = vmPassword; }
+    public String getVmUsername() { return vmUsername; }
+    public String getVmPassword() { return vmPassword; }
 }

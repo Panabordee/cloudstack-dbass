@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.stream.Collectors;
@@ -158,6 +159,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             String sql = readSchemaStatement();
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.executeUpdate();
+            ensureVmCredentialColumns(txn);
         } catch (Exception e) {
             // Credential storage degrades gracefully (see storeCredential), so
             // a management server that can't create this table should still
@@ -166,6 +168,25 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             // unchecked CloudRuntimeException (DB down / pool exhausted) that
             // a SQLException catch would let escape and fail management start.
             logger.error("failed to ensure dbaas_credentials table exists", e);
+        }
+    }
+
+    // CREATE TABLE IF NOT EXISTS cannot extend a table created before the
+    // vm_username / vm_password_encrypted columns existed; add them when an
+    // upgrade finds a pre-vmaccess table.
+    private void ensureVmCredentialColumns(TransactionLegacy txn) throws SQLException {
+        String check = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()"
+                + " AND TABLE_NAME = 'dbaas_credentials' AND COLUMN_NAME = 'vm_username'";
+        try (PreparedStatement pstmt = txn.prepareStatement(check); ResultSet rs = pstmt.executeQuery()) {
+            if (rs.next() && rs.getInt(1) > 0) {
+                return;
+            }
+        }
+        try (PreparedStatement pstmt = txn.prepareStatement("ALTER TABLE `dbaas_credentials`"
+                + " ADD COLUMN `vm_username` varchar(255) NULL,"
+                + " ADD COLUMN `vm_password_encrypted` varchar(512) NULL")) {
+            pstmt.executeUpdate();
+            logger.info("added vm_username / vm_password_encrypted columns to dbaas_credentials");
         }
     }
 
@@ -183,6 +204,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             dbUsername = cmd.getDbName();
         }
         parameters.addProperty("db_username", dbUsername);
+        parameters.addProperty("reset_vm_password", Boolean.TRUE.equals(cmd.isResetVmPassword()));
 
         JsonObject details = runExtensionAction("create_database", cmd.getVirtualMachineId(), parameters);
 
@@ -193,8 +215,9 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         response.setDatabase(details.get("database").getAsString());
         response.setUsername(details.get("username").getAsString());
         response.setPassword(details.get("password").getAsString());
-        // VM access is best-effort on the extension side: templates built
-        // before vmaccess.sh existed report no vm_* fields at all.
+        // VM access is best-effort on the extension side: it only reports
+        // vm_* fields when reset_vm_password was set and the template ships
+        // vmaccess.sh; templates built before it existed report none.
         if (details.has("vm_username")) {
             response.setVmUsername(details.get("vm_username").getAsString());
         }
@@ -203,7 +226,11 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
         response.setObjectName("dbaas");
 
-        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(), response.getEngine());
+        // A create without resetvmpassword never touched the OS password, so
+        // pass nulls: storeCredential inherits the previous row's VM
+        // credentials, keeping them recoverable through Show Password.
+        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(),
+                response.getEngine(), response.getVmUsername(), response.getVmPassword());
         return response;
     }
 
@@ -224,7 +251,8 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         response.setPassword(details.get("password").getAsString());
         response.setObjectName("dbaas");
 
-        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(), response.getEngine());
+        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(),
+                response.getEngine(), null, null);
         return response;
     }
 
@@ -234,7 +262,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         // reached; this just resolves the UUID the table is keyed on.
         String vmId = vmUuid(cmd.getVirtualMachineId());
 
-        String sql = "SELECT db_username, db_password_encrypted, engine FROM dbaas_credentials WHERE vm_id = ?"
+        String sql = "SELECT db_username, db_password_encrypted, vm_username, vm_password_encrypted, engine FROM dbaas_credentials WHERE vm_id = ?"
                 + (cmd.getDbUsername() != null ? " AND db_username = ?" : "")
                 + " ORDER BY created_at DESC, id DESC LIMIT 1";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
@@ -252,6 +280,15 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 response.setUsername(rs.getString("db_username"));
                 response.setPassword(DBEncryptionUtil.decrypt(rs.getString("db_password_encrypted")));
                 response.setEngine(rs.getString("engine"));
+                // VM credentials ride along when the instance's login password
+                // was ever set; a pre-vmaccess row has NULLs and the response
+                // simply omits the fields.
+                String vmUsername = rs.getString("vm_username");
+                String vmPasswordEncrypted = rs.getString("vm_password_encrypted");
+                if (vmUsername != null && vmPasswordEncrypted != null) {
+                    response.setVmUsername(vmUsername);
+                    response.setVmPassword(DBEncryptionUtil.decrypt(vmPasswordEncrypted));
+                }
                 response.setObjectName("dbaas");
                 return response;
             }
@@ -271,14 +308,46 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // create_database/reset_password both call this on every success, so
     // Show Password always reflects whatever the tenant's credential
     // actually is right now -- not just what it was the first time.
-    private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine) {
-        String sql = "INSERT INTO dbaas_credentials (vm_id, db_username, db_password_encrypted, engine) VALUES (?, ?, ?, ?)";
+    // create_database/reset_password both call this on every success, so
+    // Show Password always reflects whatever the tenant's credential
+    // actually is right now -- not just what it was the first time.
+    // vmUsername/vmPassword are null when the call never touched the OS
+    // password: the previous row's values are then copied forward, so Show
+    // Password keeps returning the tenant's actual login credentials instead
+    // of losing them to a newer database-only row.
+    private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine,
+            String vmUsername, String vmPassword) {
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            if (vmUsername == null || vmPassword == null) {
+                String previous = "SELECT vm_username, vm_password_encrypted FROM dbaas_credentials"
+                        + " WHERE vm_id = ? AND vm_username IS NOT NULL AND vm_password_encrypted IS NOT NULL"
+                        + " ORDER BY created_at DESC, id DESC LIMIT 1";
+                try (PreparedStatement pstmt = txn.prepareStatement(previous)) {
+                    pstmt.setString(1, vmId);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) {
+                            vmUsername = rs.getString("vm_username");
+                            // Re-encrypting would round-trip needlessly; the
+                            // ciphertext is reusable as-is under the same key.
+                            vmPassword = rs.getString("vm_password_encrypted");
+                        }
+                    }
+                }
+            }
+            String sql = "INSERT INTO dbaas_credentials (vm_id, db_username, db_password_encrypted, engine,"
+                    + " vm_username, vm_password_encrypted) VALUES (?, ?, ?, ?, ?, ?)";
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.setString(1, vmId);
             pstmt.setString(2, dbUsername);
             pstmt.setString(3, DBEncryptionUtil.encrypt(dbPassword));
             pstmt.setString(4, engine);
+            if (vmUsername != null && vmPassword != null) {
+                pstmt.setString(5, vmUsername);
+                pstmt.setString(6, DBEncryptionUtil.encrypt(vmPassword));
+            } else {
+                pstmt.setNull(5, java.sql.Types.VARCHAR);
+                pstmt.setNull(6, java.sql.Types.VARCHAR);
+            }
             pstmt.executeUpdate();
         } catch (Exception e) {
             // The provisioning call already succeeded and the tenant already

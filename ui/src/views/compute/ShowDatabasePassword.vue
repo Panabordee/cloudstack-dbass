@@ -23,6 +23,15 @@
         <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
       </a-descriptions>
+      <template v-if="credentials.password && credentials.vmusername">
+        <a-descriptions bordered size="small" :column="1" class="credentials">
+          <a-descriptions-item :label="$t('label.vm.username')">{{ credentials.vmusername }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.vm.password')">{{ credentials.vmpassword }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.ssh.command')">
+            <span class="connect-command">{{ sshCommand }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+      </template>
       <a-alert
         v-else-if="loaded && noCredential"
         type="warning"
@@ -50,6 +59,18 @@
           type="primary">
           {{ $t('label.copy.password') }}
         </a-button>
+        <a-button
+          v-if="credentials.vmpassword"
+          @click="notifyCopied"
+          v-clipboard:copy="credentials.vmpassword">
+          {{ $t('label.copy.vm.password') }}
+        </a-button>
+        <a-button
+          v-if="sshCommand"
+          @click="notifyCopied"
+          v-clipboard:copy="sshCommand">
+          {{ $t('label.copy.ssh.command') }}
+        </a-button>
         <a-button v-if="loaded && !credentials.password" @click="fetchPassword">{{ $t('label.retry') }}</a-button>
         <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
       </div>
@@ -59,6 +80,7 @@
 
 <script>
 import { getAPI } from '@/api'
+import { buildSshCommand } from '@/utils/dbaas'
 
 export default {
   name: 'ShowDatabasePassword',
@@ -79,6 +101,11 @@ export default {
   },
   created () {
     this.fetchPassword()
+  },
+  computed: {
+    sshCommand () {
+      return buildSshCommand(this.credentials)
+    }
   },
   methods: {
     fetchPassword () {

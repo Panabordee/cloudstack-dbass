@@ -499,7 +499,11 @@ export default {
       postAPI('createDatabase', {
         virtualmachineid: vmId,
         dbname: values.dbname,
-        dbusername: values.dbusername
+        dbusername: values.dbusername,
+        // This view only ever deploys a freshly created instance, so setting
+        // the tenant login password here is safe; later createDatabase calls
+        // on the same VM (Create Database action) must not rotate it.
+        resetvmpassword: true
       }, { ignoreCancelToken: true }).then(json => {
         const dbaas = json.createdatabaseresponse?.dbaas
         if (dbaas) {
