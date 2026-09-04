@@ -389,7 +389,7 @@
           style="margin-left: 5px"
           :actions="actions"
           :resource="record"
-          :enabled="quickViewEnabled() && actions.length > 0 && columns && columns[0].dataIndex === 'fqdn'"
+          :enabled="quickViewEnabled(actions, columns, column.key)"
           @exec-action="$parent.execAction"
         />
       </template>
@@ -762,7 +762,7 @@
           style="margin-left: 5px"
           :actions="actions"
           :resource="record"
-          :enabled="quickViewEnabled() && actions.length > 0 && columns && columns[0].dataIndex === 'domain'"
+          :enabled="quickViewEnabled(actions, columns, column.key)"
           @exec-action="$parent.execAction"
         />
       </template>
@@ -928,7 +928,7 @@
           style="margin-left: 5px"
           :actions="actions"
           :resource="record"
-          :enabled="quickViewEnabled() && actions.length > 0"
+          :enabled="quickViewEnabled(actions, columns, column.key)"
           @exec-action="$parent.execAction"
         />
       </template>

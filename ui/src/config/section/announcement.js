@@ -19,8 +19,8 @@ import { shallowRef, defineAsyncComponent } from 'vue'
 export default {
   name: 'announcement',
   title: 'label.announcements',
-  icon: 'sound-outlined',
-  permission: ['listAnnouncements'],
+  icon: 'ReadOutlined',
+  permission: ['listAnnouncements', 'createAnnouncement'],
   columns: ['title', 'type', 'enabled', 'priority', 'startdate', 'enddate', 'created'],
   details: ['id', 'title', 'message', 'type', 'enabled', 'closable', 'persistdismissal', 'priority', 'startdate', 'enddate', 'created'],
   searchFilters: ['type'],

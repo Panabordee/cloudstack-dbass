@@ -16,6 +16,7 @@
 // under the License.
 import store from '@/store'
 import { shallowRef, defineAsyncComponent } from 'vue'
+import announcement from '@/config/section/announcement'
 
 export default {
   name: 'tools',
@@ -87,6 +88,7 @@ export default {
       permission: ['listInfrastructure', 'listVolumesForImport'],
       component: () => import('@/views/tools/ManageVolumes.vue')
     },
+    announcement,
     {
       name: 'webhook',
       title: 'label.webhooks',
