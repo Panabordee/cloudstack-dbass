@@ -3366,7 +3366,7 @@
   "message.desc.created.ssh.key.pair": "Created a SSH key pair.",
   "message.desc.create.database": "Provision a database and a dedicated user on this instance. The generated password is shown once and cannot be retrieved afterwards.",
   "message.desc.created.database": "Copy the password now for convenience. It is also saved and can be viewed again later from this instance's Show Password action.",
-  "message.confirm.close.database.password": "You haven't copied the password yet. You can still view it later with Show Password, but do you want to close this window now?",
+  "message.confirm.close.database.password": "You haven't copied the credentials yet. The database password can be recovered later via Show Password, but the instance login password is shown only this once. Copy them before closing?",
   "message.error.database.identifier": "Must start with a letter and contain only letters, digits or underscores (max 32 characters).",
   "message.error.database.response": "The database may have been created, but the response could not be read, so the password could not be shown. Check the instance before retrying: a retry with the same name will fail because the user already exists.",
   "message.desc.create.database.instance": "Deploys a new instance from the selected engine template and provisions a database on it in one step. The generated password is shown once and cannot be retrieved afterwards.",
@@ -4268,6 +4268,5 @@
   "message.delete.proxy.domain": "Please confirm that you want to delete this proxy domain suffix. Only domain suffixes without proxy hosts can be deleted.",
   "message.success.add.proxy.domain": "The proxy domain suffix has been added",
   "message.success.update.proxy.domain": "The proxy domain suffix has been updated",
-  "label.reset.vm.password": "Reset instance login password",
-  "message.warning.reset.vm.password": "This overwrites the current instance login password. Anyone using the existing password will be locked out until you share the new one shown here."
+  "label.reset.vm.password": "Reset instance login password"
 }

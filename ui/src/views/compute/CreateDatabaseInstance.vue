@@ -175,16 +175,16 @@
           <a-button @click="notifyCopied" v-clipboard:copy="sshCommand" type="primary">
             {{ $t('label.copy.ssh.command') }}
           </a-button>
-          <a-button @click="notifyCopied" v-clipboard:copy="credentials.vmpassword">
+          <a-button @click="markCopied('vmPassword')" v-clipboard:copy="credentials.vmpassword">
             {{ $t('label.copy.vm.password') }}
           </a-button>
         </div>
       </template>
       <div :span="24" class="action-button">
-        <a-button @click="notifyCopied" v-clipboard:copy="connectCommand" type="primary">
+        <a-button @click="markCopied('dbPassword')" v-clipboard:copy="connectCommand" type="primary">
           {{ $t('label.copy.connect.command') }}
         </a-button>
-        <a-button @click="notifyCopied" v-clipboard:copy="credentials.password">
+        <a-button @click="markCopied('dbPassword')" v-clipboard:copy="credentials.password">
           {{ $t('label.copy.password') }}
         </a-button>
         <a-button @click="confirmClose(goToInstance)">{{ $t('label.go.to.instance') }}</a-button>
@@ -217,7 +217,7 @@ import { mixinForm } from '@/utils/mixin'
 import {
   buildConnectCommand,
   buildSshCommand,
-  copyTextToClipboard,
+  credentialNotification,
   DBAAS_TEMPLATE_PREFIX,
   DBAAS_IDENTIFIER_PATTERN,
   DBAAS_MIN_OFFERING,
@@ -243,7 +243,8 @@ export default {
       keyPairs: [],
       keyPairLoading: false,
       credentials: {},
-      passwordCopied: false,
+      dbPasswordCopied: false,
+      vmPasswordCopied: false,
       failureMessage: '',
       closed: false,
       deployedVmId: null,
@@ -510,51 +511,13 @@ export default {
           this.credentials = dbaas
           this.step = 'done'
           this.loading = false
-          // The notification is the user's one shot at the credentials --
-          // especially the instance login password, which is never stored
-          // anywhere -- so it fires on EVERY successful creation, whether
-          // the dialog is still open or was closed early. The database
-          // password is additionally stored server-side, retrievable via
-          // Show Password.
-          const copyButton = (label, text) => h(Button, {
-            size: 'small',
-            style: { marginRight: '8px' },
-            onClick: async () => {
-              if (await copyTextToClipboard(text)) {
-                this.notifyCopied()
-              }
-            }
-          }, { default: () => label })
-          this.$notification.success({
-            message: this.$t('label.create.database.instance'),
-            description: h('div', [
-              h('div', `db username: ${this.credentials.username}`),
-              h('div', `db password: ${this.credentials.password}`),
-              h('div', {
-                style: { fontFamily: 'monospace', wordBreak: 'break-all', marginTop: '4px' }
-              }, this.connectCommand),
-              this.credentials.vmusername
-                ? h('div', { style: { marginTop: '8px' } }, `vm username: ${this.credentials.vmusername}`)
-                : null,
-              this.credentials.vmpassword
-                ? h('div', `vm password: ${this.credentials.vmpassword}`)
-                : null,
-              this.sshCommand
-                ? h('div', {
-                  style: { fontFamily: 'monospace', wordBreak: 'break-all' }
-                }, this.sshCommand)
-                : null
-            ]),
-            btn: h('div', { style: { marginTop: '8px' } }, [
-              copyButton(this.$t('label.copy.password'), this.credentials.password),
-              copyButton(this.$t('label.copy.connect.command'), this.connectCommand),
-              this.credentials.vmpassword
-                ? copyButton(this.$t('label.copy.vm.password'), this.credentials.vmpassword)
-                : null,
-              this.sshCommand ? copyButton(this.$t('label.copy.ssh.command'), this.sshCommand) : null
-            ]),
-            duration: 0
-          })
+          // The instance login password cannot be recovered later (Show
+          // Password deliberately does not store it), so the notification
+          // with copy buttons fires every time the VM credentials come back
+          // -- whether the dialog is still open or was closed early.
+          if (this.credentials.vmusername) {
+            this.notifyVmCredentials()
+          }
           this.$emit('refresh-data')
         } else {
           this.failStep(this.$t('message.error.database.response'))
@@ -591,17 +554,40 @@ export default {
       // on top of it and land on the wrong page.
       this.closed = true
     },
-    notifyCopied () {
-      this.passwordCopied = true
+    notifyVmCredentials () {
+      const parts = credentialNotification(h, Button, this.credentials, t => this.$t(t), flag => this.markCopied(flag))
+      this.$notification.success({
+        message: this.$t('label.create.database.instance'),
+        description: parts.description,
+        btn: parts.btn,
+        duration: 0
+      })
+    },
+    markCopied (flag) {
+      if (flag === 'dbPassword') {
+        this.dbPasswordCopied = true
+      } else if (flag === 'vmPassword') {
+        this.vmPasswordCopied = true
+      }
       this.$notification.info({
-        message: this.$t('message.success.copy.clipboard')
+        message: this.$t('message.success.copy.clipboard'),
+        duration: 2
       })
     },
     // Only guards the credentials step -- by the time this runs the password
     // is already stored server-side and retrievable via Show Password later,
     // so this is a courtesy nudge to copy it now, not a last chance.
     confirmClose (proceed) {
-      if (this.step !== 'done' || this.passwordCopied) {
+      if (this.step !== 'done') {
+        proceed()
+        return
+      }
+      // Both secrets are unrecoverable from this dialog once closed: the
+      // instance login password is never stored anywhere, so warn when
+      // either one has not been copied yet.
+      const missing = !this.dbPasswordCopied ||
+        (this.credentials.vmusername && !this.vmPasswordCopied)
+      if (!missing) {
         proceed()
         return
       }

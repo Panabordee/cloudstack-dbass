@@ -103,6 +103,50 @@ export function buildSshCommand (credentials) {
   return `ssh ${credentials.vmusername}@${credentials.host}`
 }
 
+// Builds the success-notification body for freshly created/rotated
+// credentials: database lines always, instance (VM) login lines when present,
+// each with copy buttons wired through onCopy(flag) so callers can track what
+// the user actually saved. h and Button are injected by the caller.
+export function credentialNotification (h, Button, credentials, t, onCopy) {
+  if (!credentials) {
+    return null
+  }
+  const mono = { fontFamily: 'monospace', wordBreak: 'break-all' }
+  const copyButton = (label, text, flag) => h(Button, {
+    size: 'small',
+    style: { marginRight: '8px' },
+    onClick: async () => {
+      if (await copyTextToClipboard(text)) onCopy(flag)
+    }
+  }, { default: () => label })
+  const connectCommand = buildConnectCommand(credentials)
+  const description = h('div', [
+    h('div', `db username: ${credentials.username}`),
+    h('div', `db password: ${credentials.password}`),
+    h('div', { style: { ...mono, marginTop: '4px' } }, connectCommand),
+    credentials.vmusername
+      ? h('div', { style: { marginTop: '8px' } }, `vm username: ${credentials.vmusername}`)
+      : null,
+    credentials.vmpassword
+      ? h('div', `vm password: ${credentials.vmpassword}`)
+      : null,
+    credentials.vmusername
+      ? h('div', { style: mono }, buildSshCommand(credentials))
+      : null
+  ])
+  const btn = h('div', { style: { marginTop: '8px' } }, [
+    copyButton(t('label.copy.password'), credentials.password, 'dbPassword'),
+    copyButton(t('label.copy.connect.command'), connectCommand, 'dbPassword'),
+    credentials.vmusername
+      ? copyButton(t('label.copy.vm.password'), credentials.vmpassword, 'vmPassword')
+      : null,
+    credentials.vmusername
+      ? copyButton(t('label.copy.ssh.command'), buildSshCommand(credentials), 'vmPassword')
+      : null
+  ])
+  return { description, btn }
+}
+
 // navigator.clipboard only exists in secure contexts; the management UI is
 // commonly served over plain http, so fall back to the execCommand textarea
 // trick. Async so the secure-context path can await the write: resolving true
