@@ -45,6 +45,14 @@ export default {
     verifyOauth () {
       const params = new URLSearchParams(window.location.search)
       const code = params.get('code')
+      if (code) {
+        // strip the OAuth callback params (e.g. ?code=) from the URL so that a
+        // failed verification redirecting back to /user/login is not mistaken
+        // for a new OAuth callback by the router guard (which would loop forever)
+        const url = new URL(window.location.href)
+        url.search = ''
+        window.history.replaceState(null, null, url.toString())
+      }
       const provider = this.$localStorage.get(OAUTH_PROVIDER)
       this.state.loginBtn = true
       getAPI('verifyOAuthCodeAndGetUser', { provider: provider, secretcode: code, domain: this.$localStorage.get(OAUTH_DOMAIN) }).then(response => {

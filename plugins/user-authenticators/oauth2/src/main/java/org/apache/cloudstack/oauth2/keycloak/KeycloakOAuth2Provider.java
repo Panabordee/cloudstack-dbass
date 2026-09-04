@@ -58,8 +58,6 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
 
     public static final String KEYCLOAK_PROVIDER = "keycloak";
 
-    protected String idToken = null;
-
     @Inject
     OauthProviderDao oauthProviderDao;
 
@@ -135,7 +133,6 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
         if (StringUtils.isBlank(verifiedEmail) || !email.equals(verifiedEmail)) {
             throw new CloudRuntimeException("Unable to verify the email address with the provided secret");
         }
-        clearIdToken();
 
         return true;
     }
@@ -157,43 +154,40 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
             throw new CloudAuthenticationException("Keycloak provider is not registered, so user cannot be verified");
         }
 
-        if (StringUtils.isBlank(idToken)) {
-            String auth = provider.getClientId() + ":" + provider.getSecretKey();
-            String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+        String auth = provider.getClientId() + ":" + provider.getSecretKey();
+        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
 
-            List<NameValuePair> params = new ArrayList<>();
-            params.add(new BasicNameValuePair("grant_type", "authorization_code"));
-            params.add(new BasicNameValuePair("code", secretCode));
-            params.add(new BasicNameValuePair("redirect_uri", provider.getRedirectUri()));
+        List<NameValuePair> params = new ArrayList<>();
+        params.add(new BasicNameValuePair("grant_type", "authorization_code"));
+        params.add(new BasicNameValuePair("code", secretCode));
+        params.add(new BasicNameValuePair("redirect_uri", provider.getRedirectUri()));
 
-            HttpPost post = new HttpPost(provider.getTokenUrl());
-            post.setHeader(HttpHeaders.AUTHORIZATION, "Basic " + encodedAuth);
+        HttpPost post = new HttpPost(provider.getTokenUrl());
+        post.setHeader(HttpHeaders.AUTHORIZATION, "Basic " + encodedAuth);
 
-            try {
-                post.setEntity(new UrlEncodedFormEntity(params));
-            } catch (UnsupportedEncodingException e) {
-                throw new CloudRuntimeException("Unable to generate URL parameters: " + e.getMessage());
+        try {
+            post.setEntity(new UrlEncodedFormEntity(params));
+        } catch (UnsupportedEncodingException e) {
+            throw new CloudRuntimeException("Unable to generate URL parameters: " + e.getMessage());
+        }
+
+        String idToken;
+        try (CloseableHttpResponse response = httpClient.execute(post)) {
+            String body = EntityUtils.toString(response.getEntity());
+
+            if (response.getStatusLine().getStatusCode() != 200) {
+                throw new CloudRuntimeException("Keycloak error during token generation: " + body);
             }
 
-            try (CloseableHttpResponse response = httpClient.execute(post)) {
-                String body = EntityUtils.toString(response.getEntity());
-
-                if (response.getStatusLine().getStatusCode() != 200) {
-                    throw new CloudRuntimeException("Keycloak error during token generation: " + body);
-                }
-
-                JsonObject json = JsonParser.parseString(body).getAsJsonObject();
-                JsonElement fetchedIdToken = json.get("id_token");
-                if (fetchedIdToken == null) {
-                    throw new CloudRuntimeException("No id_token found in token");
-                }
-                String idTokenAsString = fetchedIdToken.getAsString();
-                validateIdToken(idTokenAsString , provider);
-
-                this.idToken = idTokenAsString ;
-            } catch (IOException e) {
-                throw new CloudRuntimeException("Unable to connect to Keycloak server", e);
+            JsonObject json = JsonParser.parseString(body).getAsJsonObject();
+            JsonElement fetchedIdToken = json.get("id_token");
+            if (fetchedIdToken == null) {
+                throw new CloudRuntimeException("No id_token found in token");
             }
+            idToken = fetchedIdToken.getAsString();
+            validateIdToken(idToken, provider);
+        } catch (IOException e) {
+            throw new CloudRuntimeException("Unable to connect to Keycloak server", e);
         }
 
         String verifiedEmail = obtainEmail(idToken, provider);
@@ -228,10 +222,6 @@ public class KeycloakOAuth2Provider extends AdapterBase implements UserOAuth2Aut
             throw new CloudRuntimeException("No email claim found in id_token");
         }
         return email;
-    }
-
-    protected void clearIdToken() {
-        idToken = null;
     }
 
     public void setHttpClient(CloseableHttpClient httpClient) {

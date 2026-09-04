@@ -281,7 +281,6 @@ public class KeycloakOAuth2ProviderTest {
         when(httpClient.execute(any(HttpPost.class))).thenReturn(firstResponse).thenReturn(secondResponse);
 
         String first = provider.verifySecretCodeAndFetchEmail("first-auth-code");
-        provider.clearIdToken();
         String second = provider.verifySecretCodeAndFetchEmail("second-auth-code");
 
         assertEquals("First code should return the email of its own token", firstEmail, first);
