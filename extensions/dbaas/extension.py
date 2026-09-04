@@ -55,10 +55,15 @@ def main():
 
     action_name = sys.argv[1]
     payload_file = sys.argv[2]
-    # sys.argv[3] is the timeout in seconds if you need to self-enforce it
-
+    # sys.argv[3] is the provisioning timeout DbaasManagerImpl runs us under
+    # (dbaas.provision.timeout). Hand it to the actions so their internal
+    # retry loops can size themselves to the real budget instead of guessing.
     try:
         config = load_config()
+        config["provision_timeout_seconds"] = int(sys.argv[3]) if len(sys.argv) > 3 else None
+    except ValueError:
+        fail(f"invalid timeout argument: {sys.argv[3]}")
+        return
     except Exception as e:
         fail(f"could not load config.json: {e}")
         return

@@ -53,8 +53,9 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             // (3 attempts, 15s apart, each up to ssh timeout + the engine's
             // own internal wait -- MongoDB's rotation marker alone is 120s),
             // so the budget must cover the whole retry loop (~570s worst
-            // case), not a single attempt. The python loop checks a 400s
-            // wall-clock budget on top and stops itself first.
+            // case), not a single attempt. The timeout is handed to
+            // extension.py, which derives its own retry budget from it
+            // (roughly 2/3) and stops itself before this kill switch fires.
             "Timeout in seconds passed through to extension.py for provisioning.", true);
 
     @Inject

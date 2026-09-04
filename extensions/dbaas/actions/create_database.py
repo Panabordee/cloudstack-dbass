@@ -34,15 +34,18 @@ TRANSIENT_CONNECT_ERRORS = (
 )
 PROVISION_ATTEMPTS = 3
 PROVISION_RETRY_SLEEP_SECONDS = 15
-# Wall-clock budget for the whole retry loop, checked before starting another
-# attempt. Java kills the python process at dbaas.provision.timeout (600s via
-# Global Settings). Worst per-attempt cost is ssh_connect_timeout_seconds
-# (config.json, 60) plus the engine's own internal wait (MongoDB's rotation
-# marker: up to 120s) = ~180s, and the sleep between attempts is 15s:
-# worst case 3 attempts = 3x180 + 2x15 = 570s -- so the budget must be tight
-# enough that the loop stops ITSELF before 600s. 400s caps the loop while
-# leaving the full first attempt untouched.
-PROVISION_TIME_BUDGET_SECONDS = 400
+# Wall-clock budget for the whole retry loop, derived from the timeout the
+# management server actually runs us under (dbaas.provision.timeout, passed
+# through config["provision_timeout_seconds"] by extension.py) -- hardcoding
+# it here would drift the day an admin raises that setting. Worst
+# per-attempt cost is ssh_connect_timeout_seconds (config.json) plus the
+# engine's own internal wait (MongoDB's rotation marker: up to 120s); the
+# loop checks the elapsed time before starting another attempt, so it always
+# stops itself before the Java-side kill switch fires mid-provision.
+DEFAULT_PROVISION_TIME_BUDGET_SECONDS = 400
+BUDGET_RATIO = 2 / 3          # 400/600: leave the Java kill switch its margin
+BUDGET_FLOOR_SECONDS = 60
+BUDGET_CEILING_SECONDS = 480
 
 # Template name -> provisioning script / port comes entirely from config.json's
 # "engines" map (see config.example.json) — never hardcode it here. Adding a
@@ -76,6 +79,15 @@ def extract_param(payload, name):
         if isinstance(container, dict) and name in container:
             return container[name]
     return payload.get(name)
+
+
+def provisioning_time_budget(config):
+    timeout = config.get("provision_timeout_seconds")
+    try:
+        budget = int(int(timeout) * BUDGET_RATIO)
+    except (TypeError, ValueError):
+        return DEFAULT_PROVISION_TIME_BUDGET_SECONDS
+    return max(BUDGET_FLOOR_SECONDS, min(budget, BUDGET_CEILING_SECONDS))
 
 
 def run(payload, config):
@@ -113,9 +125,10 @@ def run(payload, config):
     provisioned = False
     last_error = None
     loop_start = time.monotonic()
+    time_budget = provisioning_time_budget(config)
     for attempt in range(1, PROVISION_ATTEMPTS + 1):
-        if attempt > 1 and time.monotonic() - loop_start > PROVISION_TIME_BUDGET_SECONDS:
-            logging.warning("provisioning budget (%ss) exhausted after %d attempts", PROVISION_TIME_BUDGET_SECONDS, attempt - 1)
+        if attempt > 1 and time.monotonic() - loop_start > time_budget:
+            logging.warning("provisioning budget (%ss) exhausted after %d attempts", time_budget, attempt - 1)
             break
         try:
             _run_provisioning_script(vm_ip, engine["script"], config, {
