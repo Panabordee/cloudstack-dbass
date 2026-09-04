@@ -4506,6 +4506,5 @@
   "message.confirm.enable.announcement": "Are you sure you want to enable this announcement?",
   "message.confirm.disable.announcement": "Are you sure you want to disable this announcement?",
   "message.confirm.delete.announcement": "Are you sure you want to delete this announcement?",
-"message.kms.key.optional": "Optional: Select a KMS key for encryption. If not selected, legacy passphrase encryption will be used.",
-"label.oauth.domain.hint": "Enter your domain to see domain-specific providers"
+"message.kms.key.optional": "Optional: Select a KMS key for encryption. If not selected, legacy passphrase encryption will be used."
 }

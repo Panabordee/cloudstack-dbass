@@ -222,29 +222,10 @@ fill="currentColor"
               </router-link>
             </a-col>
           </a-row>
-          <div class="content" v-if="socialLogin">
+          <div class="content" v-if="socialLogin && oauthButtons.length > 0">
             <p class="or">{{ $t('label.or.sign.in.with') }}</p>
           </div>
-          <div v-if="socialLogin" class="oauth-section">
-            <a-form-item name="oauthDomain">
-              <a-input
-                size="large"
-                type="text"
-                :placeholder="$t('label.domain')"
-                v-model:value="form.oauthDomain"
-                @pressEnter="handleOauthDomainSubmit"
-                @blur="handleOauthDomainSubmit"
-              >
-                <template #prefix>
-                  <project-outlined />
-                </template>
-              </a-input>
-            </a-form-item>
-            <div
-              v-if="(oauthGithubProvider || oauthGoogleProvider || oauthKeycloakProvider) && !form.oauthDomain"
-              style="text-align: center; color: #999; font-size: 12px; margin-bottom: 8px;">
-              {{ $t('label.oauth.domain.hint') }}
-            </div>
+          <div v-if="socialLogin && oauthButtons.length > 0" class="oauth-section">
             <a-button
               v-for="(btn, idx) in oauthButtons"
               :key="btn.key"
@@ -292,7 +273,6 @@ export default {
       email: '',
       secretcode: '',
       oauthexclude: '',
-      socialLogin: false,
       naclFooter: 'Built with 💙 by <a href="https://www.ce-nacl.com" target="_blank" rel="noopener">Network and Cloud Laboratory (NaCl)</a><br>On top of Apache CloudStack',
       googleprovider: false,
       githubprovider: false,
@@ -323,7 +303,6 @@ export default {
       oauthKeycloakLogo: '',
       oauthKeycloakName: '',
       oauthLoading: false,
-      oauthDomainQueried: false,
       loginType: 0,
       state: {
         time: 60,
@@ -346,6 +325,9 @@ export default {
     },
     loginFooter () {
       return this.$config.loginFooter || ''
+    },
+    socialLogin () {
+      return this.oauthGoogleProvider || this.oauthGithubProvider || this.oauthKeycloakProvider
     },
     domainOptions () {
       const all = this.loginDomains.map(d => {
@@ -445,7 +427,6 @@ export default {
         server: (this.server.apiHost || '') + this.server.apiBase,
         username: this.$route.query?.username || '',
         domain: this.$route.query?.domain || savedDomain || '',
-        oauthDomain: '',
         project: null
       })
       this.rules = reactive({})
@@ -466,11 +447,14 @@ export default {
     },
     onDomainSelect () {
       this.domainKeyword = ''
+      this.fetchOauthProviders(this.resolveDomain(this.form.domain))
     },
     onDomainDropdownVisible (open) {
       if (open) {
         // always show the full list of domains when the dropdown opens
         this.domainKeyword = ''
+      } else {
+        this.fetchOauthProviders(this.resolveDomain(this.form.domain))
       }
     },
     preselectFirstDomain () {
@@ -517,8 +501,10 @@ export default {
           this.loginDomains = response.listlogindomainsresponse.logindomain || []
           this.preselectFirstDomain()
         }
+        this.fetchOauthProviders(this.resolveDomain(this.form.domain))
       }).catch(() => {
         this.loginDomains = []
+        this.fetchOauthProviders()
       })
       getAPI('listIdps').then(response => {
         if (response) {
@@ -531,7 +517,6 @@ export default {
           this.form.idp = this.idps[0].id || ''
         }
       })
-      this.fetchOauthProviders()
       postAPI('forgotPassword', {}).then(response => {
         this.forgotPasswordEnabled = response.forgotpasswordresponse.enabled
       }).catch((err) => {
@@ -574,7 +559,6 @@ export default {
                 this.keycloaklogo = item.logo || ''
               }
             })
-            this.socialLogin = this.googleprovider || this.githubprovider || this.keycloakprovider
             this.oauthGithubProvider = this.githubprovider
             this.oauthGoogleProvider = this.googleprovider
             this.oauthKeycloakProvider = this.keycloakprovider
@@ -638,38 +622,7 @@ export default {
     },
     handleTabClick (key) {
       this.customActiveKey = key
-      if (key === 'oauth') {
-        this.oauthGithubProvider = this.githubprovider
-        this.oauthGoogleProvider = this.googleprovider
-        this.oauthKeycloakProvider = this.keycloakprovider
-        this.oauthGithubClientId = this.githubclientid
-        this.oauthGoogleClientId = this.googleclientid
-        this.oauthKeycloakClientId = this.keycloakclientid
-        this.oauthGithubRedirectUri = this.githubredirecturi
-        this.oauthGoogleRedirectUri = this.googleredirecturi
-        this.oauthKeycloakRedirectUri = this.keycloakredirecturi
-        this.oauthKeycloakAuthorizeUrl = this.keycloakauthorizeurl
-      }
       this.setRules()
-    },
-    handleOauthDomainSubmit () {
-      const domain = this.form.oauthDomain
-      if (domain) {
-        this.oauthDomainQueried = true
-        this.fetchOauthProviders(domain)
-      } else {
-        this.oauthDomainQueried = false
-        this.oauthGithubProvider = this.githubprovider
-        this.oauthGoogleProvider = this.googleprovider
-        this.oauthKeycloakProvider = this.keycloakprovider
-        this.oauthGithubClientId = this.githubclientid
-        this.oauthGoogleClientId = this.googleclientid
-        this.oauthKeycloakClientId = this.keycloakclientid
-        this.oauthGithubRedirectUri = this.githubredirecturi
-        this.oauthGoogleRedirectUri = this.googleredirecturi
-        this.oauthKeycloakRedirectUri = this.keycloakredirecturi
-        this.oauthKeycloakAuthorizeUrl = this.keycloakauthorizeurl
-      }
     },
     handleGithubProviderAndDomain () {
       this.handleDomain()
@@ -685,7 +638,7 @@ export default {
     },
     handleDomain () {
       const values = toRaw(this.form)
-      const domain = this.customActiveKey === 'oauth' ? values.oauthDomain : values.domain
+      const domain = values.domain
       if (!domain) {
         this.$store.commit('SET_DOMAIN_USED_TO_LOGIN', '/')
       } else {
