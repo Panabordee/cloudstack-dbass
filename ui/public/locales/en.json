@@ -4269,5 +4269,6 @@
   "message.success.add.proxy.domain": "The proxy domain suffix has been added",
   "message.success.update.proxy.domain": "The proxy domain suffix has been updated",
   "label.reset.vm.password": "Reset instance login password",
-  "message.warning.reset.vm.password": "This overwrites the current instance login password. Anyone using the existing password will be locked out until you share the new one shown here."
+  "message.warning.reset.vm.password": "This overwrites the current instance login password. Anyone using the existing password will be locked out until you share the new one shown here.",
+  "message.confirm.close.database.dbpassword": "You haven't copied the database password yet. It can be recovered later via Show Password, but do you want to close this window now?"
 }

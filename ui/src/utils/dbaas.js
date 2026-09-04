@@ -151,7 +151,7 @@ export function credentialNotification (h, Button, credentials, t, onCopy) {
 // commonly served over plain http, so fall back to the execCommand textarea
 // trick. Async so the secure-context path can await the write: resolving true
 // before the promise settles would toast "copied" even on a rejected write.
-export async function copyTextToClipboard (text) {
+async function copyTextToClipboard (text) {
   if (!text) {
     return false
   }

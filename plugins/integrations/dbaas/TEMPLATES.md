@@ -411,12 +411,6 @@ this yet — see `register_extension.sh`'s header comment).
   VM volumes, MySQL can cross the 0.85 default while the others stay well
   under it. Enlarging primary storage is the durable fix; raising the threshold
   only moves the ceiling.
-- **`create_database` restarts mysqld/mariadbd on every call.** `mysql.sh` and
-  `mariadb.sh` rewrite `bind-address` whenever the line is present, which stays
-  true after the first rewrite, so every subsequent provision restarts the
-  server and drops the live connections of tenants already on that VM. Guard
-  the rewrite on the value actually needing a change.
-
 - **`Small Instance` is too small for these templates — use `Medium Instance`
   or larger (1 vCPU @ 1 GHz+, 1 GB+ RAM).** Measured on Ubuntu 24.04 with
   MySQL 8.0 (not yet re-measured on the Debian 12 rebuild, but the mechanism is

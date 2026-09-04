@@ -28,20 +28,10 @@ public class DbaasEngineResponse extends BaseResponse {
     @Param(description = "the template name this engine provisions on")
     private String template;
 
-    @SerializedName("script")
-    @Param(description = "the provisioning script run inside the instance")
-    private String script;
-
-    @SerializedName("resetscript")
-    @Param(description = "the script that rotates a user's password")
-    private String resetScript;
-
     @SerializedName("port")
     @Param(description = "the port the database engine listens on")
     private Integer port;
 
     public void setTemplate(String template) { this.template = template; }
-    public void setScript(String script) { this.script = script; }
-    public void setResetScript(String resetScript) { this.resetScript = resetScript; }
     public void setPort(Integer port) { this.port = port; }
 }

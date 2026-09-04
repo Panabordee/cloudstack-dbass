@@ -373,10 +373,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 JsonObject cfg = entry.getValue().getAsJsonObject();
                 DbaasEngineResponse engine = new DbaasEngineResponse();
                 engine.setTemplate(entry.getKey());
-                engine.setScript(cfg.get("script").getAsString());
-                if (cfg.has("reset_script")) {
-                    engine.setResetScript(cfg.get("reset_script").getAsString());
-                }
                 engine.setPort(cfg.get("port").getAsInt());
                 engine.setObjectName("dbaasengine");
                 result.add(engine);

@@ -156,7 +156,7 @@ export default {
       }
       Modal.confirm({
         title: this.$t('label.close'),
-        content: this.$t('message.confirm.close.database.password'),
+        content: this.$t('message.confirm.close.database.dbpassword'),
         okText: this.$t('label.yes'),
         cancelText: this.$t('label.no'),
         onOk: this.closeAction
