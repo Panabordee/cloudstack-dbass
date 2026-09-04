@@ -398,18 +398,22 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
+    // Takes the instance UUID directly (string): callers may target an
+    // instance whose row is already expunged, where uuid -> id resolution is
+    // not possible and not needed -- dbaas_credentials is keyed on the uuid.
     @Override
-    public int deleteCredentialsForVm(Long vmId) {
-        String vmIdUuid = vmUuid(vmId);
+    public int deleteCredentialsForVm(String vmUuid) {
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             try (PreparedStatement pstmt = txn.prepareStatement("DELETE FROM dbaas_credentials WHERE vm_id = ?")) {
-                pstmt.setString(1, vmIdUuid);
-                return pstmt.executeUpdate();
+                pstmt.setString(1, vmUuid);
+                final int deleted = pstmt.executeUpdate();
+                logger.info("deleted {} dbaas credential row(s) for VM {}", deleted, vmUuid);
+                return deleted;
             }
         } catch (Exception e) {
             // Cleanup is best-effort: the instance is already gone, the rows
             // only linger until the documented manual cleanup runs.
-            logger.warn("failed to delete dbaas credentials for VM {}", vmIdUuid, e);
+            logger.warn("failed to delete dbaas credentials for VM {}", vmUuid, e);
             return 0;
         }
     }

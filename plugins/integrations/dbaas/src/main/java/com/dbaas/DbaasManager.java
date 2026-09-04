@@ -11,5 +11,5 @@ public interface DbaasManager {
 
     List<DbaasEngineResponse> listEngines();
 
-    int deleteCredentialsForVm(Long vmId);
+    int deleteCredentialsForVm(String vmUuid);
 }

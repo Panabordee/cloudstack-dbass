@@ -285,9 +285,12 @@ export default {
           description: record.displayname || record.name,
           // The stored credentials belong to the destroyed instance: wipe
           // them server-side once the destroy job succeeds, so the rows the
-          // schema docs call out for manual cleanup stop accumulating.
+          // schema docs call out for manual cleanup stop accumulating. The
+          // call targets the instance UUID directly, so it still works when
+          // the destroy included an expunge.
           successMethod: () => {
-            postAPI('deleteDbaasCredentials', { virtualmachineid: record.id }).catch(() => {})
+            postAPI('deleteDbaasCredentials', { virtualmachineid: record.id })
+              .catch(e => console.warn('deleteDbaasCredentials failed for', record.id, e))
             this.fetchData()
           },
           errorMethod: () => this.fetchData(),

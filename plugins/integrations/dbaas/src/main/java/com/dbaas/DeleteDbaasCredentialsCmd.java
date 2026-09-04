@@ -24,7 +24,6 @@ import org.apache.cloudstack.api.BaseCmd;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.ServerApiException;
 import org.apache.cloudstack.api.response.SuccessResponse;
-import org.apache.cloudstack.api.response.UserVmResponse;
 import org.apache.cloudstack.context.CallContext;
 
 import com.cloud.utils.db.EntityManager;
@@ -48,14 +47,18 @@ public class DeleteDbaasCredentialsCmd extends BaseCmd {
     @Inject
     private DbaasManager _dbaasManager;
 
+    // Deliberately a STRING, not CommandType.UUID: the dispatcher resolves
+    // UUID params through the entity lookup, which fails outright once the
+    // instance row has been expunged out of vm_instance -- exactly the case
+    // this cleanup call covers. The raw uuid is matched directly against
+    // dbaas_credentials.vm_id instead.
     @Parameter(name = ApiConstants.VIRTUAL_MACHINE_ID,
-            type = CommandType.UUID,
-            entityType = UserVmResponse.class,
+            type = CommandType.STRING,
             required = true,
-            description = "the ID of the DBaaS instance whose stored credentials should be deleted")
-    private Long virtualMachineId;
+            description = "the UUID of the DBaaS instance whose stored credentials should be deleted")
+    private String virtualMachineId;
 
-    public Long getVirtualMachineId() {
+    public String getVirtualMachineId() {
         return virtualMachineId;
     }
 
@@ -64,13 +67,13 @@ public class DeleteDbaasCredentialsCmd extends BaseCmd {
         return s_name;
     }
 
-    // Usually invoked while the VM sits in Destroyed state, so the normal
-    // owner lookup applies; once it has been expunged the lookup is null and
-    // the caller's own account is the best available ACL -- deleting stale
-    // rows for an instance that no longer exists is exactly the point.
+    // ACL is best-effort by design: the target is usually a destroyed or
+    // already-expunged instance whose row may be gone, in which case the
+    // caller's own account is the strongest available check -- deleting
+    // stale rows for an instance that no longer exists is exactly the point.
     @Override
     public long getEntityOwnerId() {
-        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, getVirtualMachineId());
+        final VirtualMachine vm = _entityMgr.findByUuidIncludingRemoved(VirtualMachine.class, getVirtualMachineId());
         if (vm != null) {
             return vm.getAccountId();
         }
@@ -79,7 +82,8 @@ public class DeleteDbaasCredentialsCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
-        int deleted = _dbaasManager.deleteCredentialsForVm(getVirtualMachineId());
+        final int deleted = _dbaasManager.deleteCredentialsForVm(getVirtualMachineId());
+        logger.info("deleteDbaasCredentials removed {} stored credential row(s)", deleted);
         SuccessResponse response = new SuccessResponse();
         response.setSuccess(true);
         response.setResponseName(getCommandName());
