@@ -315,7 +315,10 @@ export default {
         const engineNames = engines
           ? new Set((engines.listdbaasenginesresponse?.dbaasengine || []).map(e => e.template))
           : null
-        this.engineNames = engineNames
+        // Keep the state a Set even on the fallback path (no listDbaasEngines
+        // API): isEngineMember() reads .size off this state, and a null here
+        // would throw a TypeError that breaks every row action in the table.
+        this.engineNames = engineNames || new Set()
         const templates = (tplResponse.listtemplatesresponse.template || [])
           .filter(t => t.name && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
         this.engineLabels = templates.reduce((acc, t) => {
