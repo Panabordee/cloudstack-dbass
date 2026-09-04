@@ -47,6 +47,7 @@
           <a-checkbox v-model:checked="form.resetvmpassword">
             {{ $t('label.reset.vm.password') }}
           </a-checkbox>
+          <p class="checkbox-warning">{{ $t('message.warning.reset.vm.password') }}</p>
         </a-form-item>
 
         <div :span="24" class="action-button">
@@ -273,5 +274,10 @@ export default {
     margin-top: 4px;
     color: rgba(0, 0, 0, 0.45);
     word-break: break-all;
+  }
+
+  .checkbox-warning {
+    margin-top: 4px;
+    color: rgba(0, 0, 0, 0.45);
   }
 </style>

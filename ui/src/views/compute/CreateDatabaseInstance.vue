@@ -574,9 +574,10 @@ export default {
         duration: 2
       })
     },
-    // Only guards the credentials step -- by the time this runs the password
-    // is already stored server-side and retrievable via Show Password later,
-    // so this is a courtesy nudge to copy it now, not a last chance.
+    // Only guards the credentials step. The database password is stored
+    // server-side and recoverable via Show Password, but the instance login
+    // password is NOT stored anywhere -- losing it means losing shell access
+    // to the instance -- so the nudge covers both.
     confirmClose (proceed) {
       if (this.step !== 'done') {
         proceed()
