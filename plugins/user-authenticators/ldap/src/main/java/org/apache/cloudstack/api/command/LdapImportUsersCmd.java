@@ -19,6 +19,7 @@ package org.apache.cloudstack.api.command;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -37,8 +38,11 @@ import org.apache.cloudstack.api.response.DomainResponse;
 import org.apache.cloudstack.api.response.LdapUserResponse;
 import org.apache.cloudstack.api.response.ListResponse;
 import org.apache.cloudstack.api.response.RoleResponse;
+import org.apache.cloudstack.context.CallContext;
 import org.apache.cloudstack.ldap.LdapManager;
 import org.apache.cloudstack.ldap.LdapUser;
+import org.apache.cloudstack.ldap.LdapImportProgress;
+import org.apache.cloudstack.ldap.LdapUserCreationLock;
 import org.apache.cloudstack.ldap.NoLdapUserMatchingQueryException;
 import org.bouncycastle.util.encoders.Base64;
 
@@ -102,12 +106,19 @@ public class LdapImportUsersCmd extends BaseListCmd {
         _accountService = accountService;
     }
 
-    private void createCloudstackUserAccount(LdapUser user, String accountName, Domain domain) {
+    private boolean createCloudstackUserAccount(LdapUser user, String accountName, Domain domain) {
         Account account = _accountService.getActiveAccountByName(accountName, domain.getId());
         if (account == null) {
+            UserAccount existingUserInDomain = _accountService.getActiveUserAccount(user.getUsername(), domain.getId());
+            if (existingUserInDomain != null) {
+                logger.info("User [name={}] already exists in domain [id={}] under account [name={}], skipping creation",
+                        user.getUsername(), domain.getId(), existingUserInDomain.getAccountName());
+                return false;
+            }
             logger.debug("No account exists with name: {}. Creating the account and a user with name: {} in the account", accountName, user.getUsername());
             _accountService.createUserAccount(user.getUsername(), generatePassword(), user.getFirstname(), user.getLastname(), user.getEmail(), timezone, accountName, getAccountType(), getRoleId(),
                     domain.getId(), domain.getNetworkDomain(), details, UUID.randomUUID().toString(), UUID.randomUUID().toString(), User.Source.LDAP);
+            return true;
         } else {
 //            check if the user exists. if yes, call update
             UserAccount csuser = _accountService.getActiveUserAccount(user.getUsername(), domain.getId());
@@ -126,6 +137,7 @@ public class LdapImportUsersCmd extends BaseListCmd {
 
                 _accountService.updateUser(updateUserCmd);
             }
+            return true;
         }
     }
 
@@ -137,6 +149,7 @@ public class LdapImportUsersCmd extends BaseListCmd {
         }
         List<LdapUser> users;
         try {
+            LdapImportProgress.startFetching(getCallingAccountId());
             if (StringUtils.isNotBlank(groupName)) {
 
                 users = _ldapManager.getUsersInGroup(groupName, domainId);
@@ -149,15 +162,50 @@ public class LdapImportUsersCmd extends BaseListCmd {
         }
 
         List<LdapUser> addedUsers = new ArrayList<>();
+        List<String> skippedUsers = new ArrayList<>();
+        List<String> failedUsers = new ArrayList<>();
+        Map<String, LdapUser> uniqueUsers = new LinkedHashMap<>();
         for (LdapUser user : users) {
-            Domain domain = getDomain(user);
-            try {
-                createCloudstackUserAccount(user, getAccountName(user), domain);
-                addedUsers.add(user);
-            } catch (InvalidParameterValueException ex) {
-                logger.error("Failed to create user with username: {} ::: {}", user.getUsername(), ex.getMessage());
+            LdapUser existing = uniqueUsers.get(user.getUsername());
+            if (existing == null) {
+                uniqueUsers.put(user.getUsername(), user);
+            } else if (!existing.getPrincipal().equals(user.getPrincipal())) {
+                logger.warn("Skipping duplicate LDAP username [{}] at [{}], first occurrence at [{}] is used",
+                        user.getUsername(), user.getPrincipal(), existing.getPrincipal());
             }
         }
+        int total = uniqueUsers.size();
+        final long accountId = getCallingAccountId();
+        LdapImportProgress.startImporting(accountId, total);
+        int index = 0;
+        try {
+            for (LdapUser user : uniqueUsers.values()) {
+                logger.info("Importing LDAP user {}/{}: [username={}, principal={}]", ++index, total, user.getUsername(), user.getPrincipal());
+                LdapImportProgress.setCurrentUser(accountId, user.getUsername());
+                Domain domain = getDomain(user);
+                try {
+                    boolean imported;
+                    synchronized (LdapUserCreationLock.getLock(user.getUsername(), domain.getId())) {
+                        imported = createCloudstackUserAccount(user, getAccountName(user), domain);
+                    }
+                    if (imported) {
+                        addedUsers.add(user);
+                        LdapImportProgress.recordProcessed(accountId, true, false, false, null);
+                    } else {
+                        skippedUsers.add(user.getUsername());
+                        LdapImportProgress.recordProcessed(accountId, false, true, false, null);
+                    }
+                } catch (InvalidParameterValueException ex) {
+                    logger.error("Failed to create user with username: {} ::: {}", user.getUsername(), ex.getMessage());
+                    failedUsers.add(user.getUsername());
+                    LdapImportProgress.recordProcessed(accountId, false, false, true, null);
+                }
+            }
+        } finally {
+            LdapImportProgress.finish(accountId);
+        }
+        logger.info("LDAP import finished: [total={}, imported={}, skipped={}, failed={}], skipped users: {}, failed users: {}",
+                total, addedUsers.size(), skippedUsers.size(), failedUsers.size(), skippedUsers, failedUsers);
         ListResponse<LdapUserResponse> response = new ListResponse<>();
         response.setResponses(createLdapUserResponse(addedUsers));
         response.setResponseName(getCommandName());
@@ -236,6 +284,11 @@ public class LdapImportUsersCmd extends BaseListCmd {
     @Override
     public String getCommandName() {
         return s_name;
+    }
+
+    private long getCallingAccountId() {
+        final CallContext callContext = CallContext.current();
+        return callContext != null ? callContext.getCallingAccountId() : -1L;
     }
 
     private String generatePassword() throws ServerApiException {

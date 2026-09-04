@@ -258,7 +258,7 @@ public class LdapAuthenticator extends AdapterBase implements UserAuthenticator 
             if (rc.first()) {
                 if (user == null) {
                     // import user to cloudstack
-                    createCloudStackUserAccount(ldapUser, domainId, accountType);
+                    importLdapUserToCloudStack(ldapUser, domainId, accountType);
                 } else {
                     enableUserInCloudStack(user);
                 }
@@ -268,6 +268,16 @@ public class LdapAuthenticator extends AdapterBase implements UserAuthenticator 
         } else {
             //disable user in cloudstack
             disableUserInCloudStack(user);
+        }
+    }
+
+    private void importLdapUserToCloudStack(LdapUser ldapUser, Long domainId, Account.Type accountType) {
+        synchronized (LdapUserCreationLock.getLock(ldapUser.getUsername(), domainId)) {
+            if (_accountManager.getActiveUserAccount(ldapUser.getUsername(), domainId) != null) {
+                logger.debug("User [name={}] already exists in domain [id={}], skipping auto-import", ldapUser.getUsername(), domainId);
+                return;
+            }
+            createCloudStackUserAccount(ldapUser, domainId, accountType);
         }
     }
 

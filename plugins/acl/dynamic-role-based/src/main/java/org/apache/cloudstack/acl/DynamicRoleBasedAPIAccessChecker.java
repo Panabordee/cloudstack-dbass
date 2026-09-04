@@ -200,7 +200,7 @@ public class DynamicRoleBasedAPIAccessChecker extends AdapterBase implements API
         }
 
         if (accountRole.getRoleType() == RoleType.Admin && accountRole.getId() == RoleType.Admin.getId() && apiKeyPairPermissions.length == 0) {
-            logger.info("Account [{}] is Root Admin and there aren't any API key pair permissions involved, thus, all APIs are allowed.", account);
+            logger.debug("Account [{}] is Root Admin and there aren't any API key pair permissions involved, thus, all APIs are allowed.", account);
             return true;
         }
 

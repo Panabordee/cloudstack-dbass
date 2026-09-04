@@ -17,9 +17,16 @@
 package org.apache.cloudstack.ldap;
 
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import javax.inject.Inject;
 import javax.naming.NamingEnumeration;
@@ -74,7 +81,7 @@ public class OpenLdapUserManagerImpl implements LdapUserManager {
         return new LdapUser(username, email, firstname, lastname, principal, domain, disabled, memberships);
     }
 
-    private String generateSearchFilter(final String username, Long domainId) {
+    String generateSearchFilter(final String username, final LdapContext context, Long domainId) {
         final StringBuilder userObjectFilter = getUserObjectFilter(domainId);
 
         final StringBuilder usernameFilter = getUsernameFilter(username, domainId);
@@ -86,7 +93,11 @@ public class OpenLdapUserManagerImpl implements LdapUserManager {
         if (CollectionUtils.isNotEmpty(ldapGroups)) {
             ldapGroupsFilter.append("(|");
             for (String ldapGroup : ldapGroups) {
-                ldapGroupsFilter.append(getMemberOfGroupString(ldapGroup, memberOfAttribute));
+                String groupDn = resolveGroupDn(ldapGroup, context, domainId);
+                if (StringUtils.isBlank(groupDn)) {
+                    groupDn = ldapGroup;
+                }
+                ldapGroupsFilter.append(getMemberOfGroupString(groupDn, memberOfAttribute));
             }
             ldapGroupsFilter.append(')');
         }
@@ -94,7 +105,11 @@ public class OpenLdapUserManagerImpl implements LdapUserManager {
         String pricipleGroup = _ldapConfiguration.getSearchGroupPrinciple(domainId);
         final StringBuilder principleGroupFilter = new StringBuilder();
         if (null != pricipleGroup) {
-            principleGroupFilter.append(getMemberOfGroupString(pricipleGroup, memberOfAttribute));
+            String principleDn = resolveGroupDn(pricipleGroup, context, domainId);
+            if (StringUtils.isBlank(principleDn)) {
+                principleDn = pricipleGroup;
+            }
+            principleGroupFilter.append(getMemberOfGroupString(principleDn, memberOfAttribute));
         }
 
         String returnString = "(&" +
@@ -192,8 +207,12 @@ public class OpenLdapUserManagerImpl implements LdapUserManager {
 
         final StringBuilder memberOfFilter = new StringBuilder();
         if ("GROUP".equals(type)) {
+            String groupDn = resolveGroupDn(name, context, domainId);
+            if (StringUtils.isBlank(groupDn)) {
+                groupDn = name;
+            }
             memberOfFilter.append("(").append(getMemberOfAttribute(domainId)).append("=");
-            memberOfFilter.append(name);
+            memberOfFilter.append(groupDn);
             memberOfFilter.append(")");
         }
 
@@ -238,14 +257,23 @@ public class OpenLdapUserManagerImpl implements LdapUserManager {
         //Expecting only one result which has all the users
         if (result.hasMoreElements()) {
             Attribute attribute = result.nextElement().getAttributes().get(attributeName);
-            NamingEnumeration<?> values = attribute.getAll();
-
-            while (values.hasMoreElements()) {
-                String userdn = String.valueOf(values.nextElement());
-                try{
-                    users.add(getUserForDn(userdn, context, domainId));
-                } catch (NamingException e){
-                    logger.info("Userdn: {} Not Found:: Exception message: {}", userdn, e.getMessage());
+            Set<String> memberDns = new LinkedHashSet<>();
+            if (attribute != null) {
+                NamingEnumeration<?> values = attribute.getAll();
+                while (values.hasMoreElements()) {
+                    memberDns.add(String.valueOf(values.nextElement()));
+                }
+            }
+            if (LdapConfiguration.isNestedGroupsEnabled(domainId)) {
+                memberDns = expandNestedGroupMembers(memberDns, context, domainId);
+                users.addAll(resolveUsersByDn(memberDns, context, domainId));
+            } else {
+                for (String userdn : memberDns) {
+                    try {
+                        users.add(getUserForDn(userdn, context, domainId));
+                    } catch (NamingException e){
+                        logger.info("Userdn: {} Not Found:: Exception message: {}", userdn, e.getMessage());
+                    }
                 }
             }
         }
@@ -253,6 +281,102 @@ public class OpenLdapUserManagerImpl implements LdapUserManager {
         Collections.sort(users);
 
         return users;
+    }
+
+    Set<String> expandNestedGroupMembers(final Set<String> memberDns, final LdapContext context, final Long domainId) {
+        final Set<String> processed = new HashSet<>();
+        final Set<String> userDns = new LinkedHashSet<>();
+        final Deque<String> queue = new ArrayDeque<>(memberDns);
+        while (!queue.isEmpty()) {
+            final String dn = queue.poll();
+            if (StringUtils.isBlank(dn) || !processed.add(dn)) {
+                continue;
+            }
+            final Set<String> groupMembers = getGroupMembers(dn, context, domainId);
+            if (groupMembers == null) {
+                userDns.add(dn);
+            } else {
+                for (String member : groupMembers) {
+                    if (!processed.contains(member)) {
+                        queue.push(member);
+                    }
+                }
+            }
+        }
+        return userDns;
+    }
+
+    private List<LdapUser> resolveUsersByDn(final Set<String> memberDns, final LdapContext context, final Long domainId) throws NamingException {
+        final List<LdapUser> users = new ArrayList<>();
+        final Set<String> missing = new LinkedHashSet<>();
+        final Map<String, LdapUser> usersByPrincipal = new HashMap<>();
+        try {
+            for (final LdapUser user : searchUsers(null, context, domainId)) {
+                usersByPrincipal.put(user.getPrincipal(), user);
+            }
+        } catch (IOException e) {
+            throw new NamingException("Failed to fetch LDAP users for group resolution: " + e.getMessage());
+        }
+        for (final String dn : memberDns) {
+            final LdapUser user = usersByPrincipal.get(dn);
+            if (user != null) {
+                users.add(user);
+            } else {
+                missing.add(dn);
+            }
+        }
+        for (final String dn : missing) {
+            try {
+                users.add(getUserForDn(dn, context, domainId));
+            } catch (NamingException e) {
+                logger.info("Userdn: {} Not Found:: Exception message: {}", dn, e.getMessage());
+            }
+        }
+        return users;
+    }
+
+    private Set<String> getGroupMembers(final String dn, final LdapContext context, final Long domainId) {
+        final String attributeName = LdapConfiguration.getGroupUniqueMemberAttribute(domainId);
+        final SearchControls controls = new SearchControls();
+        controls.setSearchScope(_ldapConfiguration.getScope());
+        controls.setReturningAttributes(new String[] {attributeName});
+        try {
+            NamingEnumeration<SearchResult> results =
+                    context.search(dn, "(objectClass=" + LdapConfiguration.getGroupObject(domainId) + ")", controls);
+            if (results.hasMoreElements()) {
+                final Attribute attribute = results.nextElement().getAttributes().get(attributeName);
+                final Set<String> members = new LinkedHashSet<>();
+                if (attribute != null) {
+                    final NamingEnumeration<?> values = attribute.getAll();
+                    while (values.hasMoreElements()) {
+                        members.add(String.valueOf(values.nextElement()));
+                    }
+                }
+                return members;
+            }
+        } catch (NamingException e) {
+            logger.debug("Unable to read members of dn {}: {}", dn, e.getMessage());
+        }
+        return null;
+    }
+
+    String resolveGroupDn(final String groupName, final LdapContext context, final Long domainId) {
+        if (StringUtils.isBlank(groupName)) {
+            return null;
+        }
+        final SearchControls controls = new SearchControls();
+        controls.setSearchScope(_ldapConfiguration.getScope());
+        controls.setReturningAttributes(new String[] {});
+        try {
+            NamingEnumeration<SearchResult> results =
+                    context.search(LdapConfiguration.getBaseDn(domainId), generateGroupSearchFilter(groupName, domainId), controls);
+            if (results.hasMoreElements()) {
+                return results.nextElement().getNameInNamespace();
+            }
+        } catch (NamingException e) {
+            logger.debug("Unable to resolve group '{}' to a DN: {}", groupName, e.getMessage());
+        }
+        return null;
     }
 
     private LdapUser getUserForDn(String userdn, LdapContext context, Long domainId) throws NamingException {
@@ -316,7 +440,7 @@ public class OpenLdapUserManagerImpl implements LdapUserManager {
         final List<LdapUser> users = new ArrayList<>();
         NamingEnumeration<SearchResult> results;
         do {
-            results = context.search(basedn, generateSearchFilter(username, domainId), searchControls);
+            results = context.search(basedn, generateSearchFilter(username, context, domainId), searchControls);
             while (results.hasMoreElements()) {
                 final SearchResult result = results.nextElement();
                 if (!isUserDisabled(result)) {

@@ -151,6 +151,15 @@
               </a-form-item>
             </div>
 
+            <div v-if="importing" class="import-progress">
+              <a-progress :percent="importPercent" :status="importProgress.status === 'Finished' ? 'success' : 'active'" />
+              <div class="progress-detail">
+                {{ $t('label.import.progress') }}: {{ importProcessed }} / {{ importTotal }}
+                ({{ $t('label.imported') }}: {{ importImported }}, {{ $t('label.skipped') }}: {{ importSkipped }}, {{ $t('label.failed') }}: {{ importFailed }})
+              </div>
+              <div v-if="importCurrentUser" class="progress-detail">{{ importCurrentUser }}</div>
+            </div>
+
             <div class="action-button">
               <a-button @click="handleClose">{{ $t('label.close') }}</a-button>
               <a-button :loading="loading" ref="submit" type="primary" @click="handleSubmit">{{ $t('label.add') }}</a-button>
@@ -187,8 +196,43 @@ export default {
       domainLoading: false,
       roleLoading: false,
       loading: false,
+      importing: false,
+      importProgress: {
+        status: 'Idle',
+        total: 0,
+        processed: 0,
+        imported: 0,
+        skipped: 0,
+        failed: 0,
+        currentuser: null,
+        percent: 0
+      },
+      importPollTimer: null,
       searchQuery: undefined,
       samlEnable: false
+    }
+  },
+  computed: {
+    importPercent () {
+      return this.importProgress.percent || 0
+    },
+    importTotal () {
+      return this.importProgress.total || 0
+    },
+    importProcessed () {
+      return this.importProgress.processed || 0
+    },
+    importImported () {
+      return this.importProgress.imported || 0
+    },
+    importSkipped () {
+      return this.importProgress.skipped || 0
+    },
+    importFailed () {
+      return this.importProgress.failed || 0
+    },
+    importCurrentUser () {
+      return this.importProgress.currentuser
     }
   },
   beforeCreate () {
@@ -364,6 +408,28 @@ export default {
         })
       })
     },
+    startImportProgressPolling () {
+      this.stopImportProgressPolling()
+      this.pollImportProgress()
+      this.importPollTimer = setInterval(this.pollImportProgress, 1000)
+    },
+    stopImportProgressPolling () {
+      if (this.importPollTimer) {
+        clearInterval(this.importPollTimer)
+        this.importPollTimer = null
+      }
+    },
+    pollImportProgress () {
+      getAPI('listLdapImportProgress').then(json => {
+        const wrapper = json.ldapimportprogressresponse
+        if (wrapper) {
+          const resp = wrapper.LdapImportProgress || wrapper
+          if (resp) {
+            this.importProgress = resp
+          }
+        }
+      }).catch(() => {})
+    },
     handleSubmit (e) {
       e.preventDefault()
       if (this.loading) return
@@ -383,6 +449,18 @@ export default {
         if (values.group && values.group.trim().length > 0) {
           params.group = values.group
           apiName = 'importLdapUsers'
+          this.importing = true
+          this.importProgress = {
+            status: 'Fetching',
+            total: 0,
+            processed: 0,
+            imported: 0,
+            skipped: 0,
+            failed: 0,
+            currentuser: null,
+            percent: 0
+          }
+          this.startImportProgressPolling()
           promises.push(new Promise((resolve, reject) => {
             postAPI(apiName, params).then(json => {
               resolve(json)
@@ -422,6 +500,12 @@ export default {
                   message: this.$t('label.add.ldap.account'),
                   description: response.createaccountresponse.account.name
                 })
+              } else if (apiName === 'importLdapUsers') {
+                const importedCount = response.ldapuserresponse && response.ldapuserresponse.count ? response.ldapuserresponse.count : 0
+                this.$notification.success({
+                  message: this.$t('label.add.ldap.account'),
+                  description: `${this.$t('label.imported')}: ${importedCount}`
+                })
               }
             }
           }
@@ -432,6 +516,11 @@ export default {
           this.$emit('refresh-data')
         }).finally(() => {
           this.loading = false
+          if (apiName === 'importLdapUsers') {
+            this.stopImportProgressPolling()
+            this.pollImportProgress()
+            this.importing = false
+          }
         })
       }).catch(error => {
         this.formRef.value.scrollToField(error.errorFields[0].name)
@@ -510,6 +599,17 @@ export default {
 
   button + button {
     margin-left: 8px;
+  }
+}
+
+.import-progress {
+  margin: 12px 0;
+
+  .progress-detail {
+    margin-top: 4px;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.65);
+    word-break: break-all;
   }
 }
 </style>

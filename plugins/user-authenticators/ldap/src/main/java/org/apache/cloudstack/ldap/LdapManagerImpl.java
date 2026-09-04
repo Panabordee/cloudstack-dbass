@@ -32,8 +32,9 @@ import org.apache.cloudstack.api.command.LDAPConfigCmd;
 import org.apache.cloudstack.api.command.LDAPRemoveCmd;
 import org.apache.cloudstack.api.command.LdapAddConfigurationCmd;
 import org.apache.cloudstack.api.command.LdapCreateAccountCmd;
-import org.apache.cloudstack.api.command.LdapDeleteConfigurationCmd;
 import org.apache.cloudstack.api.command.LdapImportUsersCmd;
+import org.apache.cloudstack.api.command.LdapListImportProgressCmd;
+import org.apache.cloudstack.api.command.LdapDeleteConfigurationCmd;
 import org.apache.cloudstack.api.command.LdapListConfigurationCmd;
 import org.apache.cloudstack.api.command.LdapListUsersCmd;
 import org.apache.cloudstack.api.command.LdapUserSearchCmd;
@@ -304,6 +305,7 @@ public class LdapManagerImpl extends ComponentLifecycleBase implements LdapManag
         cmdList.add(LdapListConfigurationCmd.class);
         cmdList.add(LdapCreateAccountCmd.class);
         cmdList.add(LdapImportUsersCmd.class);
+        cmdList.add(LdapListImportProgressCmd.class);
         cmdList.add(LDAPConfigCmd.class);
         cmdList.add(LDAPRemoveCmd.class);
         cmdList.add(LinkDomainToLdapCmd.class);
