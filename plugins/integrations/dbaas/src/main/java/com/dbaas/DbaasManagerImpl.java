@@ -110,6 +110,11 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     + " onto; leaving it empty disables the callback and provisioning stays 'pending' forever.",
             true);
 
+    public static final ConfigKey<Integer> DbaasReportRateLimit = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.report.rate.limit", "60",
+            "Maximum reportDbaasProvisioningResult calls accepted per source IP per minute. The endpoint is"
+                    + " unauthenticated, so this bounds request flooding; 0 disables the limit.", true);
+
     private static final int REPORT_TOKEN_BYTES = 32;
 
     private static String sha256Hex(String value) {
@@ -149,6 +154,26 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     private static final java.util.regex.Pattern PASSWORD_PATTERN =
             java.util.regex.Pattern.compile("^[A-Za-z0-9_.-]{8,64}$");
 
+    // Same identifier shape the engine scripts enforce at the point of
+    // interpolation (mysql.sh and friends). Checked here as well so a bad
+    // name fails before the instance is stopped and restarted for nothing,
+    // not only once it is already booting.
+    private static final java.util.regex.Pattern IDENTIFIER_PATTERN =
+            java.util.regex.Pattern.compile("^[A-Za-z][A-Za-z0-9_]{0,31}$");
+
+    // Template detail that marks an image as built for config-drive
+    // provisioning (it carries /opt/dbaas/firstboot.sh and /opt/dbaas/engine).
+    // Without this check a v1 SSH-era template could be picked, would boot,
+    // would read nothing, and would leave its credential 'pending' forever
+    // with no error anywhere.
+    public static final String CONFIGDRIVE_DETAIL_KEY = "dbaas.configdrive";
+
+    // Cap on the status_message column (varchar(1024)) minus headroom: a
+    // report message longer than this is truncated server-side, because an
+    // UPDATE that fails on data truncation would lose the report exactly when
+    // it mattered most.
+    static final int STATUS_MESSAGE_MAX = 1000;
+
     static String validateOrGeneratePassword(String supplied) {
         if (supplied == null || supplied.trim().isEmpty()) {
             return generatePassword();
@@ -158,6 +183,13 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     + " letters, digits, underscore, dot and hyphen only; leave it empty to have one generated");
         }
         return supplied;
+    }
+
+    static void validateIdentifier(String value, String field) {
+        if (value == null || !IDENTIFIER_PATTERN.matcher(value).matches()) {
+            throw new InvalidParameterValueException(field + " must start with a letter and may contain only"
+                    + " letters, digits and underscores, up to 32 characters total");
+        }
     }
 
     static String generatePassword() {
@@ -392,8 +424,14 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
      * User data is only read at boot, so a running instance is stopped first.
      * That is a real, brief interruption for "Create Database" on an
      * already-running instance (the wizard avoids it entirely by deploying
-     * with startvm=false up front); the caller sees it in the response's
-     * message, not just in a log line.
+     * with startvm=false up front); the Create Database dialog warns the
+     * tenant before submitting (CreateDatabase.vue), which is the only
+     * warning there is -- the response carries no message field.
+     * <p>
+     * Identifiers and the template's config-drive support are validated, and
+     * the Stopped state awaited, before anything else runs; every step after
+     * the stop is wrapped so a failure starts the instance again instead of
+     * leaving the tenant with an outage.
      * <p>
      * The credential is stored before the instance (re)starts, so Show
      * Password has something to show immediately; it stays 'pending' until
@@ -405,81 +443,155 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         if (vm == null) {
             throw new InvalidParameterValueException("VM not found: " + cmd.getVirtualMachineId());
         }
-        boolean wasRunning = vm.getState() == VirtualMachine.State.Running;
-        if (wasRunning) {
+        // Fail fast on everything checkable BEFORE touching the instance's
+        // power state, so a bad request never costs the tenant a restart.
+        String dbUsername = cmd.getDbUsername();
+        if (dbUsername == null || dbUsername.trim().isEmpty()) {
+            dbUsername = cmd.getDbName();
+        }
+        validateIdentifier(cmd.getDbName(), "dbname");
+        validateIdentifier(dbUsername, "dbusername");
+        String dbPassword = validateOrGeneratePassword(cmd.getDbPassword());
+
+        VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
+        if (template == null) {
+            throw new InvalidParameterValueException("template not found for instance " + vm.getUuid());
+        }
+        String engineName = template.getName();
+        requireConfigDriveTemplate(template);
+        JsonObject engineConfig = engineConfigForVm(cmd.getVirtualMachineId());
+        if (engineConfig == null) {
+            throw new InvalidParameterValueException("template " + engineName + " is not listed in the engines map"
+                    + " of " + DbaasConfigPath.value() + ", so this plugin cannot serve databases from it;"
+                    + " add an engines entry for it or deploy from a template that is listed");
+        }
+
+        if (vm.getState() == VirtualMachine.State.Running) {
             try {
                 userVmService.stopVirtualMachine(vm.getId(), false);
             } catch (Exception e) {
                 throw new CloudRuntimeException("could not stop instance " + vm.getUuid() + " to attach the"
                         + " provisioning request (config-drive user data is only read at boot): " + e.getMessage(), e);
             }
-            vm = _entityMgr.findById(VirtualMachine.class, cmd.getVirtualMachineId());
+            // stopVirtualMachine returns before the transition is necessarily
+            // visible to the entity manager -- poll briefly instead of
+            // re-reading once, or a just-stopped instance can still read
+            // Running and the state check would fail on a stale read.
+            if (!awaitVmState(vm.getId(), VirtualMachine.State.Stopped, 30)) {
+                throw new CloudRuntimeException("instance " + vm.getUuid() + " did not reach Stopped within 30s"
+                        + " of being stopped; refusing to attach the provisioning request in an unknown state");
+            }
         }
-        if (vm.getState() != VirtualMachine.State.Stopped) {
-            throw new InvalidParameterValueException("instance " + vm.getUuid() + " must be Stopped to attach a"
-                    + " provisioning request (config-drive user data is only read at boot), but it is "
-                    + vm.getState());
-        }
-        VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
-        String engineName = template != null ? template.getName() : null;
-
-        String dbUsername = cmd.getDbUsername();
-        if (dbUsername == null || dbUsername.trim().isEmpty()) {
-            dbUsername = cmd.getDbName();
-        }
-        String dbPassword = validateOrGeneratePassword(cmd.getDbPassword());
-
-        String reportUrl = DbaasReportApiUrl.value();
-        String reportToken = (reportUrl != null && !reportUrl.isEmpty()) ? generateReportToken() : null;
-
-        String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword, vm.getUuid(), reportUrl, reportToken);
         try {
+            String reportUrl = DbaasReportApiUrl.value();
+            String reportToken = (reportUrl != null && !reportUrl.isEmpty()) ? generateReportToken() : null;
+            String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword, vm.getUuid(), reportUrl, reportToken);
             userVmManager.updateVirtualMachine(vm.getId(), null, null, null, null, null, null,
                     userData, null, null, null, BaseCmd.HTTPMethod.POST, null, null, null, null, null);
-        } catch (Exception e) {
-            throw new CloudRuntimeException("failed to attach the provisioning request to instance "
-                    + vm.getUuid() + ": " + e.getMessage(), e);
-        }
 
-        // Stored before the start, not after: a start that fails leaves an
-        // instance the tenant can start themselves, and the credential it will
-        // provision with must already be recoverable when they do. Only the
-        // token's hash is kept; the raw value already left with the user data
-        // and cannot be recovered from this row.
-        if (reportToken != null) {
-            java.sql.Timestamp expiresAt = new java.sql.Timestamp(
-                    System.currentTimeMillis() + DbaasReportTokenTtl.value() * 1000L);
-            storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
-                    sha256Hex(reportToken), expiresAt);
-        } else {
-            logger.warn("dbaas.report.api.url is not set -- instance {} cannot report its provisioning result,"
-                    + " and its credential will stay 'pending'", vm.getUuid());
-            storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING);
-        }
+            // Stored before the start, not after: a start that fails leaves an
+            // instance the tenant can start themselves, and the credential it
+            // will provision with must already be recoverable when they do.
+            // Only the token's hash is kept; the raw value already left with
+            // the user data and cannot be recovered from this row.
+            if (reportToken != null) {
+                java.sql.Timestamp expiresAt = new java.sql.Timestamp(
+                        System.currentTimeMillis() + DbaasReportTokenTtl.value() * 1000L);
+                storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
+                        sha256Hex(reportToken), expiresAt);
+            } else {
+                logger.warn("dbaas.report.api.url is not set -- instance {} cannot report its provisioning result,"
+                        + " and its credential will stay 'pending'", vm.getUuid());
+                storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING);
+            }
 
-        // Looked up as a UserVm rather than cast: the entity manager hands back
-        // whatever VO backs the row, and a cast would only fail at runtime.
-        UserVm userVm = _entityMgr.findById(UserVm.class, cmd.getVirtualMachineId());
-        if (userVm == null) {
-            throw new CloudRuntimeException("instance " + vm.getUuid()
-                    + " carries the provisioning request but is not a user instance, so it cannot be started here");
-        }
-        try {
+            // Looked up as a UserVm rather than cast: the entity manager hands back
+            // whatever VO backs the row, and a cast would only fail at runtime.
+            UserVm userVm = _entityMgr.findById(UserVm.class, cmd.getVirtualMachineId());
+            if (userVm == null) {
+                throw new CloudRuntimeException("instance " + vm.getUuid()
+                        + " carries the provisioning request but is not a user instance, so it cannot be started here");
+            }
             userVmService.startVirtualMachine(userVm, null);
         } catch (Exception e) {
-            throw new CloudRuntimeException("the provisioning request was attached to instance " + vm.getUuid()
-                    + " but it could not be started: " + e.getMessage(), e);
+            // The instance was stopped for this request: leaving it stopped
+            // without a database would turn a failed create into an outage.
+            // Best-effort start, then surface the original failure.
+            restartQuietly(cmd.getVirtualMachineId(), vm.getUuid());
+            if (e instanceof CloudRuntimeException) {
+                throw (CloudRuntimeException) e;
+            }
+            throw new CloudRuntimeException("failed to attach the provisioning request to instance "
+                    + vm.getUuid() + " and start it: " + e.getMessage(), e);
         }
 
         DbaasResponse response = new DbaasResponse();
         response.setEngine(engineName);
-        response.setHost(primaryIpAddress(vm));
-        response.setPort(enginePort(engineConfigForVm(cmd.getVirtualMachineId())));
+        // Read after the start: the pre-start VM's NIC can still have no
+        // address, which would render the UI's connect command blank.
+        VirtualMachine started = _entityMgr.findById(VirtualMachine.class, cmd.getVirtualMachineId());
+        response.setHost(primaryIpAddress(started));
+        response.setPort(enginePort(engineConfig));
         response.setDatabase(cmd.getDbName());
         response.setUsername(dbUsername);
         response.setPassword(dbPassword);
         response.setObjectName("dbaas");
         return response;
+    }
+
+    // A template that is not built for config-drive provisioning would boot,
+    // read nothing from the config drive, and leave its credential 'pending'
+    // forever with no error anywhere -- reject it up front instead. The image
+    // itself cannot be inspected from here, so the template carries the
+    // marker: detail dbaas.configdrive=true, set at registration (see
+    // TEMPLATES.md).
+    private void requireConfigDriveTemplate(VirtualMachineTemplate template) {
+        Map<?, ?> details = template.getDetails();
+        Object value = details == null ? null : details.get(CONFIGDRIVE_DETAIL_KEY);
+        if (value == null || !"true".equalsIgnoreCase(String.valueOf(value).trim())) {
+            throw new InvalidParameterValueException("template " + template.getName() + " does not declare"
+                    + " config-drive provisioning support: set its " + CONFIGDRIVE_DETAIL_KEY + "=true template"
+                    + " detail on an image built for config-drive provisioning (one carrying"
+                    + " /opt/dbaas/firstboot.sh), or deploy from a template that has it -- otherwise the request"
+                    + " would never be read and the credential would stay 'pending' forever");
+        }
+    }
+
+    // Waits up to the given seconds for the instance to reach the expected
+    // state, polling once a second; false on timeout or a vanished instance.
+    private boolean awaitVmState(Long vmId, VirtualMachine.State expected, int seconds) {
+        for (int waited = 0; waited < seconds; waited++) {
+            VirtualMachine current = _entityMgr.findById(VirtualMachine.class, vmId);
+            if (current == null) {
+                return false;
+            }
+            if (current.getState() == expected) {
+                return true;
+            }
+            try {
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
+    }
+
+    // Best-effort start of an instance that this call stopped; every failure
+    // is logged, none is propagated -- the caller rethrows the original error.
+    private void restartQuietly(Long vmId, String uuid) {
+        try {
+            UserVm userVm = _entityMgr.findById(UserVm.class, vmId);
+            if (userVm != null) {
+                userVmService.startVirtualMachine(userVm, null);
+            }
+            logger.warn("instance {} was stopped to attach a provisioning request, the request failed, and it"
+                    + " was started again", uuid);
+        } catch (Exception startException) {
+            logger.error("instance {} could not be provisioned AND could not be started again -- it is left"
+                    + " Stopped and must be started manually", uuid, startException);
+        }
     }
 
     // Resetting a database password needs a channel into a VM that is already
@@ -627,17 +739,22 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         // A broken config.json must not take the whole API down: the UI's
         // engine picker and the Database section both call this, so a failure
         // here degrades to "no engines available" (logged loudly) instead of
-        // erroring every page that touches the plugin.
+        // erroring every page that touches the plugin. One malformed entry
+        // skips that entry only -- the healthy ones still list.
         List<DbaasEngineResponse> result = new ArrayList<>();
         try {
             JsonObject engines = readEnginesConfig().getAsJsonObject("engines");
             for (Map.Entry<String, JsonElement> entry : engines.entrySet()) {
-                JsonObject cfg = entry.getValue().getAsJsonObject();
-                DbaasEngineResponse engine = new DbaasEngineResponse();
-                engine.setTemplate(entry.getKey());
-                engine.setPort(cfg.get("port").getAsInt());
-                engine.setObjectName("dbaasengine");
-                result.add(engine);
+                try {
+                    JsonObject cfg = entry.getValue().getAsJsonObject();
+                    DbaasEngineResponse engine = new DbaasEngineResponse();
+                    engine.setTemplate(entry.getKey());
+                    engine.setPort(cfg.get("port").getAsInt());
+                    engine.setObjectName("dbaasengine");
+                    result.add(engine);
+                } catch (Exception e) {
+                    logger.warn("skipping malformed engine entry '{}' in the dbaas config", entry.getKey(), e);
+                }
             }
         } catch (Exception e) {
             logger.error("failed to read dbaas engines from config.json -- reporting no engines", e);
@@ -714,28 +831,56 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         if (vmUuid == null || token == null || (!STATUS_CONFIRMED.equals(status) && !STATUS_FAILED.equals(status))) {
             return false;
         }
+        // The column is varchar(1024): a longer message would fail the whole
+        // UPDATE and lose the report exactly when it mattered most. Truncate
+        // to the same cap firstboot.sh already applies.
+        if (message != null && message.length() > STATUS_MESSAGE_MAX) {
+            message = message.substring(0, STATUS_MESSAGE_MAX);
+        }
         String tokenHash = sha256Hex(token);
-        // Matches the most recent row for this instance whose token hash is
-        // still present (not yet redeemed) and not expired; clearing the hash
-        // in the same statement makes a concurrent replay of the same token
-        // update zero rows instead of two.
-        String sql = "UPDATE dbaas_credentials SET status = ?, status_message = ?,"
-                + " report_token_hash = NULL, report_token_expires_at = NULL"
-                + " WHERE vm_id = ? AND report_token_hash = ? AND report_token_expires_at > NOW()"
-                + " ORDER BY created_at DESC LIMIT 1";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-            PreparedStatement pstmt = txn.prepareStatement(sql);
-            pstmt.setString(1, status);
-            pstmt.setString(2, message);
-            pstmt.setString(3, vmUuid);
-            pstmt.setString(4, tokenHash);
-            int updated = pstmt.executeUpdate();
-            if (updated > 0) {
-                logger.info("provisioning report accepted for VM {}: {}", vmUuid, status);
-                return true;
+            // Find the newest unredeemed row for this instance, then compare
+            // expiry in Java: the timestamp was written from this JVM's clock
+            // (storeCredential), and comparing it against NOW() of the DB
+            // would silently shift the real TTL with any clock skew between
+            // the two machines.
+            String find = "SELECT id, report_token_expires_at FROM dbaas_credentials"
+                    + " WHERE vm_id = ? AND report_token_hash = ?"
+                    + " ORDER BY created_at DESC, id DESC";
+            long rowId = -1;
+            java.sql.Timestamp expiresAt = null;
+            try (PreparedStatement pstmt = txn.prepareStatement(find)) {
+                pstmt.setString(1, vmUuid);
+                pstmt.setString(2, tokenHash);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        rowId = rs.getLong(1);
+                        expiresAt = rs.getTimestamp(2);
+                    }
+                }
             }
-            logger.warn("provisioning report rejected for VM {}: no matching pending token", vmUuid);
-            return false;
+            if (rowId < 0 || expiresAt == null || expiresAt.getTime() <= System.currentTimeMillis()) {
+                logger.warn("provisioning report rejected for VM {}: no matching pending token", vmUuid);
+                return false;
+            }
+            // Clearing the hash in the same statement makes a concurrent
+            // replay of the same token update zero rows instead of two.
+            String sql = "UPDATE dbaas_credentials SET status = ?, status_message = ?,"
+                    + " report_token_hash = NULL, report_token_expires_at = NULL"
+                    + " WHERE id = ? AND report_token_hash = ?";
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                pstmt.setString(1, status);
+                pstmt.setString(2, message);
+                pstmt.setLong(3, rowId);
+                pstmt.setString(4, tokenHash);
+                int updated = pstmt.executeUpdate();
+                if (updated > 0) {
+                    logger.info("provisioning report accepted for VM {}: {}", vmUuid, status);
+                    return true;
+                }
+                logger.warn("provisioning report rejected for VM {}: no matching pending token", vmUuid);
+                return false;
+            }
         } catch (Exception e) {
             logger.warn("failed to record provisioning report for VM {}", vmUuid, e);
             return false;
@@ -750,6 +895,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     @Override
     public ConfigKey<?>[] getConfigKeys() {
         return new ConfigKey<?>[] {DbaasConfigPath, DbaasCredentialsCleanupInterval,
-                DbaasReportTokenTtl, DbaasReportApiUrl};
+                DbaasReportTokenTtl, DbaasReportApiUrl, DbaasReportRateLimit};
     }
 }

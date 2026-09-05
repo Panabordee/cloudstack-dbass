@@ -108,7 +108,10 @@ export default {
       loaded: false,
       errorMsg: '',
       autoChecks: 0,
-      maxAutoChecks: 12,
+      // 30 x 10s = 5 minutes: a config-drive provision includes a full first
+      // boot (image boot, cloud-init, engine readiness wait), so 2 minutes
+      // regularly gave up while the instance was still working.
+      maxAutoChecks: 30,
       retryTimerId: null,
       credentials: {}
     }

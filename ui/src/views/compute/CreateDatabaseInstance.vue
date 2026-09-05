@@ -317,6 +317,11 @@ export default {
           : null
         this.templates = (tpl.listtemplatesresponse.template || [])
           .filter(t => t.name && t.isready && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
+          // A template only provisions over the config drive when it carries
+          // the marker detail; without it the backend refuses createDatabase
+          // anyway, so do not offer what would fail. When the list response
+          // carries no details at all, let the backend be the judge.
+          .filter(t => !t.details || t.details['dbaas.configdrive'] === 'true')
           // Same label source DatabaseInstances uses: the template's own
           // displaytext ("MySQL Community 8.0 on Debian 12 x86_64"), so a new
           // engine added to the backend config shows up without UI changes.

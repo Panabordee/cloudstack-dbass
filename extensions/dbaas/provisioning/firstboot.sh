@@ -54,6 +54,11 @@ except Exception:
 # here, so this only ever logs whether the call itself succeeded or not.
 report_result() {
     local status="$1" message="$2" request_file="$3"
+    # The server stores status_message in a varchar(1024) column -- a longer
+    # message would fail the whole UPDATE and the report would be lost, so
+    # truncate here (byte-wise; good enough for a human-readable tail). The
+    # full output stays in result.json on the instance.
+    message="${message:0:1000}"
     local report_url report_token vm_id
     report_url=$(report_field report_url "$request_file")
     report_token=$(report_field report_token "$request_file")
@@ -108,6 +113,46 @@ if [[ ! -x "$ENGINE_SCRIPT" ]]; then
     write_result failed "engine script ${ENGINE_SCRIPT} missing or not executable"
     exit 1
 fi
+
+# cloud-init's runcmd fires in the final boot stage, which races the engine
+# service starting -- and runcmd never retries, so running the engine script
+# against a not-yet-listening socket would fail provisioning permanently
+# (a reboot does not re-run it). Wait for the engine instead: up to
+# ENGINE_WAIT seconds, polling the per-engine readiness probe.
+ENGINE_WAIT="${DBAAS_ENGINE_WAIT:-120}"
+
+engine_ready() {
+    case "$(tr -d '[:space:]' < "$ENGINE_FILE")" in
+        mysql|mariadb)
+            mysqladmin --protocol=socket -uroot ping >/dev/null 2>&1
+            ;;
+        postgresql)
+            pg_isready -q >/dev/null 2>&1
+            ;;
+        mongodb)
+            mongosh --quiet --eval "db.adminCommand({ ping: 1 })" >/dev/null 2>&1 \
+                || mongo --quiet --eval "db.adminCommand({ ping: 1 })" >/dev/null 2>&1
+            ;;
+        *)
+            # Unknown engine marker: no probe known -- proceed and let the
+            # engine script report its own failure.
+            return 0
+            ;;
+    esac
+}
+
+waited=0
+until engine_ready; do
+    if [[ $waited -ge $ENGINE_WAIT ]]; then
+        log "engine not ready after ${ENGINE_WAIT}s -- failing instead of running the engine script against a dead socket"
+        write_result failed "database engine did not become ready within ${ENGINE_WAIT}s"
+        report_result failed "database engine did not become ready within ${ENGINE_WAIT}s" "$REQUEST_FILE" || true
+        exit 1
+    fi
+    sleep 2
+    waited=$((waited + 2))
+done
+log "engine ready (waited ${waited}s)"
 
 log "provisioning with ${ENGINE_SCRIPT}"
 if OUTPUT=$("$ENGINE_SCRIPT" < "$REQUEST_FILE" 2>&1); then

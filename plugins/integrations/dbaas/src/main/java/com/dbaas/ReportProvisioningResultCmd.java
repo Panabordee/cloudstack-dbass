@@ -3,6 +3,7 @@ package com.dbaas;
 import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
@@ -45,6 +46,37 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
     private static final String STATUS_CONFIRMED = "confirmed";
     private static final String STATUS_FAILED = "failed";
 
+    // Fixed-window per-IP counter for the unauthenticated endpoint: the
+    // 256-bit token makes guessing infeasible, but nothing about the endpoint
+    // itself stops request flooding. Window start (millis) and hit count are
+    // kept per source IP; entries age out of a pruned map, so a spoofed-address
+    // flood costs memory only up to the cap. 0/negative limit disables it.
+    private static final ConcurrentHashMap<String, long[]> REPORT_WINDOWS = new ConcurrentHashMap<>();
+    private static final long WINDOW_MILLIS = 60_000L;
+    private static final int MAX_TRACKED_IPS = 4096;
+
+    static boolean rateLimited(InetAddress remoteAddress, int limitPerMinute) {
+        if (limitPerMinute <= 0 || remoteAddress == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        if (REPORT_WINDOWS.size() > MAX_TRACKED_IPS) {
+            REPORT_WINDOWS.entrySet().removeIf(entry -> now - entry.getValue()[0] >= WINDOW_MILLIS);
+        }
+        long[] window = REPORT_WINDOWS.computeIfAbsent(remoteAddress.getHostAddress(), k -> new long[] {now, 0});
+        synchronized (window) {
+            if (now - window[0] >= WINDOW_MILLIS) {
+                window[0] = now;
+                window[1] = 0;
+            }
+            if (window[1] >= limitPerMinute) {
+                return true;
+            }
+            window[1]++;
+            return false;
+        }
+    }
+
     @Inject
     private DbaasManager dbaasManager;
 
@@ -71,6 +103,18 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
     public String authenticate(String command, Map<String, Object[]> params, HttpSession session,
             InetAddress remoteAddress, String responseType, StringBuilder auditTrailSb,
             HttpServletRequest req, HttpServletResponse resp) throws ServerApiException {
+        // The limit is checked before anything else: it exists precisely for
+        // the caller who sends garbage at volume and never reaches the token
+        // check. A limited caller gets 429 and nothing else.
+        int limitPerMinute = DbaasManagerImpl.DbaasReportRateLimit.value();
+        if (rateLimited(remoteAddress, limitPerMinute)) {
+            logger.warn("reportDbaasProvisioningResult rate limited for {} (>{} calls/minute)",
+                    remoteAddress, limitPerMinute);
+            // 429 SC_TOO_MANY_REQUESTS: the servlet-api this compiles against
+            // predates the constant, so the literal is used.
+            return serialize(resp, 429, false, responseType);
+        }
+
         String vmUuid = param(params, "vmid");
         String token = param(params, "token");
         String status = param(params, "status");
@@ -82,9 +126,14 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
 
         auditTrailSb.append("command=").append(command).append(" accepted=").append(accepted);
 
-        SuccessResponse response = new SuccessResponse(getCommandName());
-        response.setSuccess(accepted);
-        resp.setStatus(accepted ? HttpServletResponse.SC_OK : HttpServletResponse.SC_FORBIDDEN);
+        return serialize(resp, accepted ? HttpServletResponse.SC_OK : HttpServletResponse.SC_FORBIDDEN, accepted,
+                responseType);
+    }
+
+    private static String serialize(HttpServletResponse resp, int status, boolean success, String responseType) {
+        resp.setStatus(status);
+        SuccessResponse response = new SuccessResponse("reportdbaasprovisioningresultresponse");
+        response.setSuccess(success);
         return ApiResponseSerializer.toSerializedString(response, responseType);
     }
 

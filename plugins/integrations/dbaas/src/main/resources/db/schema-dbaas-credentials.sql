@@ -15,13 +15,12 @@
 -- single statement.
 --
 -- LIFECYCLE / CLEANUP:
--- Rows are never deleted automatically: the extension has no expunge hook in
--- 4.22 (the Extensions Framework exposes no VM-lifecycle event to plugins), so
--- credentials of expunged VMs accumulate. They are encrypted at rest and
--- harmless beyond table growth. DbaasManagerImpl ships a sweeper that runs
--- the exact statement below on a schedule (dbaas.credentials.cleanup.interval,
--- default 3600s) on every management start, so manual execution is only
--- needed on deployments running older plugin builds:
+-- The plugin's sweeper (DbaasManagerImpl, interval dbaas.credentials.cleanup.interval,
+-- default 3600s, started with the management server) deletes rows whose
+-- instance has been expunged on schedule; orphaned DATADISK volumes are only
+-- counted and logged there, never deleted. The statement it runs is exactly
+-- the one below, so manual execution is only needed on deployments running
+-- older plugin builds:
 --
 --   DELETE c FROM dbaas_credentials c
 --     LEFT JOIN vm_instance v ON v.uuid = c.vm_id

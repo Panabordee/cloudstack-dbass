@@ -4533,7 +4533,7 @@
   "message.error.database.response": "The database may have been created, but the response could not be read, so the password could not be shown. Check the instance before retrying: a retry with the same name will fail because the user already exists.",
   "message.desc.create.database.instance": "Deploys a new instance from the selected engine template and provisions a database on it in one step. The generated password is shown once and cannot be retrieved afterwards.",
   "message.dbaas.deploying": "Creating the instance...",
-  "message.dbaas.waiting.engine": "Waiting for the database engine to start...",
+  "message.dbaas.waiting.engine": "Attaching the provisioning request and starting the instance -- the database engine is configured at first boot...",
   "message.dbaas.close.early": "The instance is already created. You can close this window now and check the password later with Show Password.",
   "message.dbaas.no.stored.credential": "No stored database credential for this instance. Provisioning either never finished or failed \u2014 the instance itself is unaffected. Use the Create Database action on this instance to run it again; Retry below only re-checks for a credential, it does not provision one.",
   "message.dbaas.provisioning.inprogress": "No credential stored yet. If provisioning is still running it will appear here \u2014 checking again automatically ({count}/{total})...",

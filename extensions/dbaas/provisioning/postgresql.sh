@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs INSIDE the dbaas-postgresql VM as root (via provision.sh). Reads JSON
+# Runs INSIDE the dbaas-postgresql VM as root (via firstboot.sh, which pipes the config-drive request into stdin). Reads JSON
 # on stdin: {"db_name": "...", "db_user": "...", "db_password": "..."}
 set -euo pipefail
 

@@ -94,19 +94,12 @@
         :footer="null"
         :title="$t(activeRowAction === 'createDatabase'
           ? 'label.create.database'
-          : activeRowAction === 'resetDatabasePassword'
-            ? 'label.reset.database.password'
-            : 'label.show.database.password')"
+          : 'label.show.database.password')"
         :width="activeRowAction === 'createDatabase' ? '500px' : '450px'"
         :closable="true"
         @cancel="closeModal">
         <create-database
           v-if="activeRowAction === 'createDatabase'"
-          :resource="activeRecord"
-          @close-action="closeModal"
-          @refresh-data="fetchData" />
-        <reset-database-password
-          v-else-if="activeRowAction === 'resetDatabasePassword'"
           :resource="activeRecord"
           @close-action="closeModal"
           @refresh-data="fetchData" />
@@ -126,13 +119,12 @@ import { Checkbox, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import Status from '@/components/widgets/Status.vue'
 import CreateDatabase from '@/views/compute/CreateDatabase.vue'
-import ResetDatabasePassword from '@/views/compute/ResetDatabasePassword.vue'
 import ShowDatabasePassword from '@/views/compute/ShowDatabasePassword.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 export default {
   name: 'DatabaseInstances',
-  components: { Status, CreateDatabase, ResetDatabasePassword, ShowDatabasePassword },
+  components: { Status, CreateDatabase, ShowDatabasePassword },
   data () {
     return {
       loading: false,
@@ -212,7 +204,7 @@ export default {
       return (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
     },
     runRowAction (key, record) {
-      if (key === 'createDatabase' || key === 'resetDatabasePassword' || key === 'getDatabasePassword') {
+      if (key === 'createDatabase' || key === 'getDatabasePassword') {
         this.activeRecord = record
         this.activeRowAction = key
         return

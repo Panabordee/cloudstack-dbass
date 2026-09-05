@@ -110,10 +110,9 @@ defects.
       UUID (`vm_id`), single use (the redeeming `UPDATE` clears the hash so a
       replay matches nothing), TTL (`dbaas.report.token.ttl`), stored hashed
       (SHA-256, raw token never persisted), every call logged (accept and
-      reject both). **Not yet done: rate limiting** — a brute-force attempt
-      against the token is infeasible (256 bits of entropy) but nothing stops
-      hammering the endpoint itself; add a per-IP or per-command throttle
-      before this is internet-facing.
+      reject both). Rate limiting: done (2026-09-05) — per-IP fixed-window
+      limiter, `dbaas.report.rate.limit` (60/min default, 0 disables), 429 on
+      exceed; the brute-force note below is moot anyway (256 bits of entropy).
 - [x] Instance reports `confirmed` / `failed` with a reason
       (`extensions/dbaas/provisioning/firstboot.sh`, 5 attempts with backoff,
       best-effort — no automatic retry beyond that until the Phase D agent
@@ -223,3 +222,35 @@ v1 code that v2 retires must not simply vanish: push
 GitHub before deleting anything here. That branch keeps the SSH transport, the
 `vmaccess.sh` VM-password path and the original `dbaas_credentials` DDL, so any
 of it can be recovered or compared against.
+
+## 8. Audit follow-ups (2026-09-05)
+
+The self-review (`AUDIT-v2.md`) and a second pass found defects that would
+surface on the first real deploy; all of the below are fixed in code now, but
+**nothing is re-verified against a live deploy yet** — the Phase B acceptance
+line still stands.
+
+- **Config-drive template marker (new requirement).** A template must carry
+  the `dbaas.configdrive=true` detail to be usable: `createDatabase` refuses
+  templates without it, and the wizard filters them out when the list response
+  includes details. Set it at registration (see the error message;
+  TEMPLATES.md needs a v2 rewrite regardless — it still describes v1).
+- **Engines map**: `config.example.json` now lists `dbaas-mysql-v2` (the
+  registered config-drive template), which the deployed `config.json` must
+  also carry or the wizard cannot list the template.
+- **Engine readiness**: `firstboot.sh` now waits up to 120s for the engine
+  (mysqladmin ping / pg_isready / mongosh ping, per `/opt/dbaas/engine`)
+  before running the engine script — the runcmd race that failed provisioning
+  permanently on a slow boot is gone.
+- **Restart safety**: `createDatabase` validates identifiers and the template
+  before touching the power state, awaits Stopped for up to 30s instead of
+  re-reading once, and starts the instance again if anything after the stop
+  throws. The response's host is read after the start.
+- **Report robustness**: report messages are truncated to 1000 chars on both
+  sides (the status_message column is 1024); expiry is compared in Java
+  against the same clock that wrote it (no MS/DB clock-skew shift).
+- **Report endpoint**: rate limited per source IP (`dbaas.report.rate.limit`,
+  60/min default, 0 disables) with a 429 — Phase C's rate-limiting gap is
+  closed.
+- **List engines**: one malformed entry in `config.json` now skips only that
+  entry, not the whole list.
