@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS `dbaas_credentials` (
   -- 'confirmed' is the only state in which the credential is known to work.
   `status` varchar(32) NOT NULL DEFAULT 'pending',
   `status_message` varchar(1024) DEFAULT NULL,
+  -- Lets the instance report its own provisioning outcome through
+  -- reportDbaasProvisioningResult without holding any CloudStack credential:
+  -- the SHA-256 hash of a token generated at create time and handed to the
+  -- instance over the config drive (the raw token is never stored). Cleared
+  -- on first use or expiry, whichever comes first -- a cleared hash can never
+  -- match anything, so the token is single-use by construction.
+  `report_token_hash` char(64) DEFAULT NULL,
+  `report_token_expires_at` datetime DEFAULT NULL,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `i_dbaas_credentials__vm_id` (`vm_id`)

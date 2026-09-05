@@ -5,6 +5,8 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -30,6 +32,7 @@ import com.google.gson.JsonParser;
 
 import com.cloud.utils.concurrency.NamedThreadFactory;
 import org.apache.cloudstack.api.BaseCmd;
+import org.apache.cloudstack.api.auth.PluggableAPIAuthenticator;
 import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
 
@@ -44,13 +47,14 @@ import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.script.OutputInterpreter;
 import com.cloud.utils.script.Script;
 import com.cloud.vm.NicVO;
-import com.cloud.vm.UserVm;
+import com.cloud.uservm.UserVm;
 import com.cloud.vm.UserVmManager;
 import com.cloud.vm.UserVmService;
 import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.dao.NicDao;
 
-public class DbaasManagerImpl extends ManagerBase implements DbaasManager, PluggableService, Configurable {
+public class DbaasManagerImpl extends ManagerBase implements DbaasManager, PluggableService, Configurable,
+        PluggableAPIAuthenticator {
 
     public static final ConfigKey<String> DbaasExtensionPath = new ConfigKey<>(
             "Advanced", String.class, "dbaas.extension.path",
@@ -99,6 +103,49 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // apply the credential.
     static final String STATUS_PENDING = "pending";
     static final String STATUS_CONFIRMED = "confirmed";
+    static final String STATUS_FAILED = "failed";
+
+    // The instance has no CloudStack credential of its own, so
+    // reportDbaasProvisioningResult is registered as an unauthenticated
+    // PluggableAPIAuthenticator command (the same mechanism the SAML/OAuth
+    // login callbacks use) and this token stands in for a signature: random,
+    // single use, short-lived, and only ever compared against its stored hash
+    // -- the raw value exists only in the user data and in the request that
+    // redeems it.
+    public static final ConfigKey<Integer> DbaasReportTokenTtl = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.report.token.ttl", "3600",
+            "Seconds a config-drive instance's provisioning report token stays valid."
+                    + " The token is single-use regardless of this value.", true);
+
+    public static final ConfigKey<String> DbaasReportApiUrl = new ConfigKey<>(
+            "Advanced", String.class, "dbaas.report.api.url", "",
+            "Base API URL (e.g. http://10.0.0.1:8080/client/api) that config-drive instances use to call"
+                    + " reportDbaasProvisioningResult. Must be reachable from every network instances deploy"
+                    + " onto; leaving it empty disables the callback and provisioning stays 'pending' forever.",
+            true);
+
+    private static final int REPORT_TOKEN_BYTES = 32;
+
+    private static String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is a JDK-guaranteed algorithm; this cannot happen.
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static String generateReportToken() {
+        byte[] raw = new byte[REPORT_TOKEN_BYTES];
+        RANDOM.nextBytes(raw);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(raw);
+    }
 
     // Alphanumeric only: the generated value travels through shell and SQL on
     // the instance, and quoting bugs there are worse than the entropy lost by
@@ -141,13 +188,24 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
      * against it; the script lives in the image, so nothing about which engine
      * this is needs to be encoded here.
      * <p>
+     * report_url/report_token/vm_id are only present when the report API is
+     * configured (see {@link #DbaasReportApiUrl}) -- firstboot.sh skips the
+     * callback when they are absent rather than fail on it, since an instance
+     * that could not report back has still provisioned correctly.
+     * <p>
      * Base64 because that is what the user data API takes.
      */
-    static String buildUserData(String dbName, String dbUsername, String dbPassword) {
+    static String buildUserData(String dbName, String dbUsername, String dbPassword,
+            String vmUuid, String reportUrl, String reportToken) {
         JsonObject request = new JsonObject();
         request.addProperty("db_name", dbName);
         request.addProperty("db_user", dbUsername);
         request.addProperty("db_password", dbPassword);
+        if (reportUrl != null && !reportUrl.isEmpty()) {
+            request.addProperty("vm_id", vmUuid);
+            request.addProperty("report_url", reportUrl);
+            request.addProperty("report_token", reportToken);
+        }
 
         String cloudConfig = "#cloud-config\n"
                 + "write_files:\n"
@@ -467,7 +525,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
         String dbPassword = validateOrGeneratePassword(cmd.getDbPassword());
 
-        String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword);
+        String reportUrl = DbaasReportApiUrl.value();
+        String reportToken = (reportUrl != null && !reportUrl.isEmpty()) ? generateReportToken() : null;
+
+        String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword, vm.getUuid(), reportUrl, reportToken);
         try {
             userVmManager.updateVirtualMachine(vm.getId(), null, null, null, null, null, null,
                     userData, null, null, null, BaseCmd.HTTPMethod.POST, null, null, null, null, null);
@@ -478,8 +539,19 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
         // Stored before the start, not after: a start that fails leaves an
         // instance the tenant can start themselves, and the credential it will
-        // provision with must already be recoverable when they do.
-        storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING);
+        // provision with must already be recoverable when they do. Only the
+        // token's hash is kept; the raw value already left with the user data
+        // and cannot be recovered from this row.
+        if (reportToken != null) {
+            java.sql.Timestamp expiresAt = new java.sql.Timestamp(
+                    System.currentTimeMillis() + DbaasReportTokenTtl.value() * 1000L);
+            storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
+                    sha256Hex(reportToken), expiresAt);
+        } else {
+            logger.warn("dbaas.report.api.url is not set -- instance {} cannot report its provisioning result,"
+                    + " and its credential will stay 'pending'", vm.getUuid());
+            storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING);
+        }
 
         // Looked up as a UserVm rather than cast: the entity manager hands back
         // whatever VO backs the row, and a cast would only fail at runtime.
@@ -658,8 +730,14 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     }
 
     private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status) {
-        String sql = "INSERT INTO dbaas_credentials (vm_id, db_username, db_password_encrypted, engine, status)"
-                + " VALUES (?, ?, ?, ?, ?)";
+        storeCredential(vmId, dbUsername, dbPassword, engine, status, null, null);
+    }
+
+    private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status,
+            String reportTokenHash, java.sql.Timestamp reportTokenExpiresAt) {
+        String sql = "INSERT INTO dbaas_credentials"
+                + " (vm_id, db_username, db_password_encrypted, engine, status, report_token_hash, report_token_expires_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.setString(1, vmId);
@@ -667,6 +745,8 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             pstmt.setString(3, DBEncryptionUtil.encrypt(dbPassword));
             pstmt.setString(4, engine);
             pstmt.setString(5, status);
+            pstmt.setString(6, reportTokenHash);
+            pstmt.setTimestamp(7, reportTokenExpiresAt);
             pstmt.executeUpdate();
         } catch (Exception e) {
             // The provisioning call already succeeded and the tenant already
@@ -766,6 +846,61 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         return cmdList;
     }
 
+    // ReportProvisioningResultCmd is registered here, not in getCommands():
+    // getAuthCommands() is how the API framework discovers commands that
+    // bypass normal signature auth (the same mechanism SAML/OAuth login use).
+    // The instance calling it has no CloudStack credential, only the one-time
+    // token minted for it in buildUserData().
+    @Override
+    public List<Class<?>> getAuthCommands() {
+        List<Class<?>> cmdList = new ArrayList<>();
+        cmdList.add(ReportProvisioningResultCmd.class);
+        return cmdList;
+    }
+
+    /**
+     * Redeems a report token: matches it against the stored hash for the
+     * given instance, checks it has not expired, and if both hold, records the
+     * outcome and clears the token so it cannot be redeemed again. Every
+     * failure path -- unknown instance, no pending report, wrong token,
+     * expired token -- returns the same generic outcome, so a caller cannot
+     * use the response to tell a wrong token from a nonexistent instance.
+     *
+     * @return true if the report was accepted
+     */
+    @Override
+    public boolean applyProvisioningReport(String vmUuid, String token, String status, String message) {
+        if (vmUuid == null || token == null || (!STATUS_CONFIRMED.equals(status) && !STATUS_FAILED.equals(status))) {
+            return false;
+        }
+        String tokenHash = sha256Hex(token);
+        // Matches the most recent row for this instance whose token hash is
+        // still present (not yet redeemed) and not expired; clearing the hash
+        // in the same statement makes a concurrent replay of the same token
+        // update zero rows instead of two.
+        String sql = "UPDATE dbaas_credentials SET status = ?, status_message = ?,"
+                + " report_token_hash = NULL, report_token_expires_at = NULL"
+                + " WHERE vm_id = ? AND report_token_hash = ? AND report_token_expires_at > NOW()"
+                + " ORDER BY created_at DESC LIMIT 1";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            PreparedStatement pstmt = txn.prepareStatement(sql);
+            pstmt.setString(1, status);
+            pstmt.setString(2, message);
+            pstmt.setString(3, vmUuid);
+            pstmt.setString(4, tokenHash);
+            int updated = pstmt.executeUpdate();
+            if (updated > 0) {
+                logger.info("provisioning report accepted for VM {}: {}", vmUuid, status);
+                return true;
+            }
+            logger.warn("provisioning report rejected for VM {}: no matching pending token", vmUuid);
+            return false;
+        } catch (Exception e) {
+            logger.warn("failed to record provisioning report for VM {}", vmUuid, e);
+            return false;
+        }
+    }
+
     @Override
     public String getConfigComponentName() {
         return DbaasManagerImpl.class.getSimpleName();
@@ -773,6 +908,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     @Override
     public ConfigKey<?>[] getConfigKeys() {
-        return new ConfigKey<?>[] {DbaasExtensionPath, DbaasProvisionTimeout, DbaasCredentialsCleanupInterval};
+        return new ConfigKey<?>[] {DbaasExtensionPath, DbaasProvisionTimeout, DbaasCredentialsCleanupInterval,
+                DbaasReportTokenTtl, DbaasReportApiUrl};
     }
 }

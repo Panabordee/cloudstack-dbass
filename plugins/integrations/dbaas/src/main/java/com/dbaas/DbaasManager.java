@@ -12,4 +12,6 @@ public interface DbaasManager {
     List<DbaasEngineResponse> listEngines();
 
     int deleteCredentialsForVm(String vmUuid);
+
+    boolean applyProvisioningReport(String vmUuid, String token, String status, String message);
 }
