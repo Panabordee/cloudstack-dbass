@@ -19,6 +19,12 @@
   <div class="form-layout">
     <a-spin :spinning="loading" v-if="!isSubmitted">
       <p v-html="$t('message.desc.create.database')"></p>
+      <a-alert
+        type="warning"
+        show-icon
+        banner
+        :message="$t('message.dbaas.will.restart')"
+        class="form-banner" />
       <a-form
         v-ctrl-enter="handleSubmit"
         :ref="formRef"
@@ -51,12 +57,6 @@
             v-model:value="form.dbpassword"
             :placeholder="$t('message.dbaas.password.optional')"/>
         </a-form-item>
-        <a-form-item name="resetvmpassword">
-          <a-checkbox v-model:checked="form.resetvmpassword">
-            {{ $t('label.reset.vm.password') }}
-          </a-checkbox>
-          <p class="checkbox-warning">{{ $t('message.warning.reset.vm.password') }}</p>
-        </a-form-item>
 
         <div :span="24" class="action-button">
           <a-button @click="closeAction">{{ $t('label.cancel') }}</a-button>
@@ -76,46 +76,27 @@
       </a-descriptions>
       <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
       <div :span="24" class="action-button">
-        <a-button @click="notifyCopied" v-clipboard:copy="connectCommand" type="primary">
+        <a-button @click="markCopied" v-clipboard:copy="connectCommand" type="primary">
           {{ $t('label.copy.connect.command') }}
         </a-button>
-        <a-button @click="notifyCopied" v-clipboard:copy="credentials.password">
+        <a-button @click="markCopied" v-clipboard:copy="credentials.password">
           {{ $t('label.copy.password') }}
         </a-button>
         <a-button @click="confirmClose">{{ $t('label.close') }}</a-button>
       </div>
-      <template v-if="credentials.vmusername">
-        <a-descriptions bordered size="small" :column="1" class="credentials">
-          <a-descriptions-item :label="$t('label.vm.username')">{{ credentials.vmusername }}</a-descriptions-item>
-          <a-descriptions-item :label="$t('label.vm.password')">{{ credentials.vmpassword }}</a-descriptions-item>
-          <a-descriptions-item :label="$t('label.ssh.command')">
-            <span class="connect-command">{{ sshCommand }}</span>
-          </a-descriptions-item>
-        </a-descriptions>
-        <p class="connect-hint">{{ $t('message.dbaas.vm.access') }}</p>
-        <div :span="24" class="action-button">
-          <a-button @click="notifyCopied" v-clipboard:copy="sshCommand" type="primary">
-            {{ $t('label.copy.ssh.command') }}
-          </a-button>
-          <a-button @click="notifyCopied" v-clipboard:copy="credentials.vmpassword">
-            {{ $t('label.copy.vm.password') }}
-          </a-button>
-        </div>
-      </template>
     </div>
   </div>
 </template>
 
 <script>
-import { h, ref, reactive, toRaw } from 'vue'
-import { Button, Modal } from 'ant-design-vue'
+import { ref, reactive, toRaw } from 'vue'
+import { Modal } from 'ant-design-vue'
 import { postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
 import {
   buildConnectCommand,
-  buildSshCommand,
-  credentialNotification,
-  DBAAS_IDENTIFIER_PATTERN
+  DBAAS_IDENTIFIER_PATTERN,
+  DBAAS_PASSWORD_PATTERN
 } from '@/utils/dbaas'
 import TooltipLabel from '@/components/widgets/TooltipLabel'
 
@@ -136,8 +117,7 @@ export default {
       loading: false,
       isSubmitted: false,
       credentials: {},
-      dbPasswordCopied: false,
-      vmPasswordCopied: false
+      dbPasswordCopied: false
     }
   },
   beforeCreate () {
@@ -146,9 +126,6 @@ export default {
   computed: {
     connectCommand () {
       return buildConnectCommand(this.credentials)
-    },
-    sshCommand () {
-      return buildSshCommand(this.credentials)
     }
   },
   created () {
@@ -176,12 +153,15 @@ export default {
       this.formRef.value.validate().then(() => {
         const values = toRaw(this.form)
         this.loading = true
+        // Provisioning reads its request from the config drive at boot: if
+        // this instance is running, the backend stops it, attaches the
+        // request, and starts it again -- the warning above says so up front
+        // rather than the instance just going dark mid-submit.
         postAPI('createDatabase', {
           virtualmachineid: this.resource.id,
           dbname: values.dbname,
           dbusername: values.dbusername,
-          dbpassword: values.dbpassword,
-          resetvmpassword: values.resetvmpassword ? true : undefined
+          dbpassword: values.dbpassword
         }).then(json => {
           const dbaas = json.createdatabaseresponse?.dbaas
           if (dbaas) {
@@ -189,13 +169,6 @@ export default {
             // stores every successful create/reset, encrypted.
             this.credentials = dbaas
             this.isSubmitted = true
-            // The instance login password is rotated only when the checkbox
-            // was ticked, and it is unrecoverable afterwards: surface the
-            // notification with copy buttons even though the inline block
-            // below also shows it.
-            if (dbaas.vmusername) {
-              this.notifyVmCredentials()
-            }
           } else {
             // Provisioning may well have succeeded on the instance. Closing
             // silently would leave no way to tell, and the retry would fail
@@ -216,39 +189,24 @@ export default {
         this.formRef.value.scrollToField(error.errorFields[0].name)
       })
     },
-    markCopied (flag) {
-      if (flag === 'dbPassword') {
-        this.dbPasswordCopied = true
-      } else if (flag === 'vmPassword') {
-        this.vmPasswordCopied = true
-      }
+    markCopied () {
+      this.dbPasswordCopied = true
       this.$notification.info({
         message: this.$t('message.success.copy.clipboard'),
         duration: 2
       })
     },
-    notifyVmCredentials () {
-      const parts = credentialNotification(h, Button, this.credentials, t => this.$t(t), flag => this.markCopied(flag))
-      this.$notification.success({
-        message: this.$t('label.create.database'),
-        description: parts.description,
-        btn: parts.btn,
-        duration: 0
-      })
-    },
+    // Only guards the credentials step: the database password is also stored
+    // server-side and recoverable later via Show Password, so this is a
+    // courtesy nudge to copy it now, not a last chance.
     confirmClose () {
-      // Both secrets are unrecoverable from this dialog once closed: the
-      // instance login password is shown only here (and in the notification),
-      // so warn when either one has not been copied yet.
-      const missing = !this.dbPasswordCopied ||
-        (this.credentials.vmusername && !this.vmPasswordCopied)
-      if (!missing) {
+      if (this.dbPasswordCopied) {
         this.closeAction()
         return
       }
       Modal.confirm({
         title: this.$t('label.close'),
-        content: this.$t('message.confirm.close.database.password'),
+        content: this.$t('message.confirm.close.database.dbpassword'),
         okText: this.$t('label.yes'),
         cancelText: this.$t('label.no'),
         onOk: this.closeAction
@@ -270,6 +228,10 @@ export default {
     }
   }
 
+  .form-banner {
+    margin-bottom: 16px;
+  }
+
   // No word-break here: labels wrap at spaces; only the value spans
   // (.connect-command) break-all.
   .credentials {
@@ -285,10 +247,5 @@ export default {
     margin-top: 4px;
     color: rgba(0, 0, 0, 0.45);
     word-break: break-all;
-  }
-
-  .checkbox-warning {
-    margin-top: 4px;
-    color: rgba(0, 0, 0, 0.45);
   }
 </style>

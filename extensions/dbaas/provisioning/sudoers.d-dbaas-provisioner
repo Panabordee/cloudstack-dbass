@@ -1,2 +1,0 @@
-Defaults:dbaas-provisioner env_keep += "SSH_ORIGINAL_COMMAND"
-dbaas-provisioner ALL=(root) NOPASSWD: /opt/dbaas/provision.sh ""

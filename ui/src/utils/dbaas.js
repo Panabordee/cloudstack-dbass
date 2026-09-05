@@ -36,49 +36,6 @@ export const DBAAS_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/
 // is accepted. An empty field means "generate one", which is unrestricted.
 export const DBAAS_PASSWORD_PATTERN = /^[A-Za-z0-9_.-]{8,64}$/
 
-// The engines starve a small vCPU badly enough that sshd cannot answer the
-// SSH banner in time, so the offering picker filters to at least this much.
-// These are minimums the API filters on, not exact matches -- and the picker
-// falls back to the unfiltered list when a zone has nothing this large, since
-// an empty dropdown with no explanation is worse than a slow instance.
-export const DBAAS_MIN_OFFERING = { memory: 1024, cpuspeed: 1000 }
-
-// A fresh instance needs roughly 48s before sshd answers, and each failed
-// attempt burns its own connect timeout on top of the delay, so this covers
-// about three minutes of slow boot.
-export const DBAAS_PROVISION_RETRIES = { maxAttempts: 8, retryDelayMs: 10000 }
-
-// The provisioning run is only reachable once sshd inside the fresh instance
-// answers. Anything matching these means we were too early and another
-// attempt is worth it; a rejection from the engine itself (duplicate user,
-// invalid identifier) will never succeed on a retry and must surface
-// immediately. Engine-specific entries are unavoidable -- each engine words
-// "not listening yet" differently -- so a new engine needs its own phrase
-// added here or its first attempt is treated as a hard failure.
-export const DBAAS_TRANSIENT_ERRORS = [
-  // paramiko, when sshd accepts the socket but cannot finish the handshake
-  'No existing session',
-  'Error reading SSH protocol banner',
-  // the NIC has no address in the CloudStack API yet
-  'could not resolve VM IP',
-  // sshd is not listening yet, or the guest has not brought the NIC up
-  'Connection refused',
-  'No route to host',
-  'Unable to connect to port 22',
-  'NoValidConnectionsError',
-  // SSH is up but the engine behind it is not listening yet
-  "Can't connect to local MySQL server",
-  'connection to server on socket',
-  'MongoNetworkError',
-  'ECONNREFUSED',
-  // 'timed out' covers ssh/paramiko, 'timeout' covers axios' own
-  // "timeout of 600000ms exceeded"
-  'timed out',
-  'timeout',
-  // the request never reached the management server
-  'Network Error'
-]
-
 // Turns a DBaaS credential response (engine/host/port/database/username/
 // password) into a single copy-paste connect command. Passwords are generated
 // alphanumeric-only by the provisioning scripts, so shell quoting is a
@@ -101,54 +58,31 @@ export function buildConnectCommand (credentials) {
   return `mysql -h ${host} -P ${port || 3306} -u ${username} -p'${password}'${database ? ' ' + database : ''}`
 }
 
-// The interactive form: the password is prompted for, not embedded.
-export function buildSshCommand (credentials) {
-  if (!credentials || !credentials.host || !credentials.vmusername) {
-    return ''
-  }
-  return `ssh ${credentials.vmusername}@${credentials.host}`
-}
-
-// Builds the success-notification body for freshly created/rotated
-// credentials: database lines always, instance (VM) login lines when present,
-// each with copy buttons wired through onCopy(flag) so callers can track what
-// the user actually saved. h and Button are injected by the caller.
+// Builds the success-notification body for a freshly created/rotated database
+// credential, with a copy button wired through onCopy() so callers can track
+// whether the user actually saved it before closing the dialog. h and Button
+// are injected by the caller.
 export function credentialNotification (h, Button, credentials, t, onCopy) {
   if (!credentials) {
     return null
   }
   const mono = { fontFamily: 'monospace', wordBreak: 'break-all' }
-  const copyButton = (label, text, flag) => h(Button, {
+  const copyButton = (label, text) => h(Button, {
     size: 'small',
     style: { marginRight: '8px' },
     onClick: async () => {
-      if (await copyTextToClipboard(text)) onCopy(flag)
+      if (await copyTextToClipboard(text)) onCopy()
     }
   }, { default: () => label })
   const connectCommand = buildConnectCommand(credentials)
   const description = h('div', [
     h('div', `db username: ${credentials.username}`),
     h('div', `db password: ${credentials.password}`),
-    h('div', { style: { ...mono, marginTop: '4px' } }, connectCommand),
-    credentials.vmusername
-      ? h('div', { style: { marginTop: '8px' } }, `vm username: ${credentials.vmusername}`)
-      : null,
-    credentials.vmpassword
-      ? h('div', `vm password: ${credentials.vmpassword}`)
-      : null,
-    credentials.vmusername
-      ? h('div', { style: mono }, buildSshCommand(credentials))
-      : null
+    h('div', { style: { ...mono, marginTop: '4px' } }, connectCommand)
   ])
   const btn = h('div', { style: { marginTop: '8px' } }, [
-    copyButton(t('label.copy.password'), credentials.password, 'dbPassword'),
-    copyButton(t('label.copy.connect.command'), connectCommand, 'dbPassword'),
-    credentials.vmusername
-      ? copyButton(t('label.copy.vm.password'), credentials.vmpassword, 'vmPassword')
-      : null,
-    credentials.vmusername
-      ? copyButton(t('label.copy.ssh.command'), buildSshCommand(credentials), 'vmPassword')
-      : null
+    copyButton(t('label.copy.password'), credentials.password),
+    copyButton(t('label.copy.connect.command'), connectCommand)
   ])
   return { description, btn }
 }

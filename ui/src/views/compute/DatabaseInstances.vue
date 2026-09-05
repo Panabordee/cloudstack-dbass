@@ -181,12 +181,14 @@ export default {
       const isStopped = record.state === 'Stopped'
       const apis = this.$store.getters.apis
       const actions = []
-      if (isRunning && 'createDatabase' in apis && this.isEngineMember(record)) {
+      // Running or Stopped: config-drive provisioning only reads its request
+      // at boot, so a running instance is stopped and restarted as part of
+      // the call -- CreateDatabase.vue warns about that itself.
+      if ((isRunning || isStopped) && 'createDatabase' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'createDatabase', label: 'label.create.database' })
       }
-      if (isRunning && 'resetDatabasePassword' in apis && this.isEngineMember(record)) {
-        actions.push({ key: 'resetDatabasePassword', label: 'label.reset.database.password' })
-      }
+      // resetDatabasePassword is not offered here: it has no working
+      // transport until the in-VM agent exists (PLAN.md Phase D).
       if ((isRunning || isStopped) && 'getDatabasePassword' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'getDatabasePassword', label: 'label.show.database.password' })
       }

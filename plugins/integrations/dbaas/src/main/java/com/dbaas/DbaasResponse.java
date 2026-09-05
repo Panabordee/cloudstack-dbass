@@ -6,6 +6,11 @@ import org.apache.cloudstack.api.BaseResponse;
 
 import com.cloud.serializer.Param;
 
+// The instance's own login password is deliberately not part of this
+// response: v1 minted and returned one itself (vmusername/vmpassword,
+// shown once, unrecoverable), which this plugin no longer does. A
+// password-enabled template gets one from CloudStack's own deploy response,
+// and resetPasswordForVirtualMachine resets it -- see PLAN.md.
 public class DbaasResponse extends BaseResponse {
 
     @SerializedName("engine")
@@ -32,14 +37,6 @@ public class DbaasResponse extends BaseResponse {
     @Param(description = "database password")
     private String password;
 
-    @SerializedName("vmusername")
-    @Param(description = "login user on the instance, when VM access was set up")
-    private String vmUsername;
-
-    @SerializedName("vmpassword")
-    @Param(description = "login password on the instance, when VM access was set up")
-    private String vmPassword;
-
     @SerializedName("status")
     @Param(description = "provisioning status of the stored credential: 'pending' while the instance has"
             + " not confirmed it configured its engine, 'confirmed' once it has, 'failed' when it"
@@ -64,10 +61,6 @@ public class DbaasResponse extends BaseResponse {
     public String getEngine() { return engine; }
     public String getUsername() { return username; }
     public String getPassword() { return password; }
-    public void setVmUsername(String vmUsername) { this.vmUsername = vmUsername; }
-    public void setVmPassword(String vmPassword) { this.vmPassword = vmPassword; }
-    public String getVmUsername() { return vmUsername; }
-    public String getVmPassword() { return vmPassword; }
     public void setFound(Boolean found) { this.found = found; }
     public void setStatus(String status) { this.status = status; }
     public void setStatusMessage(String statusMessage) { this.statusMessage = statusMessage; }

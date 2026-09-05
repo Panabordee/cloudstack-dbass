@@ -437,27 +437,21 @@ export default {
           message: 'message.desc.create.database',
           dataView: true,
           popup: true,
+          // Running or Stopped: config-drive provisioning only reads its
+          // request at boot, so a running instance is stopped and restarted
+          // as part of the call -- the dialog warns about that itself.
           show: (record) => {
             return record.hypervisor !== 'External' &&
-              ['Running'].includes(record.state) &&
+              ['Running', 'Stopped'].includes(record.state) &&
               (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
           },
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabase.vue')))
         },
-        {
-          api: 'resetDatabasePassword',
-          icon: 'key-outlined',
-          label: 'label.reset.database.password',
-          message: 'message.desc.reset.database.password',
-          dataView: true,
-          popup: true,
-          show: (record) => {
-            return record.hypervisor !== 'External' &&
-              ['Running'].includes(record.state) &&
-              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
-          },
-          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
-        },
+        // resetDatabasePassword has no working transport yet: config-drive
+        // provisioning only ever runs once, at first boot, and cannot deliver
+        // a reset to an instance already running its engine. Hidden until the
+        // in-VM agent (PLAN.md Phase D) exists -- the API command itself
+        // stays registered and returns a clear error if called directly.
         {
           api: 'getDatabasePassword',
           icon: 'eye-outlined',

@@ -2,7 +2,6 @@ package com.dbaas;
 
 import java.io.File;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
@@ -24,8 +23,6 @@ import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
 
-import org.joda.time.Duration;
-
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -44,8 +41,6 @@ import com.cloud.utils.crypt.DBEncryptionUtil;
 import com.cloud.utils.db.EntityManager;
 import com.cloud.utils.db.TransactionLegacy;
 import com.cloud.utils.exception.CloudRuntimeException;
-import com.cloud.utils.script.OutputInterpreter;
-import com.cloud.utils.script.Script;
 import com.cloud.vm.NicVO;
 import com.cloud.uservm.UserVm;
 import com.cloud.vm.UserVmManager;
@@ -56,10 +51,14 @@ import com.cloud.vm.dao.NicDao;
 public class DbaasManagerImpl extends ManagerBase implements DbaasManager, PluggableService, Configurable,
         PluggableAPIAuthenticator {
 
-    public static final ConfigKey<String> DbaasExtensionPath = new ConfigKey<>(
-            "Advanced", String.class, "dbaas.extension.path",
-            "/usr/share/cloudstack-management/extensions/dbaas/extension.py",
-            "Filesystem path to the DBaaS extension.py entrypoint.", true);
+    // config.json (the engines map: template -> script/reset_script/port) is
+    // the only file this plugin still reads off disk -- there is no
+    // extension.py anymore to derive its directory from, so the path is
+    // configured directly.
+    public static final ConfigKey<String> DbaasConfigPath = new ConfigKey<>(
+            "Advanced", String.class, "dbaas.config.path",
+            "/usr/share/cloudstack-management/extensions/dbaas/config.json",
+            "Filesystem path to the DBaaS engines config.json.", true);
 
     public static final ConfigKey<Integer> DbaasCredentialsCleanupInterval = new ConfigKey<>(
             "Advanced", Integer.class, "dbaas.credentials.cleanup.interval", "3600",
@@ -68,17 +67,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             // orphaned DATADISK volumes are counted and logged for the admin.
             "Interval in seconds between sweeps that delete stored credentials"
                     + " of expunged instances and report orphaned data disks.", true);
-
-    public static final ConfigKey<Integer> DbaasProvisionTimeout = new ConfigKey<>(
-            "Advanced", Integer.class, "dbaas.provision.timeout", "600",
-            // 600s: the extension retries transient SSH failures internally
-            // (3 attempts, 15s apart, each up to ssh timeout + the engine's
-            // own internal wait -- MongoDB's rotation marker alone is 120s),
-            // so the budget must cover the whole retry loop (~570s worst
-            // case), not a single attempt. The timeout is handed to
-            // extension.py, which derives its own retry budget from it
-            // (roughly 2/3) and stops itself before this kill switch fires.
-            "Timeout in seconds passed through to extension.py for provisioning.", true);
 
     @Inject
     private EntityManager _entityMgr;
@@ -97,10 +85,8 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     private ScheduledExecutorService credentialsCleanupExecutor;
 
     // A credential is 'pending' from the moment it is generated until the
-    // instance confirms it configured the engine with it. The SSH path
-    // verifies the login itself before returning, so it stores 'confirmed'
-    // directly. 'failed' is written when an instance reports it could not
-    // apply the credential.
+    // instance reports back through reportDbaasProvisioningResult that it
+    // configured the engine with it ('confirmed') or could not ('failed').
     static final String STATUS_PENDING = "pending";
     static final String STATUS_CONFIRMED = "confirmed";
     static final String STATUS_FAILED = "failed";
@@ -235,69 +221,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     private Integer enginePort(JsonObject engineConfig) {
         return engineConfig != null && engineConfig.has("port") ? engineConfig.get("port").getAsInt() : null;
-    }
-
-    /**
-     * Runs one extension.py action against a VM and hands back the connection
-     * details it reported. Both API commands go through here so the payload
-     * shape and the failure handling stay in one place.
-     */
-    private JsonObject runExtensionAction(String actionName, Long vmId, JsonObject parameters) {
-        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
-        if (vm == null) {
-            throw new InvalidParameterValueException("VM not found: " + vmId);
-        }
-        VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
-        String templateName = template != null ? template.getName() : null;
-
-        // Build the exact payload shape extension.py already expects — do not
-        // touch its parsing logic, it's been tested extensively already.
-        JsonObject vmDetails = new JsonObject();
-        vmDetails.addProperty("templatename", templateName);
-        JsonObject externalDetails = new JsonObject();
-        externalDetails.add("virtualmachine", vmDetails);
-
-        JsonObject payload = new JsonObject();
-        payload.addProperty("virtualmachineid", vm.getUuid());
-        payload.add("externaldetails", externalDetails);
-        payload.add("parameters", parameters);
-
-        File payloadFile = null;
-        try {
-            payloadFile = File.createTempFile("dbaas-payload-", ".json");
-            try (FileWriter w = new FileWriter(payloadFile)) {
-                w.write(payload.toString());
-            }
-
-            int timeoutSeconds = DbaasProvisionTimeout.value();
-            // Script(String, long, Logger) is deprecated in 4.22; the Duration
-            // overload is the supported one.
-            Script script = new Script("python3", Duration.standardSeconds(timeoutSeconds), logger);
-            script.add(DbaasExtensionPath.value());
-            script.add(actionName);
-            script.add(payloadFile.getAbsolutePath());
-            script.add(String.valueOf(timeoutSeconds));
-
-            OutputInterpreter.AllLinesParser parser = new OutputInterpreter.AllLinesParser();
-            String errorMsg = script.execute(parser);
-            if (errorMsg != null) {
-                throw new CloudRuntimeException("failed to invoke dbaas extension.py: " + errorMsg);
-            }
-
-            JsonObject result = JsonParser.parseString(parser.getLines()).getAsJsonObject();
-            if (!"success".equals(result.get("status").getAsString())) {
-                throw new CloudRuntimeException("dbaas provisioning reported failure: " + result);
-            }
-            return JsonParser.parseString(result.get("message").getAsString()).getAsJsonObject();
-        } catch (IOException e) {
-            throw new CloudRuntimeException("failed to write dbaas payload file", e);
-        } finally {
-            // The payload file briefly holds nothing secret going in, but
-            // delete it regardless — no leftover temp files, ever.
-            if (payloadFile != null) {
-                payloadFile.delete();
-            }
-        }
     }
 
     @Override
@@ -458,63 +381,44 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
+    /**
+     * Provisioning is entirely config-drive: the management server writes the
+     * request onto the instance's config drive and (re)starts it, and the
+     * instance configures its own engine at first boot. Nothing here connects
+     * to the instance, so it works on networks the management server has no
+     * route to, and with the virtual router down -- there is no SSH fallback
+     * to fall back to.
+     * <p>
+     * User data is only read at boot, so a running instance is stopped first.
+     * That is a real, brief interruption for "Create Database" on an
+     * already-running instance (the wizard avoids it entirely by deploying
+     * with startvm=false up front); the caller sees it in the response's
+     * message, not just in a log line.
+     * <p>
+     * The credential is stored before the instance (re)starts, so Show
+     * Password has something to show immediately; it stays 'pending' until
+     * the instance reports back that its engine really was configured.
+     */
     @Override
     public DbaasResponse createDatabase(CreateDatabaseCmd cmd) {
-        if (PROVISION_MODE_CONFIG_DRIVE.equals(provisionModeForVm(cmd.getVirtualMachineId()))) {
-            return createDatabaseViaConfigDrive(cmd);
-        }
-        return createDatabaseOverSsh(cmd);
-    }
-
-    // The engine entry for the template this instance was deployed from, or
-    // null when config.json does not know it (the SSH path reports that as a
-    // failure with the list of known engines, so this stays quiet).
-    private JsonObject engineConfigForVm(Long vmId) {
-        try {
-            VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
-            if (vm == null) {
-                return null;
-            }
-            VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
-            if (template == null) {
-                return null;
-            }
-            JsonObject engines = readEnginesConfig().getAsJsonObject("engines");
-            JsonElement entry = engines.get(template.getName());
-            return entry == null ? null : entry.getAsJsonObject();
-        } catch (Exception e) {
-            logger.warn("could not resolve the engine config for VM {}", vmId, e);
-            return null;
-        }
-    }
-
-    private String provisionModeForVm(Long vmId) {
-        return provisionMode(engineConfigForVm(vmId));
-    }
-
-    /**
-     * Config-drive provisioning: the management server writes the request onto
-     * the instance's config drive and starts it, and the instance configures
-     * its own engine at first boot. Nothing here connects to the instance, so
-     * it works on networks the management server has no route to, and with the
-     * virtual router down.
-     * <p>
-     * The credential is stored before the instance starts, so Show Password
-     * has something to show immediately; it stays 'pending' until the instance
-     * reports back that its engine really was configured.
-     */
-    private DbaasResponse createDatabaseViaConfigDrive(CreateDatabaseCmd cmd) {
         VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, cmd.getVirtualMachineId());
         if (vm == null) {
             throw new InvalidParameterValueException("VM not found: " + cmd.getVirtualMachineId());
         }
-        // User data is only picked up when the instance boots, so it has to be
-        // attached while the instance is still stopped. The wizard deploys
-        // with startvm=false for exactly this reason.
+        boolean wasRunning = vm.getState() == VirtualMachine.State.Running;
+        if (wasRunning) {
+            try {
+                userVmService.stopVirtualMachine(vm.getId(), false);
+            } catch (Exception e) {
+                throw new CloudRuntimeException("could not stop instance " + vm.getUuid() + " to attach the"
+                        + " provisioning request (config-drive user data is only read at boot): " + e.getMessage(), e);
+            }
+            vm = _entityMgr.findById(VirtualMachine.class, cmd.getVirtualMachineId());
+        }
         if (vm.getState() != VirtualMachine.State.Stopped) {
-            throw new InvalidParameterValueException("this engine provisions from its config drive, which is only"
-                    + " read at boot: the instance must be stopped when the database is created, but it is "
-                    + vm.getState() + ". Deploy with startvm=false, or use an instance that is stopped.");
+            throw new InvalidParameterValueException("instance " + vm.getUuid() + " must be Stopped to attach a"
+                    + " provisioning request (config-drive user data is only read at boot), but it is "
+                    + vm.getState());
         }
         VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
         String engineName = template != null ? template.getName() : null;
@@ -578,74 +482,16 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         return response;
     }
 
-    private DbaasResponse createDatabaseOverSsh(CreateDatabaseCmd cmd) {
-        JsonObject parameters = new JsonObject();
-        parameters.addProperty("db_name", cmd.getDbName());
-        // The username is optional: the form banner advertises that an empty
-        // one defaults to the database name. Both share one identifier shape,
-        // so the provisioning script's validation accepts either, and a
-        // name-derived user makes a retry on the same VM fail loudly on the
-        // duplicate user instead of stacking anonymous users.
-        String dbUsername = cmd.getDbUsername();
-        if (dbUsername == null || dbUsername.trim().isEmpty()) {
-            dbUsername = cmd.getDbName();
-        }
-        parameters.addProperty("db_username", dbUsername);
-        // Validated here rather than in the extension: a rejected password
-        // must fail before anything is deployed or connected to.
-        if (cmd.getDbPassword() != null && !cmd.getDbPassword().trim().isEmpty()) {
-            parameters.addProperty("db_password", validateOrGeneratePassword(cmd.getDbPassword()));
-        }
-        parameters.addProperty("reset_vm_password", Boolean.TRUE.equals(cmd.isResetVmPassword()));
-
-        JsonObject details = runExtensionAction("create_database", cmd.getVirtualMachineId(), parameters);
-
-        DbaasResponse response = new DbaasResponse();
-        response.setEngine(details.get("engine").getAsString());
-        response.setHost(details.get("host").getAsString());
-        response.setPort(details.get("port").getAsInt());
-        response.setDatabase(details.get("database").getAsString());
-        response.setUsername(details.get("username").getAsString());
-        response.setPassword(details.get("password").getAsString());
-        // VM access is best-effort on the extension side: it only reports
-        // vm_* fields when reset_vm_password was set and the template ships
-        // vmaccess.sh; templates built before it existed report none.
-        if (details.has("vm_username")) {
-            response.setVmUsername(details.get("vm_username").getAsString());
-        }
-        if (details.has("vm_password")) {
-            response.setVmPassword(details.get("vm_password").getAsString());
-        }
-        response.setObjectName("dbaas");
-
-        // The instance login password is deliberately NOT stored: it is
-        // delivered once, on the creation screen / notification, and the user
-        // is expected to keep it. Only database credentials are recoverable.
-        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(),
-                response.getEngine());
-        return response;
-    }
-
+    // Resetting a database password needs a channel into a VM that is already
+    // running its engine -- config-drive user data only ever runs at first
+    // boot, so it cannot deliver this. That channel is the in-VM agent
+    // (PLAN.md Phase D); until it exists there is no way to reset a database
+    // password without SSH, which this plugin no longer has.
     @Override
     public DbaasResponse resetDatabasePassword(ResetDatabasePasswordCmd cmd) {
-        JsonObject parameters = new JsonObject();
-        parameters.addProperty("db_username", cmd.getDbUsername());
-
-        JsonObject details = runExtensionAction("reset_password", cmd.getVirtualMachineId(), parameters);
-
-        // A reset does not name a database: the user keeps whatever it already
-        // had access to, so that field stays unset rather than guessed at.
-        DbaasResponse response = new DbaasResponse();
-        response.setEngine(details.get("engine").getAsString());
-        response.setHost(details.get("host").getAsString());
-        response.setPort(details.get("port").getAsInt());
-        response.setUsername(details.get("username").getAsString());
-        response.setPassword(details.get("password").getAsString());
-        response.setObjectName("dbaas");
-
-        storeCredential(vmUuid(cmd.getVirtualMachineId()), response.getUsername(), response.getPassword(),
-                response.getEngine());
-        return response;
+        throw new CloudRuntimeException("resetting a database password requires the in-VM agent (PLAN.md Phase D),"
+                + " which does not exist yet -- config-drive provisioning only runs once, at first boot, and"
+                + " cannot deliver a reset to an instance that is already running its engine");
     }
 
     @Override
@@ -725,10 +571,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // actually is right now -- not just what it was the first time. The
     // instance login password is intentionally not stored here; it is shown
     // exactly once on the creation screen / notification.
-    private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine) {
-        storeCredential(vmId, dbUsername, dbPassword, engine, STATUS_CONFIRMED);
-    }
-
     private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status) {
         storeCredential(vmId, dbUsername, dbPassword, engine, status, null, null);
     }
@@ -758,25 +600,26 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
-    // Provisioning transport for one engine, straight from config.json. An
-    // entry without the key is an image built before the config-drive script
-    // existed, which can only be provisioned over SSH -- so that, not the new
-    // path, is the default. Never hardcode the mapping itself here.
-    static final String PROVISION_MODE_SSH = "ssh";
-    static final String PROVISION_MODE_CONFIG_DRIVE = "configdrive";
-
-    private String provisionMode(JsonObject engineConfig) {
-        if (engineConfig == null || !engineConfig.has("provision_mode")) {
-            return PROVISION_MODE_SSH;
+    // The engine entry for the template this instance was deployed from, or
+    // null when config.json does not know it -- callers report that as their
+    // own failure (a database on a template with no engine entry).
+    private JsonObject engineConfigForVm(Long vmId) {
+        try {
+            VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
+            if (vm == null) {
+                return null;
+            }
+            VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
+            if (template == null) {
+                return null;
+            }
+            JsonObject engines = readEnginesConfig().getAsJsonObject("engines");
+            JsonElement entry = engines.get(template.getName());
+            return entry == null ? null : entry.getAsJsonObject();
+        } catch (Exception e) {
+            logger.warn("could not resolve the engine config for VM {}", vmId, e);
+            return null;
         }
-        String mode = engineConfig.get("provision_mode").getAsString();
-        if (PROVISION_MODE_CONFIG_DRIVE.equalsIgnoreCase(mode)) {
-            return PROVISION_MODE_CONFIG_DRIVE;
-        }
-        if (!PROVISION_MODE_SSH.equalsIgnoreCase(mode)) {
-            logger.warn("unknown provision_mode {} in config.json -- treating it as {}", mode, PROVISION_MODE_SSH);
-        }
-        return PROVISION_MODE_SSH;
     }
 
     @Override
@@ -793,7 +636,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 DbaasEngineResponse engine = new DbaasEngineResponse();
                 engine.setTemplate(entry.getKey());
                 engine.setPort(cfg.get("port").getAsInt());
-                engine.setProvisionMode(provisionMode(cfg));
                 engine.setObjectName("dbaasengine");
                 result.add(engine);
             }
@@ -803,11 +645,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         return result;
     }
 
-    // config.json lives next to extension.py; the engines map inside it is the
-    // single source of truth for which templates are DBaaS engines.
+    // The engines map inside config.json is the single source of truth for
+    // which templates are DBaaS engines.
     private JsonObject readEnginesConfig() {
-        File extensionFile = new File(DbaasExtensionPath.value());
-        File configFile = new File(extensionFile.getParentFile(), "config.json");
+        File configFile = new File(DbaasConfigPath.value());
         try (FileReader reader = new FileReader(configFile)) {
             return JsonParser.parseReader(reader).getAsJsonObject();
         } catch (Exception e) {
@@ -908,7 +749,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     @Override
     public ConfigKey<?>[] getConfigKeys() {
-        return new ConfigKey<?>[] {DbaasExtensionPath, DbaasProvisionTimeout, DbaasCredentialsCleanupInterval,
+        return new ConfigKey<?>[] {DbaasConfigPath, DbaasCredentialsCleanupInterval,
                 DbaasReportTokenTtl, DbaasReportApiUrl};
     }
 }

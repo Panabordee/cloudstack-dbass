@@ -138,12 +138,9 @@
       <p class="progress-text">
         {{ step === 'deploying' ? $t('message.dbaas.deploying') : $t('message.dbaas.waiting.engine') }}
       </p>
-      <p v-if="step === 'provisioning'" class="progress-sub">
-        {{ $t('label.in.progress') }} {{ attempt }}/{{ maxAttempts }}
-      </p>
-      <!-- The instance already exists once this step is reached; provisioning
-           keeps retrying in the background even after this dialog closes, so
-           there is nothing left here that requires staying open. -->
+      <!-- The instance already exists once this step is reached; if the
+           createDatabase call outlives this dialog (ignoreCancelToken) it
+           still finishes in the background. -->
       <p v-if="step === 'provisioning'" class="progress-sub">
         {{ $t('message.dbaas.close.early') }}
       </p>
@@ -167,29 +164,11 @@
         </a-descriptions-item>
       </a-descriptions>
       <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
-      <template v-if="credentials.vmusername">
-        <a-descriptions bordered size="small" :column="1" class="credentials">
-          <a-descriptions-item :label="$t('label.vm.username')">{{ credentials.vmusername }}</a-descriptions-item>
-          <a-descriptions-item :label="$t('label.vm.password')">{{ credentials.vmpassword }}</a-descriptions-item>
-          <a-descriptions-item :label="$t('label.ssh.command')">
-            <span class="connect-command">{{ sshCommand }}</span>
-          </a-descriptions-item>
-        </a-descriptions>
-        <p class="connect-hint">{{ $t('message.dbaas.vm.access') }}</p>
-        <div :span="24" class="action-button">
-          <a-button @click="notifyCopied" v-clipboard:copy="sshCommand" type="primary">
-            {{ $t('label.copy.ssh.command') }}
-          </a-button>
-          <a-button @click="markCopied('vmPassword')" v-clipboard:copy="credentials.vmpassword">
-            {{ $t('label.copy.vm.password') }}
-          </a-button>
-        </div>
-      </template>
       <div :span="24" class="action-button">
-        <a-button @click="markCopied('dbPassword')" v-clipboard:copy="connectCommand" type="primary">
+        <a-button @click="markCopied" v-clipboard:copy="connectCommand" type="primary">
           {{ $t('label.copy.connect.command') }}
         </a-button>
-        <a-button @click="markCopied('dbPassword')" v-clipboard:copy="credentials.password">
+        <a-button @click="markCopied" v-clipboard:copy="credentials.password">
           {{ $t('label.copy.password') }}
         </a-button>
         <a-button @click="confirmClose(goToInstance)">{{ $t('label.go.to.instance') }}</a-button>
@@ -215,20 +194,15 @@
 </template>
 
 <script>
-import { ref, reactive, toRaw, h } from 'vue'
-import { Button, Modal } from 'ant-design-vue'
+import { ref, reactive, toRaw } from 'vue'
+import { Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import { mixinForm } from '@/utils/mixin'
 import {
   buildConnectCommand,
-  buildSshCommand,
-  credentialNotification,
   DBAAS_TEMPLATE_PREFIX,
   DBAAS_IDENTIFIER_PATTERN,
-  DBAAS_PASSWORD_PATTERN,
-  DBAAS_MIN_OFFERING,
-  DBAAS_PROVISION_RETRIES,
-  DBAAS_TRANSIENT_ERRORS
+  DBAAS_PASSWORD_PATTERN
 } from '@/utils/dbaas'
 
 export default {
@@ -249,16 +223,10 @@ export default {
       keyPairs: [],
       keyPairLoading: false,
       credentials: {},
-      // template name -> 'configdrive' | 'ssh', from listDbaasEngines
-      provisionModes: {},
       dbPasswordCopied: false,
-      vmPasswordCopied: false,
       failureMessage: '',
       closed: false,
-      deployedVmId: null,
-      attempt: 0,
-      maxAttempts: DBAAS_PROVISION_RETRIES.maxAttempts,
-      retryDelayMs: DBAAS_PROVISION_RETRIES.retryDelayMs
+      deployedVmId: null
     }
   },
   computed: {
@@ -269,9 +237,6 @@ export default {
     },
     connectCommand () {
       return buildConnectCommand(this.credentials)
-    },
-    sshCommand () {
-      return buildSshCommand(this.credentials)
     },
     showKeyPairs () {
       return 'listSSHKeyPairs' in this.$store.getters.apis
@@ -341,26 +306,15 @@ export default {
       Promise.all([
         getAPI('listTemplates', templateParams),
         getAPI('listZones', { available: true }),
-        // memory and cpuspeed are minimum filters, not exact matches, so this
-        // drops every offering below Medium server-side. A zone with nothing
-        // that large falls back to the full list below rather than showing an
-        // empty dropdown.
-        getAPI('listServiceOfferings', { ...DBAAS_MIN_OFFERING }),
+        getAPI('listServiceOfferings'),
         // Data disk is entirely optional, so this is never in the required
         // rules -- it only ever adds an extra volume when actually picked.
         getAPI('listDiskOfferings'),
         hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
       ]).then(([tpl, zone, off, diskOff, engines]) => {
-        const engineList = engines?.listdbaasenginesresponse?.dbaasengine || []
         const engineNames = engines
-          ? new Set(engineList.map(e => e.template))
+          ? new Set((engines.listdbaasenginesresponse?.dbaasengine || []).map(e => e.template))
           : null
-        // Which transport each engine provisions with. Absent on management
-        // servers running an older plugin, where every engine is ssh.
-        this.provisionModes = engineList.reduce((acc, e) => {
-          acc[e.template] = e.provisionmode || 'ssh'
-          return acc
-        }, {})
         this.templates = (tpl.listtemplatesresponse.template || [])
           .filter(t => t.name && t.isready && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
           // Same label source DatabaseInstances uses: the template's own
@@ -374,16 +328,6 @@ export default {
           iscustomized: o.iscustomized
         })
         this.offerings = (off.listserviceofferingsresponse.serviceoffering || []).map(mapOffering)
-        if (this.offerings.length === 0) {
-          // Nothing meets the recommended minimum in this zone. Offering a
-          // full list (with the sizing caveat in the docs) beats a dropdown
-          // the user cannot pick anything from and no reason why.
-          getAPI('listServiceOfferings').then(all => {
-            this.offerings = (all.listserviceofferingsresponse.serviceoffering || []).map(mapOffering)
-          }).catch(error => {
-            this.$notifyError(error)
-          })
-        }
         this.diskOfferings = (diskOff.listdiskofferingsresponse.diskoffering || [])
           .map(d => ({ id: d.id, label: d.iscustomized ? `${d.name} (${this.$t('label.iscustomized')})` : `${d.name} (${d.disksize} GB)` }))
         if (this.zones.length === 1) {
@@ -395,10 +339,6 @@ export default {
       }).finally(() => {
         this.optionsLoading = false
       })
-    },
-    provisionModeFor (templateId) {
-      const template = this.templates.find(t => t.id === templateId)
-      return template ? (this.provisionModes[template.name] || 'ssh') : 'ssh'
     },
     fetchNetworks () {
       this.form.networkid = undefined
@@ -448,9 +388,6 @@ export default {
       }
       return error?.message || String(error)
     },
-    isTransient (message) {
-      return DBAAS_TRANSIENT_ERRORS.some(m => message.includes(m))
-    },
     handleSubmit (e) {
       if (this.loading) return
       this.formRef.value.validate().then(() => {
@@ -484,13 +421,11 @@ export default {
         if (this.needsNetwork && values.networkid) {
           params.networkids = values.networkid
         }
-        // A config-drive engine reads its provisioning request from the
-        // config drive at boot, so the request has to be attached before the
-        // instance ever starts: deploy it stopped and let createDatabase
-        // start it once the request is in place.
-        if (this.provisionModeFor(values.engine) === 'configdrive') {
-          params.startvm = false
-        }
+        // Provisioning reads its request from the config drive at boot, so
+        // the request has to be attached before the instance ever starts:
+        // deploy it stopped and let createDatabase start it once the request
+        // is in place.
+        params.startvm = false
         this.step = 'deploying'
         // ignoreCancelToken: leaving mid-deploy must not abort the deploy
         // request -- the API call submits the async job server-side even if
@@ -512,7 +447,7 @@ export default {
               const vm = result.jobresult.virtualmachine
               this.deployedVmId = vm.id
               this.step = 'provisioning'
-              this.provision(vm.id, values, 1)
+              this.provision(vm.id, values)
             },
             errorMethod: result => {
               this.step = 'form'
@@ -533,48 +468,33 @@ export default {
         this.formRef.value.scrollToField(error.errorFields[0].name)
       })
     },
-    provision (vmId, values, attempt) {
-      this.attempt = attempt
-      // ignoreCancelToken keeps this call (and its retries) alive after the
-      // dialog is closed: the whole point of the non-blocking flow is that
-      // provisioning finishes in the background while route changes cancel
-      // every other in-flight request. Without it a navigation aborts the
-      // call, the client treats the cancellation as a hard failure, and the
-      // retry chain dies silently -- the database then never gets provisioned
-      // and Show Password finds no stored credential.
+    provision (vmId, values) {
+      // ignoreCancelToken keeps this call alive after the dialog is closed:
+      // the whole point of the non-blocking flow is that provisioning
+      // finishes in the background while route changes cancel every other
+      // in-flight request. Without it a navigation aborts the call and the
+      // database never gets provisioned, with nothing telling the user why.
+      // Unlike the old SSH transport, this is one attempt: createDatabase
+      // either attaches the request and starts the instance, or it fails
+      // outright -- there is no transient "sshd not listening yet" state to
+      // retry against.
       postAPI('createDatabase', {
         virtualmachineid: vmId,
         dbname: values.dbname,
         dbusername: values.dbusername,
-        dbpassword: values.dbpassword,
-        // This view only ever deploys a freshly created instance, so setting
-        // the tenant login password here is safe; later createDatabase calls
-        // on the same VM (Create Database action) must not rotate it.
-        resetvmpassword: true
+        dbpassword: values.dbpassword
       }, { ignoreCancelToken: true }).then(json => {
         const dbaas = json.createdatabaseresponse?.dbaas
         if (dbaas) {
           this.credentials = dbaas
           this.step = 'done'
           this.loading = false
-          // The instance login password cannot be recovered later (Show
-          // Password deliberately does not store it), so the notification
-          // with copy buttons fires every time the VM credentials come back
-          // -- whether the dialog is still open or was closed early.
-          if (this.credentials.vmusername) {
-            this.notifyVmCredentials()
-          }
           this.$emit('refresh-data')
         } else {
           this.failStep(this.$t('message.error.database.response'))
         }
       }).catch(error => {
-        const message = this.errorText(error)
-        if (attempt < this.maxAttempts && this.isTransient(message)) {
-          setTimeout(() => this.provision(vmId, values, attempt + 1), this.retryDelayMs)
-          return
-        }
-        this.failStep(message)
+        this.failStep(this.errorText(error))
       })
     },
     failStep (message) {
@@ -600,47 +520,27 @@ export default {
       // on top of it and land on the wrong page.
       this.closed = true
     },
-    notifyVmCredentials () {
-      const parts = credentialNotification(h, Button, this.credentials, t => this.$t(t), flag => this.markCopied(flag))
-      this.$notification.success({
-        message: this.$t('label.create.database.instance'),
-        description: parts.description,
-        btn: parts.btn,
-        duration: 0
-      })
+    markCopied () {
+      this.dbPasswordCopied = true
+      this.notifyCopied()
     },
-    markCopied (flag) {
-      if (flag === 'dbPassword') {
-        this.dbPasswordCopied = true
-      } else if (flag === 'vmPassword') {
-        this.vmPasswordCopied = true
-      }
+    notifyCopied () {
       this.$notification.info({
         message: this.$t('message.success.copy.clipboard'),
         duration: 2
       })
     },
-    // Only guards the credentials step. The database password is stored
-    // server-side and recoverable via Show Password, but the instance login
-    // password is NOT stored anywhere -- losing it means losing shell access
-    // to the instance -- so the nudge covers both.
+    // Only guards the credentials step: the database password is also stored
+    // server-side and recoverable later via Show Password, so this is a
+    // courtesy nudge to copy it now, not a last chance.
     confirmClose (proceed) {
-      if (this.step !== 'done') {
-        proceed()
-        return
-      }
-      // Both secrets are unrecoverable from this dialog once closed: the
-      // instance login password is never stored anywhere, so warn when
-      // either one has not been copied yet.
-      const missing = !this.dbPasswordCopied ||
-        (this.credentials.vmusername && !this.vmPasswordCopied)
-      if (!missing) {
+      if (this.step !== 'done' || this.dbPasswordCopied) {
         proceed()
         return
       }
       Modal.confirm({
         title: this.$t('label.close'),
-        content: this.$t('message.confirm.close.database.password'),
+        content: this.$t('message.confirm.close.database.dbpassword'),
         okText: this.$t('label.yes'),
         cancelText: this.$t('label.no'),
         onOk: proceed

@@ -32,13 +32,6 @@ public class DbaasEngineResponse extends BaseResponse {
     @Param(description = "the port the database engine listens on")
     private Integer port;
 
-    @SerializedName("provisionmode")
-    @Param(description = "how the engine is configured after deployment: 'configdrive' when the"
-            + " instance configures itself at first boot, 'ssh' when the management server connects"
-            + " to it and runs the provisioning script", since = "4.23.0.0")
-    private String provisionMode;
-
     public void setTemplate(String template) { this.template = template; }
     public void setPort(Integer port) { this.port = port; }
-    public void setProvisionMode(String provisionMode) { this.provisionMode = provisionMode; }
 }

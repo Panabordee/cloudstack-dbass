@@ -131,15 +131,41 @@ defects.
 
 ### Phase D — in-VM agent, retire SSH
 
-- [ ] Agent in the template polls its config source for pending jobs
-- [ ] Create Database on a running instance goes through the agent
-- [ ] Reset Database Password goes through the agent
-- [ ] Remaining engines rebuilt: mariadb, postgresql, mongodb
-- [ ] Delete the SSH transport: `cs_api.py`, `extension.py`, paramiko, the
-      retry loop, `PROVISION_ATTEMPTS`, `TRANSIENT_CONNECT_ERRORS`, the budget
-      calculation, `provision.sh` and its allowlist, the forced-command key,
-      `sudoers.d-dbaas-provisioner`, `ssh_connect_timeout_seconds`,
-      `dbaas.provision.timeout`, the transient-error list in `utils/dbaas.js`
+**The SSH transport is already gone**, ahead of schedule — see §1a below. What
+is left in this phase is narrower than originally planned: a channel into an
+*already-running* instance, needed only by the one flow config-drive cannot
+reach.
+
+- [x] Delete the SSH transport: `cs_api.py`, `extension.py`,
+      `actions/create_database.py`, `actions/reset_database_password.py`,
+      `provision.sh` and its allowlist, the forced-command key,
+      `authorized_keys.example`, `sudoers.d-dbaas-provisioner`,
+      `register_extension.sh`, `requirements.txt` (paramiko/requests),
+      `runExtensionAction()`/`createDatabaseOverSsh()` in `DbaasManagerImpl`,
+      `provision_mode`/`provisionmode` (moot with one transport),
+      `DBAAS_MIN_OFFERING`/`DBAAS_PROVISION_RETRIES`/`DBAAS_TRANSIENT_ERRORS`
+      and the client-side retry loop in `CreateDatabaseInstance.vue` (no
+      transient "sshd not listening yet" state exists anymore to retry
+      against — createDatabase now either succeeds or fails outright)
+- [x] Create Database on a running instance does **not** need the agent: the
+      config-drive path is reused as-is. `createDatabase` stops a `Running`
+      instance itself (`UserVmService.stopVirtualMachine`), attaches the
+      request, and starts it again — the same method that already served the
+      wizard's `Stopped` instances. `CreateDatabase.vue` warns the tenant that
+      a running instance will be briefly restarted; the row action in the
+      Database page now shows for `Running` or `Stopped` instead of only the
+      one it required over SSH.
+- [ ] Reset Database Password **does** need the agent: cloud-init only ever
+      runs once, at first boot, and cannot deliver a command to an instance
+      that already configured its engine. `resetDatabasePassword` now throws
+      a clear `CloudRuntimeException` naming this gap instead of attempting
+      anything; the UI hides the action rather than offering a button that
+      always fails. `*_reset.sh` scripts are kept in `config.json`'s
+      `reset_script` entries for the agent to call unchanged once it exists.
+- [ ] Agent in the template polls its config source for pending jobs, and
+      reset goes through it
+- [ ] Remaining engines rebuilt: mariadb, postgresql, mongodb (Phase B only
+      built out mysql's `firstboot.sh` wiring end to end)
 
 ### Phase E — additions worth having
 
@@ -166,8 +192,12 @@ the first NIC).
 - Deploying a database on an instance that already has one fails hard on
   "user already exists" — correct, but the UI could say so more clearly
 - `storeCredential` inserts a new row per create/reset; only the latest is read
-- Data disks and credential rows are only cleaned up by the UI's destroy path;
-  the lifecycle-hook item in Phase A replaces it
+- Data disks are only cleaned up by the UI's destroy path (expunge only);
+  credential rows are additionally swept server-side (Phase A)
+- `README.md`, `INSTALL.md`, `TEMPLATES.md` still describe the v1 SSH
+  architecture (extension.py, forced-command keys, `ssh_connect_timeout_seconds`
+  sizing, etc.) — not rewritten yet; PLAN.md is the accurate source until they
+  are
 
 ## 5. Sequencing
 
