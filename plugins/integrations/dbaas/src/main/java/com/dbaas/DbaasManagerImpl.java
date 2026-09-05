@@ -558,7 +558,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         // reached; this just resolves the UUID the table is keyed on.
         String vmId = vmUuid(cmd.getVirtualMachineId());
 
-        String sql = "SELECT db_username, db_password_encrypted, engine FROM dbaas_credentials WHERE vm_id = ?"
+        String sql = "SELECT db_username, db_password_encrypted, engine, status, status_message FROM dbaas_credentials WHERE vm_id = ?"
                 + (cmd.getDbUsername() != null ? " AND db_username = ?" : "")
                 + " ORDER BY created_at DESC, id DESC LIMIT 1";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
@@ -583,6 +583,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 response.setUsername(rs.getString("db_username"));
                 response.setPassword(DBEncryptionUtil.decrypt(rs.getString("db_password_encrypted")));
                 response.setEngine(rs.getString("engine"));
+                // The recorded outcome, so the caller does not have to guess
+                // whether a credential that exists was ever applied.
+                response.setStatus(rs.getString("status"));
+                response.setStatusMessage(rs.getString("status_message"));
                 // The connection command needs a reachable host and the
                 // engine's port: resolve the instance's current IP live (it
                 // may have changed since provisioning) and take the port from

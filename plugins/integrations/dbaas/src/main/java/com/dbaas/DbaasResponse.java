@@ -40,6 +40,16 @@ public class DbaasResponse extends BaseResponse {
     @Param(description = "login password on the instance, when VM access was set up")
     private String vmPassword;
 
+    @SerializedName("status")
+    @Param(description = "provisioning status of the stored credential: 'pending' while the instance has"
+            + " not confirmed it configured its engine, 'confirmed' once it has, 'failed' when it"
+            + " reported it could not", since = "4.23.0.0")
+    private String status;
+
+    @SerializedName("statusmessage")
+    @Param(description = "why provisioning failed, when the status is 'failed'", since = "4.23.0.0")
+    private String statusMessage;
+
     @SerializedName("found")
     @Param(description = "true when a stored database credential exists for the instance", since = "4.22.2.0")
     private Boolean found;
@@ -59,4 +69,6 @@ public class DbaasResponse extends BaseResponse {
     public String getVmUsername() { return vmUsername; }
     public String getVmPassword() { return vmPassword; }
     public void setFound(Boolean found) { this.found = found; }
+    public void setStatus(String status) { this.status = status; }
+    public void setStatusMessage(String statusMessage) { this.statusMessage = statusMessage; }
 }

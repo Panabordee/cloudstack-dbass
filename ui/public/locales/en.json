@@ -4552,5 +4552,7 @@
   "message.desc.show.database.password": "Fetching the stored password for this instance's database user...",
   "label.reset.vm.password": "Reset instance login password",
   "message.warning.reset.vm.password": "This overwrites the current instance login password. Anyone using the existing password will be locked out until you share the new one shown here.",
-  "message.confirm.close.database.dbpassword": "You haven't copied the database password yet. It can be recovered later via Show Password, but do you want to close this window now?"
+  "message.confirm.close.database.dbpassword": "You haven't copied the database password yet. It can be recovered later via Show Password, but do you want to close this window now?",
+  "message.dbaas.status.pending": "The credential below is the one this instance will use, but it has not confirmed yet that its database engine came up with it. If it never confirms, use the Create Database action to run provisioning again.",
+  "message.dbaas.status.failed": "The instance reported that it could not configure its database engine with this credential."
 }

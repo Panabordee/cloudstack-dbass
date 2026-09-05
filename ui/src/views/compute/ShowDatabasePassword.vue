@@ -26,6 +26,22 @@
           <span class="connect-command">{{ connectCommand }}</span>
         </a-descriptions-item>
       </a-descriptions>
+      <!-- A credential exists but the instance has not confirmed it applied
+           it (config-drive provisioning stores the credential before the
+           instance boots). The password below is the one it will use. -->
+      <a-alert
+        v-if="credentials.found && provisioningPending"
+        type="info"
+        showIcon
+        :message="$t('message.dbaas.status.pending')"
+        class="state-alert" />
+      <a-alert
+        v-else-if="credentials.found && provisioningFailed"
+        type="error"
+        showIcon
+        :message="$t('message.dbaas.status.failed')"
+        :description="credentials.statusmessage"
+        class="state-alert" />
       <a-alert
         v-else-if="loaded && miss && autoChecking"
         type="info"
@@ -119,6 +135,15 @@ export default {
     },
     autoChecking () {
       return this.miss && this.autoChecks > 0 && this.autoChecks < this.maxAutoChecks
+    },
+    // Reported by the instance, not inferred here: 'pending' means the
+    // credential was generated and handed to the instance but nothing has
+    // confirmed the engine came up with it yet.
+    provisioningPending () {
+      return this.credentials.status === 'pending'
+    },
+    provisioningFailed () {
+      return this.credentials.status === 'failed'
     }
   },
   methods: {
@@ -138,7 +163,8 @@ export default {
       getAPI('getDatabasePassword', { virtualmachineid: this.resource.id }).then(json => {
         this.credentials = json.getdatabasepasswordresponse?.dbaas || {}
         this.loaded = true
-        if (this.credentials.found === false && this.autoChecks < this.maxAutoChecks) {
+        const unsettled = this.credentials.found === false || this.credentials.status === 'pending'
+        if (unsettled && this.autoChecks < this.maxAutoChecks) {
           this.autoChecks++
           this.retryTimerId = setTimeout(() => this.fetchPassword(), 10000)
         }

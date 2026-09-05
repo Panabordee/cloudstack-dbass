@@ -99,11 +99,15 @@ defects.
 
 ### Phase C — status and report-back
 
-- [ ] `status` / `status_message` written by the plugin (`pending` at create)
+- [x] `status` / `status_message` written by the plugin (`pending` at create on
+      the config-drive path, `confirmed` on the SSH path, which verifies the
+      login itself), returned by `getDatabasePassword`, and rendered by Show
+      Password instead of being inferred
 - [ ] Report-back endpoint validated by a one-time token: bound to one instance
       UUID, single use, TTL, stored hashed, rate limited, every call logged
 - [ ] Instance reports `confirmed` / `failed` with a reason
-- [ ] Show Password renders the real status; the polling guesswork is deleted
+- [x] Show Password renders the real status and keeps polling while it is
+      `pending`; the "is it still provisioning or did it fail" guess is gone
 - [ ] Decision recorded: the endpoint accepts an unauthenticated caller (the
       instance holds no CloudStack credentials) — accepted or rejected
 
