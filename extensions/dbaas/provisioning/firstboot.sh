@@ -122,7 +122,11 @@ fi
 ENGINE_WAIT="${DBAAS_ENGINE_WAIT:-120}"
 
 engine_ready() {
-    case "$(tr -d '[:space:]' < "$ENGINE_FILE")" in
+    # The marker holds the script name (mysql.sh), the probe keys off the
+    # engine (mysql) -- strip exactly the .sh suffix, nothing else.
+    local marker
+    marker="$(tr -d '[:space:]' < "$ENGINE_FILE")"
+    case "${marker%.sh}" in
         mysql|mariadb)
             mysqladmin --protocol=socket -uroot ping >/dev/null 2>&1
             ;;

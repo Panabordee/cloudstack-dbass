@@ -254,3 +254,147 @@ line still stands.
   closed.
 - **List engines**: one malformed entry in `config.json` now skips only that
   entry, not the whole list.
+
+## 9. Remaining engine templates — mariadb, postgresql, mongodb (2026-09-05)
+
+Phase B built `dbaas-mysql-v2` and wired `firstboot.sh` end to end for MySQL
+only. The other three engines have their scripts already (`mariadb.sh`,
+`postgresql.sh`, `mongodb.sh` and their `_reset` counterparts are v2-shaped
+today: they read the request JSON on stdin, validate identifiers with the same
+regex the server enforces, refuse an existing user/role instead of silently
+skipping, and verify the new login before reporting `ok`). What is missing is
+image-side: three config-drive images, three registrations, three config
+entries.
+
+The recipe is `README-BUILD-DEPLOY.md` §6–§8 repeated per engine, with the
+per-engine differences below. `TEMPLATES.md` still documents the v1 SSH build
+and must not be followed for the image contract — only its engine-install
+notes (§"Rebuilding a template" step 2) are still accurate, because the
+packages and their configuration did not change.
+
+### 9.0 Prerequisite — the engine marker breaks the readiness wait
+
+`/opt/dbaas/engine` is written as `mysql.sh` (`README-BUILD-DEPLOY.md:168`),
+because `firstboot.sh:110` appends its contents to `/opt/dbaas/` to find the
+engine script. But `engine_ready()` (`firstboot.sh:124-142`) switches on the
+*same* string against bare engine names (`mysql|mariadb|postgresql|mongodb`),
+so `mysql.sh` falls through to the `*)` arm, returns 0 immediately, and the
+120s wait added for P1-1 never actually waits. The race that fix was written
+for is still open on every image built to this recipe.
+
+Fix before building anything: strip the suffix in `engine_ready()` (match on
+`"${marker%.sh}"`), keeping the marker file's contents as they are so the
+already-registered `dbaas-mysql-v2` image stays valid. Then re-verify on
+MySQL — this is also the reason the mysql acceptance run has to be repeated
+rather than assumed from the earlier build.
+
+- [ ] `engine_ready()` matches the marker with its `.sh` suffix stripped
+- [ ] Readiness wait observed doing something on a real boot (log line
+      `engine ready (waited Ns)` with N > 0 on a cold boot)
+
+### 9.1 Per-engine image contract
+
+Every image, regardless of engine, must carry:
+
+| Path | Content | Mode |
+| --- | --- | --- |
+| `/opt/dbaas/firstboot.sh` | from `extensions/dbaas/provisioning/` | 0755 root:root |
+| `/opt/dbaas/<engine>.sh` | the engine script | 0755 root:root |
+| `/opt/dbaas/<engine>_reset.sh` | kept for the Phase D agent, unused today | 0755 root:root |
+| `/opt/dbaas/engine` | `<engine>.sh` | 0644 root:root |
+| `/var/lib/dbaas/` | empty directory | 0700 root:root |
+
+and must **not** carry any v1 artefact: no `provision.sh`, no
+`dbaas-provisioner` user, no `/etc/sudoers.d/dbaas-provisioner`, no
+`authorized_keys`, no `vmaccess.sh`. Deleting them is part of the build, not
+an optional cleanup — they are a standing remote-access path that nothing in
+v2 uses.
+
+Also required in every image, and easy to miss because MySQL's base image
+happened to have them:
+
+- cloud-init installed, with `ConfigDrive` in its datasource list (or no
+  restrictive `datasource_list` at all)
+- the binary `engine_ready()` probes with: `mysqladmin` (mysql, mariadb),
+  `pg_isready` (postgresql), `mongosh` **or** `mongo` (mongodb). A missing
+  probe binary is not a hard failure — it makes the probe fail forever and
+  provisioning times out after 120s with a misleading message
+- `python3` and `curl`, used by `firstboot.sh` for the request parsing and the
+  report-back call
+- the banner set for the engine (`/etc/dbaas-engine`,
+  `/etc/update-motd.d/00-dbaas`, `/etc/motd`, `/etc/issue`)
+
+### 9.2 Per-engine notes
+
+**mariadb.** Package `mariadb-server` from Debian's own repo. Root over the
+unix socket is `unix_socket` auth, so both `mariadb.sh` and the `mysqladmin`
+probe work as root with no password. Needs `bind-address` opened the same way
+MySQL did if the tenant is to reach it from outside the instance.
+
+**postgresql.** `listen_addresses = '*'` in `postgresql.conf` and a
+`host all all 0.0.0.0/0 scram-sha-256` line in `pg_hba.conf`, then restart —
+without them the database provisions fine and is unreachable, which reads as
+a plugin bug. `postgresql.sh` verifies its own credential over TCP against
+127.0.0.1, so a missing `pg_hba` line fails the build loudly at test time
+rather than silently in production.
+
+**mongodb.** Three extra things, all of which have bitten this project before:
+the host needs `guest.cpu.mode=host-passthrough` or `mongod` dies with
+`Illegal instruction` (see `host/README.md`); `bindIp: 0.0.0.0` and
+`security.authorization: enabled` in `/etc/mongod.conf`; and the
+`dbaas_admin` credential plus `rotate-admin-password.sh` and its unit, with
+the unit left **enabled** and its marker under `/var/lib/dbaas` removed before
+generalizing. `mongosh` must be present for the readiness probe.
+
+### 9.3 Naming and configuration
+
+Register as `dbaas-mariadb-v2`, `dbaas-postgresql-v2`, `dbaas-mongodb-v2`,
+matching the `dbaas-mysql-v2` precedent: the v1 templates keep their names and
+stay deployable until v2 is proven, and nothing about the v1 entries in the
+engines map has to move.
+
+Each name needs an entry in `extensions/dbaas/config.example.json` **and** in
+the deployed `/usr/share/cloudstack-management/extensions/dbaas/config.json`
+(`script`, `reset_script`, `port` — 3306 / 5432 / 27017). The deployed copy is
+the one `listDbaasEngines` reads; the example file is what stops the next
+deployment losing it.
+
+Registration flags, per `README-BUILD-DEPLOY.md` §7:
+
+- `passwordenabled=true` — CloudStack owns the instance login password
+- the `dbaas.configdrive=true` **template detail**, without which
+  `createDatabase` refuses the template outright
+  (`DbaasManagerImpl.requireConfigDriveTemplate`, :548). It is a detail, not a
+  flag: set it at `registerTemplate` (`details[0].dbaas.configdrive=true`) or
+  afterwards with `updateTemplate`, and confirm with `listTemplates
+  templatefilter=all` that the detail is actually present on the response
+
+### 9.4 Work items
+
+- [ ] Fix `engine_ready()` marker matching (§9.0) and re-verify on mysql
+- [ ] Build and register `dbaas-mariadb-v2`
+- [ ] Build and register `dbaas-postgresql-v2`
+- [ ] Build and register `dbaas-mongodb-v2`
+- [ ] Add all three to `config.example.json` and to the deployed `config.json`
+- [ ] Set `dbaas.configdrive=true` on all three, verified through
+      `listTemplates`
+- [ ] Per engine: deploy through the wizard onto the ConfigDrive network,
+      confirm `/var/lib/dbaas/result.json` says `confirmed` from the console,
+      Show Password reports `confirmed`, and the engine answers on its port
+      with the returned credential
+- [ ] Per engine: repeat on a network the management server cannot reach, or
+      with the VR stopped — the Phase B acceptance line, which no engine has
+      passed yet
+- [ ] Rewrite `TEMPLATES.md` for the config-drive build, retiring the SSH
+      recipe (currently `README-BUILD-DEPLOY.md` is the only accurate build
+      document, and it only covers mysql)
+
+### 9.5 Sequencing
+
+Fix §9.0 first — it is three characters of shell and it decides whether any
+acceptance result below is meaningful. Then mariadb, because it is the
+closest to the already-built mysql image (same probe, same scripts, same
+socket auth) and therefore the fastest confirmation that the recipe
+generalizes. Postgresql next, mongodb last: it carries the most build-time
+configuration and the only host-level prerequisite, so it is the worst
+candidate for finding out that something in the shared path is wrong.
