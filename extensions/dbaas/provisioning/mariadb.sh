@@ -48,7 +48,16 @@ SQL
 # Same discovery as mysql.sh: locate the file that actually sets
 # bind-address rather than hardcoding one packaging's layout, and restart
 # whichever unit is really running.
-CONF_FILE=$(grep -rls '^bind-address' /etc/mysql /etc/my.cnf /etc/my.cnf.d 2>/dev/null | head -1)
+#
+# `|| true` is load-bearing: grep exits 2 when any argument path does not
+# exist -- even when it matched in another one -- and /etc/my.cnf,
+# /etc/my.cnf.d do not exist on Debian's mariadb-server. Under
+# `set -e -o pipefail` that status killed this script silently right here,
+# after the database and user had already been created, with the error
+# suppressed by 2>/dev/null. Observed on dbaas-mariadb-accept2 (2026-09-05):
+# testdb1 existed and worked, bind-address was never rewritten, and the
+# instance reported {"status":"failed","message":""}.
+CONF_FILE=$(grep -rls '^bind-address' /etc/mysql /etc/my.cnf /etc/my.cnf.d 2>/dev/null | head -1 || true)
 if [[ -n "$CONF_FILE" ]]; then
   CURRENT_BIND=$(grep '^bind-address' "$CONF_FILE" | head -1)
   if [[ "$CURRENT_BIND" != *"0.0.0.0"* ]]; then

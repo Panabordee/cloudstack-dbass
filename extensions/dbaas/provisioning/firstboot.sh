@@ -67,19 +67,33 @@ report_result() {
         log "no report_url in the provisioning request -- reporting is not configured, staying local-only"
         return 0
     fi
-    local attempt
+    local attempt response http_code body
     for attempt in 1 2 3 4 5; do
-        if curl -fsS -m 10 -X POST "$report_url" \
+        # Keep curl's own diagnostics: swallowing them (the previous
+        # `>/dev/null 2>&1`) turned every possible cause -- no route, refused,
+        # DNS, TLS, 401, 429 -- into the same "report attempt failed" line and
+        # left nothing to debug from on an instance nobody can log into.
+        response=$(curl -sS -m 10 -w $'\n%{http_code}' -X POST "$report_url" \
             --data-urlencode "command=reportDbaasProvisioningResult" \
             --data-urlencode "response=json" \
             --data-urlencode "vmid=${vm_id}" \
             --data-urlencode "token=${report_token}" \
             --data-urlencode "status=${status}" \
-            --data-urlencode "message=${message}" >/dev/null 2>&1; then
+            --data-urlencode "message=${message}" 2>&1) || response=""
+        http_code="${response##*$'\n'}"
+        body="${response%$'\n'*}"
+        # HTTP 200 alone is not proof. The server answers a *rejected* report
+        # with 403, so a 200 carrying no success payload is not a rejection --
+        # it is the management server having failed before the command ran
+        # (seen on 2026-09-05: the command bean could not be injected, the
+        # servlet swallowed the exception and returned an empty 200). Treating
+        # that as delivered would delete request.json and the one-time token
+        # with it, making the credential unconfirmable forever.
+        if [[ "$http_code" == "200" && "$body" == *success* && "$body" == *true* ]]; then
             log "provisioning result reported: ${status}"
             return 0
         fi
-        log "report attempt ${attempt}/5 failed, retrying"
+        log "report attempt ${attempt}/5 to ${report_url} failed (http=${http_code:-none}): ${body:-no body}"
         sleep $((attempt * 3))
     done
     log "could not report provisioning result after 5 attempts -- credential stays 'pending' until reported"
@@ -159,14 +173,30 @@ done
 log "engine ready (waited ${waited}s)"
 
 log "provisioning with ${ENGINE_SCRIPT}"
-if OUTPUT=$("$ENGINE_SCRIPT" < "$REQUEST_FILE" 2>&1); then
+# Capture the exit code separately: an engine script killed by `set -e` on a
+# command whose stderr it had suppressed reports nothing at all, and a bare
+# {"status":"failed","message":""} tells whoever reads it exactly nothing
+# about where it died. Observed for real on dbaas-mariadb-accept2 (mariadb.sh
+# exited 2 at the bind-address grep, after the database was already created).
+set +e
+OUTPUT=$("$ENGINE_SCRIPT" < "$REQUEST_FILE" 2>&1)
+ENGINE_RC=$?
+set -e
+if [[ $ENGINE_RC -eq 0 ]]; then
     write_result confirmed "database provisioned"
-    report_result confirmed "database provisioned" "$REQUEST_FILE" || true
-    # The request holds the password in cleartext and has served its purpose:
-    # remove it so it does not sit on the instance's disk afterwards, now that
-    # the report (if any) already read the fields it needed from it. The
-    # config drive itself is read-only and detaches with the instance.
-    rm -f "$REQUEST_FILE"
+    # The request holds the password in cleartext and should not linger, but
+    # it also holds the *only* copy of the one-time report token. Deleting it
+    # regardless of whether the report landed -- as this did until 2026-09-05 --
+    # makes a missed report permanent: the credential is stuck 'pending' and
+    # the instance can never confirm itself, so the only recovery is deploying
+    # a new one. Delete it only once the report is in, and leave the retry
+    # timer to finish the job otherwise.
+    if report_result confirmed "database provisioned" "$REQUEST_FILE"; then
+        rm -f "$REQUEST_FILE"
+    else
+        log "report did not land -- keeping ${REQUEST_FILE} so dbaas-report-retry can finish it"
+        systemctl start dbaas-report-retry.timer >/dev/null 2>&1 || true
+    fi
     : > "$DONE_MARKER"
     chmod 0600 "$DONE_MARKER"
     log "provisioned successfully"
@@ -176,7 +206,8 @@ fi
 # Keep the request on failure: an operator can fix the engine and re-run this
 # script by hand without the management server having to reach the instance,
 # and report_result still needs report_url/token/vm_id from it.
-log "provisioning failed: ${OUTPUT}"
-write_result failed "${OUTPUT}"
-report_result failed "${OUTPUT}" "$REQUEST_FILE" || true
+FAILURE="${OUTPUT:-${ENGINE_SCRIPT} exited ${ENGINE_RC} without writing anything to stdout or stderr}"
+log "provisioning failed (rc=${ENGINE_RC}): ${FAILURE}"
+write_result failed "${FAILURE}"
+report_result failed "${FAILURE}" "$REQUEST_FILE" || true
 exit 1

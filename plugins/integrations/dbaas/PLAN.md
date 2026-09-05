@@ -368,6 +368,11 @@ Registration flags, per `README-BUILD-DEPLOY.md` §7:
   flag: set it at `registerTemplate` (`details[0].dbaas.configdrive=true`) or
   afterwards with `updateTemplate`, and confirm with `listTemplates
   templatefilter=all` that the detail is actually present on the response
+- a second detail `dbaas.engine=<mysql|mariadb|postgresql|mongodb>`, which
+  **nothing reads today**. It is set now only so the option described in §9.6
+  stays open without re-registering or re-touching any template later; set it
+  on the three new images and backfill it onto `dbaas-mysql-v2` with
+  `updateTemplate`.
 
 ### 9.4 Work items
 
@@ -378,6 +383,9 @@ Registration flags, per `README-BUILD-DEPLOY.md` §7:
 - [ ] Add all three to `config.example.json` and to the deployed `config.json`
 - [ ] Set `dbaas.configdrive=true` on all three, verified through
       `listTemplates`
+- [ ] Set the inert `dbaas.engine=<key>` detail on all three and backfill it
+      onto `dbaas-mysql-v2` (§9.6 — nothing reads it; it only keeps that
+      option cheap later)
 - [ ] Per engine: deploy through the wizard onto the ConfigDrive network,
       confirm `/var/lib/dbaas/result.json` says `confirmed` from the console,
       Show Password reports `confirmed`, and the engine answers on its port
@@ -398,3 +406,32 @@ socket auth) and therefore the fastest confirmation that the recipe
 generalizes. Postgresql next, mongodb last: it carries the most build-time
 configuration and the only host-level prerequisite, so it is the worst
 candidate for finding out that something in the shared path is wrong.
+
+### 9.6 Deferred: engine identity by detail instead of template name
+
+Today a template is recognised as a DBaaS engine by its **name** being a key
+in `config.json`'s `engines` map (`DbaasManagerImpl` :460, :658, :718; the UI
+mirrors it in `CreateDatabaseInstance.vue:319` and
+`DatabaseInstances.isEngineMember` :198). That couples the engine's identity
+to a string that changes every time an image is rebuilt — which is why
+`dbaas-mysql` and `dbaas-mysql-v2` both need their own entry for one engine.
+
+The alternative, should it ever be worth doing: key the `engines` map by
+engine (`mysql`, `mariadb`, …) instead of by template name, and resolve a
+template's engine from its `dbaas.engine` detail. One engine would then serve
+any number of templates, and rebuilds would stop touching configuration at
+all. `dbaas.configdrive` could collapse into it, since carrying
+`dbaas.engine` would itself mean "built for the config-drive path". Two
+things would need checking first: whether `listTemplates` returns details to
+non-root users (the UI filter would depend on it; there is already a "no
+details in the response, let the backend judge" fallback), and the `dbaas-`
+name prefix in `compute.js:446/464`, which cannot go away regardless because
+a static section `show()` hook cannot await an API call.
+
+**Decision: not now, and not until explicitly asked for.** The name-based path
+works, its cost is operational annoyance rather than a defect, and nothing has
+yet completed a single successful deploy from a v2 template — refactoring
+engine resolution before that would make a failed acceptance run ambiguous
+between the config-drive path and the refactor. The `dbaas.engine` detail in
+§9.3 is the only part done in advance, and it is inert: it changes no
+behaviour and can be ignored indefinitely.

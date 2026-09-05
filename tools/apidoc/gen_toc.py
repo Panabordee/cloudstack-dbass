@@ -286,11 +286,17 @@ known_categories = {
     'downloadValidationScreenshot': 'Backup and Recovery',
     'Announcement': 'Announcements',
     'Announcements': 'Announcements',
+    'Dbaas': 'DBaaS',
+    'Database': 'DBaaS',
     'InstanceProxy': 'Reverse Proxy',
     'InstanceProxies': 'Reverse Proxy',
     'ReverseProxyHosts': 'Reverse Proxy',
     'ReverseProxyDomain': 'Reverse Proxy',
-    'ReverseProxyDomains': 'Reverse Proxy'
+    'ReverseProxyDomains': 'Reverse Proxy',
+    'Dbaas': 'Database as a Service',
+    'createDatabase': 'Database as a Service',
+    'getDatabasePassword': 'Database as a Service',
+    'resetDatabasePassword': 'Database as a Service'
 }
 
 

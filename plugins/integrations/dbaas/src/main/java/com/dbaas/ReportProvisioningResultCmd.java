@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
@@ -43,6 +42,12 @@ import com.cloud.api.response.ApiResponseSerializer;
         responseHasSensitiveInfo = false)
 public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthenticator {
 
+    // The manager is NOT injected: APIAuthenticationManagerImpl constructs
+    // this command with newInstance() and runs ComponentContext.inject() on
+    // it from a context that cannot resolve com.dbaas.DbaasManager, which
+    // throws and leaves the caller with an empty 200. DbaasManagerImpl
+    // publishes itself into a static holder at start() instead; read it from
+    // there and answer with a real error when the plugin is genuinely down.
     private static final String STATUS_CONFIRMED = "confirmed";
     private static final String STATUS_FAILED = "failed";
 
@@ -76,9 +81,6 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
             return false;
         }
     }
-
-    @Inject
-    private DbaasManager dbaasManager;
 
     @Override
     public void execute() throws ServerApiException {
@@ -120,9 +122,16 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
         String status = param(params, "status");
         String message = param(params, "message");
 
+        DbaasManager manager = DbaasManagerImpl.getRunningManager();
+        if (manager == null) {
+            logger.error("reportDbaasProvisioningResult: the DBaaS manager is not running --"
+                    + " the report is NOT processed and the token is not consumed");
+            return serialize(resp, HttpServletResponse.SC_SERVICE_UNAVAILABLE, false, responseType);
+        }
+
         boolean validStatus = STATUS_CONFIRMED.equals(status) || STATUS_FAILED.equals(status);
         boolean accepted = validStatus && vmUuid != null && token != null
-                && dbaasManager.applyProvisioningReport(vmUuid, token, status, message);
+                && manager.applyProvisioningReport(vmUuid, token, status, message);
 
         auditTrailSb.append("command=").append(command).append(" accepted=").append(accepted);
 

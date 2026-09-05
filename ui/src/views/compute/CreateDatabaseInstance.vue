@@ -190,6 +190,21 @@
         <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
       </div>
     </div>
+
+    <!-- step 3c: the browser stopped listening (the user navigated away) before
+         the answer came back. The request was already accepted, so this is not
+         a failure of anything -- only of our ability to watch it finish. -->
+    <div v-if="step === 'detached'">
+      <a-alert type="info" showIcon :message="$t('label.dbaas.database.submitted')">
+        <template #description>
+          <p>{{ $t('message.dbaas.database.submitted') }}</p>
+        </template>
+      </a-alert>
+      <div :span="24" class="action-button">
+        <a-button type="primary" @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
+        <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -499,8 +514,43 @@ export default {
           this.failStep(this.$t('message.error.database.response'))
         }
       }).catch(error => {
+        // Navigating away (Database -> Instances, say) cancels in-flight
+        // requests. `ignoreCancelToken` is meant to exempt this one, but when
+        // the cancellation lands anyway all we lost is the *answer*: the
+        // management server already accepted createDatabase and is running it.
+        // Reporting that as "Instance created -- database was not" is simply
+        // false, and users saw it while the database was being created
+        // perfectly well. Say what is actually true instead.
+        if (this.isCancellation(error)) {
+          this.detachedStep()
+          return
+        }
         this.failStep(this.errorText(error))
       })
+    },
+    // axios reports a cancelled request in three shapes depending on version
+    // and on whether the adapter or the interceptor did the cancelling.
+    isCancellation (error) {
+      if (!error) {
+        return false
+      }
+      if (error.code === 'ERR_CANCELED' || error.__CANCEL__ === true) {
+        return true
+      }
+      const text = String(error.message || error).toLowerCase()
+      return text === 'canceled' || text === 'cancelled'
+    },
+    detachedStep () {
+      this.step = 'detached'
+      this.loading = false
+      if (this.closed) {
+        this.$notification.info({
+          message: this.$t('label.dbaas.database.submitted'),
+          description: this.$t('message.dbaas.database.submitted'),
+          duration: 0
+        })
+      }
+      this.$emit('refresh-data')
     },
     failStep (message) {
       // The instance is up either way. Say so loudly: deploying a second one

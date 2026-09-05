@@ -34,6 +34,7 @@ import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
 
 import com.cloud.exception.InvalidParameterValueException;
+import com.cloud.storage.dao.VMTemplateDetailsDao;
 import com.cloud.template.VirtualMachineTemplate;
 import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.component.PluggableService;
@@ -74,6 +75,11 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     @Inject
     private NicDao _nicDao;
 
+    // Template details are not populated by EntityManager.findById (the VO it
+    // hands back carries no details) -- read them through the details dao.
+    @Inject
+    private VMTemplateDetailsDao _templateDetailsDao;
+
     @Inject
     private UserVmManager userVmManager;
 
@@ -83,6 +89,18 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // Created when the sweep is scheduled at start() and shut down in
     // stop(); null when the interval is configured to 0 (sweeping off).
     private ScheduledExecutorService credentialsCleanupExecutor;
+
+    // Static holder for the report command: APIAuthenticationManagerImpl
+    // constructs ReportProvisioningResultCmd with newInstance() and injects
+    // it from a context that cannot resolve com.dbaas.DbaasManager, so the
+    // command reads the running manager from here instead. start() publishes
+    // this and stop() clears it; a null holder means the plugin is down and
+    // the command must answer with a real error instead of an empty 200.
+    private static volatile DbaasManager s_runningManager;
+
+    public static DbaasManager getRunningManager() {
+        return s_runningManager;
+    }
 
     // A credential is 'pending' from the moment it is generated until the
     // instance reports back through reportDbaasProvisioningResult that it
@@ -114,6 +132,20 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "Advanced", Integer.class, "dbaas.report.rate.limit", "60",
             "Maximum reportDbaasProvisioningResult calls accepted per source IP per minute. The endpoint is"
                     + " unauthenticated, so this bounds request flooding; 0 disables the limit.", true);
+
+    // Data-disk cleanup is opt-in: deleting tenant data without a human saying
+    // so was rejected once already (PLAN.md Phase A) and stays rejected as a
+    // default. When true, the sweeper marks removed the DATADISK volumes that
+    // carry the dbaas.instance marker, are unattached, belong to expunged
+    // instances, and are older than the grace period below.
+    public static final ConfigKey<Boolean> DbaasDataDiskCleanupEnabled = new ConfigKey<>(
+            "Advanced", Boolean.class, "dbaas.datadisk.cleanup.enabled", "false",
+            "When true, the sweeper marks removed the unattached data disks marked dbaas.instance whose"
+                    + " instance is expunged and that are older than 24 hours. Default false -- deletion of"
+                    + " tenant data must be switched on by an admin.", true);
+
+    // Grace period before the opt-in sweeper may remove an orphaned data disk.
+    private static final long DATA_DISK_GRACE_SECONDS = 24 * 3600;
 
     private static final int REPORT_TOKEN_BYTES = 32;
 
@@ -257,9 +289,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     @Override
     public boolean start() {
+        s_runningManager = this;
         ensureCredentialsTableExists();
         cleanupOrphanedCredentials();
-        reportOrphanedDataDisks();
+        cleanupOrphanedDataDisks();
         scheduleCredentialsCleanup();
         return true;
     }
@@ -269,6 +302,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         if (credentialsCleanupExecutor != null) {
             credentialsCleanupExecutor.shutdown();
         }
+        s_runningManager = null;
         return true;
     }
 
@@ -286,7 +320,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         credentialsCleanupExecutor.scheduleWithFixedDelay(() -> {
             try {
                 cleanupOrphanedCredentials();
-                reportOrphanedDataDisks();
+                cleanupOrphanedDataDisks();
             } catch (Throwable t) {
                 // The sweeper must never bring its thread down: a failed sweep
                 // simply retries on the next interval.
@@ -341,6 +375,55 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             }
         } catch (Exception e) {
             logger.warn("orphaned data disk report failed", e);
+        }
+    }
+
+    // Opt-in data-disk cleanup (dbaas.datadisk.cleanup.enabled, default
+    // false): a DATADISK is marked removed only when EVERY condition holds --
+    // unattached, its instance is expunged or purged, it carries the
+    // dbaas.instance marker written at create time, and it is older than the
+    // grace period. A volume without the marker -- anything created before
+    // markers existed, DATA-73 included -- can never match. Only the database
+    // row is removed; the primary storage file is logged for the admin.
+    private void cleanupOrphanedDataDisks() {
+        if (!DbaasDataDiskCleanupEnabled.value()) {
+            reportOrphanedDataDisks();
+            return;
+        }
+        final String find = "SELECT v.id, v.uuid, v.name, COALESCE(v.size, 0) FROM volumes v"
+                + " JOIN volume_details vd ON vd.volume_id = v.id AND vd.name = 'dbaas.instance'"
+                + " LEFT JOIN vm_instance i ON i.uuid = vd.value"
+                + " WHERE v.volume_type = 'DATADISK' AND v.removed IS NULL"
+                + " AND (v.instance_id IS NULL OR v.instance_id = 0)"
+                + " AND (i.id IS NULL OR i.removed IS NOT NULL)"
+                + " AND v.created < DATE_SUB(NOW(), INTERVAL " + DATA_DISK_GRACE_SECONDS + " SECOND)";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            final List<long[]> candidates = new ArrayList<>();
+            final List<String> descriptions = new ArrayList<>();
+            long removed = 0;
+            try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    candidates.add(new long[] {rs.getLong(1), rs.getLong(4)});
+                    descriptions.add(rs.getString(3) + " (" + rs.getString(2) + ")");
+                }
+            }
+            for (int i = 0; i < candidates.size(); i++) {
+                try (PreparedStatement del = txn.prepareStatement("UPDATE volumes SET removed = NOW() WHERE id = ?")) {
+                    del.setLong(1, candidates.get(i)[0]);
+                    if (del.executeUpdate() > 0) {
+                        removed++;
+                        logger.warn("dbaas sweeper marked orphaned data disk {} ({} bytes) removed --"
+                                + " the primary storage file must still be reclaimed by an admin",
+                                descriptions.get(i), candidates.get(i)[1]);
+                    }
+                }
+            }
+            if (removed > 0) {
+                logger.warn("dbaas sweeper removed {} orphaned data disk(s) past the {}s grace period",
+                        removed, DATA_DISK_GRACE_SECONDS);
+            }
+        } catch (Exception e) {
+            logger.warn("orphaned data disk cleanup failed", e);
         }
     }
 
@@ -525,6 +608,31 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     + vm.getUuid() + " and start it: " + e.getMessage(), e);
         }
 
+        // Tag the data disks now that the first start has attached them: a
+        // volume requested with the deploy is not linked to the instance
+        // until that first attach, and an unlinked disk is invisible both to
+        // the destroy-time lookup and to the cleanup sweeper.
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(
+                    "INSERT INTO volume_details (volume_id, name, value, display)"
+                    + " SELECT v.id, 'dbaas.instance', ?, 1 FROM volumes v"
+                    + " WHERE v.instance_id = ? AND v.volume_type = 'DATADISK' AND v.removed IS NULL"
+                    + " AND NOT EXISTS (SELECT 1 FROM volume_details vd"
+                    + " WHERE vd.volume_id = v.id AND vd.name = 'dbaas.instance' AND vd.value = ?)")) {
+                pstmt.setString(1, vm.getUuid());
+                pstmt.setLong(2, cmd.getVirtualMachineId());
+                pstmt.setString(3, vm.getUuid());
+                final int tagged = pstmt.executeUpdate();
+                if (tagged > 0) {
+                    logger.info("marked {} data disk(s) of instance {} with dbaas.instance for cleanup tracking",
+                            tagged, vm.getUuid());
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("could not mark the data disks of {} with dbaas.instance -- cleanup falls back"
+                    + " to the UI lookup", vm.getUuid(), e);
+        }
+
         DbaasResponse response = new DbaasResponse();
         response.setEngine(engineName);
         // Read after the start: the pre-start VM's NIC can still have no
@@ -546,7 +654,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // marker: detail dbaas.configdrive=true, set at registration (see
     // TEMPLATES.md).
     private void requireConfigDriveTemplate(VirtualMachineTemplate template) {
-        Map<?, ?> details = template.getDetails();
+        Map<?, ?> details = _templateDetailsDao.listDetailsKeyPairs(template.getId());
         Object value = details == null ? null : details.get(CONFIGDRIVE_DETAIL_KEY);
         if (value == null || !"true".equalsIgnoreCase(String.valueOf(value).trim())) {
             throw new InvalidParameterValueException("template " + template.getName() + " does not declare"
@@ -895,6 +1003,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     @Override
     public ConfigKey<?>[] getConfigKeys() {
         return new ConfigKey<?>[] {DbaasConfigPath, DbaasCredentialsCleanupInterval,
-                DbaasReportTokenTtl, DbaasReportApiUrl, DbaasReportRateLimit};
+                DbaasReportTokenTtl, DbaasReportApiUrl, DbaasReportRateLimit, DbaasDataDiskCleanupEnabled};
     }
 }

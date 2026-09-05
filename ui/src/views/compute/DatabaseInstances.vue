@@ -275,13 +275,26 @@ export default {
     // silently until the allocator refuses new deploys with "No destination
     // found for a deployment". Collect the ids BEFORE the destroy runs: once
     // the instance is expunged the volume no longer names it.
-    fetchDataDiskIds (vmId) {
-      return getAPI('listVolumes', { virtualmachineid: vmId, type: 'DATADISK', listall: true })
+    // Collect the ids BEFORE the destroy runs: once the instance is expunged
+    // the volume no longer names it. Two lookups, merged: the classic
+    // virtualmachineid one (works when the disk was attached at least once)
+    // and the dbaas.instance tag written at createDatabase (works even for an
+    // instance that was destroyed before its first start, where the disk was
+    // never linked to the instance and the first lookup returns nothing).
+    fetchDataDiskIds (vmUuid, vmId) {
+      const byVm = getAPI('listVolumes', { virtualmachineid: vmId, type: 'DATADISK', listall: true })
         .then(json => (json.listvolumesresponse.volume || []).map(v => v.id))
         .catch(e => {
           console.warn('could not list data disks for', vmId, e)
           return []
         })
+      const byTag = getAPI('listVolumes', { 'tags[0].key': 'dbaas.instance', 'tags[0].value': vmUuid, type: 'DATADISK', listall: true })
+        .then(json => (json.listvolumesresponse.volume || []).map(v => v.id))
+        .catch(e => {
+          console.warn('could not list tagged data disks for', vmUuid, e)
+          return []
+        })
+      return Promise.all([byVm, byTag]).then(([byVmIds, byTagIds]) => [...new Set([...byVmIds, ...byTagIds])])
     },
     // Only ever called for an expunged instance. A destroyed-but-recoverable
     // one keeps its disks: recovering it and finding the data gone would be
@@ -299,7 +312,7 @@ export default {
       }
       // Resolved before the destroy call so the lookup still sees the
       // attachment; empty for a non-expunging destroy, which keeps its disks.
-      const dataDisks = expunge ? this.fetchDataDiskIds(record.id) : Promise.resolve([])
+      const dataDisks = expunge ? this.fetchDataDiskIds(record.uuid, record.id) : Promise.resolve([])
       return postAPI('destroyVirtualMachine', params).then(json => {
         const jobId = json.destroyvirtualmachineresponse?.jobid
         if (!jobId) {

@@ -1,0 +1,31 @@
+# Installed at /etc/systemd/network/99-dbaas-fallback.network in every dbaas-*
+# image.
+#
+# Why this exists: CloudStack only writes a populated
+# openstack/latest/network_data.json onto the config drive when ConfigDrive is
+# the *Dhcp or Dns provider* for the network (ConfigDriveBuilder
+# .needForGeneratingNetworkData / ConfigDriveNetworkElement
+# .getSupportedServicesByElementForNetwork). On a network where ConfigDrive
+# only provides UserData and the virtual router still does DHCP, that file is
+# written as an empty object, `{}`.
+#
+# cloud-init treats `{}` as a network configuration that happens to describe
+# no interfaces -- not as "no configuration given" -- so it renders a netplan
+# with no ethernets at all and never falls back to DHCP. The NIC then stays
+# down forever: no DHCP DISCOVER, no ARP, nothing on the wire. This cost one
+# acceptance run to find (dbaas-mariadb-accept2, 2026-09-05).
+#
+# systemd-networkd applies the first matching .network file in lexical order,
+# and netplan renders its own as /run/systemd/network/10-netplan-*.network.
+# So when the config drive *does* carry a real network configuration, netplan's
+# 10- file wins and this file is never consulted; when it carries `{}`, nothing
+# else matches and this brings the interface up over DHCP.
+[Match]
+Name=en*
+Type=ether
+
+[Network]
+DHCP=yes
+
+[DHCPv4]
+UseDomains=yes

@@ -202,7 +202,7 @@ export default {
     width: 80vw;
 
     @media (min-width: 600px) {
-      width: 450px;
+      width: 560px;
     }
   }
 
@@ -210,6 +210,32 @@ export default {
   // (.connect-command) break-all, since commands have no spaces to wrap on.
   .credentials {
     margin-top: 16px;
+
+    // a-descriptions renders a real <table> with automatic layout, so a long
+    // unbreakable value -- the connect command, which is one token with no
+    // spaces -- widens the table past the dialog instead of wrapping inside
+    // it, and the content spills over the modal's edge. Pin the layout, give
+    // the label column a fixed share, and let the value column break
+    // anywhere.
+    :deep(.ant-descriptions-view) {
+      width: 100%;
+    }
+
+    :deep(table) {
+      width: 100%;
+      table-layout: fixed;
+    }
+
+    :deep(.ant-descriptions-item-label) {
+      width: 34%;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+
+    :deep(.ant-descriptions-item-content) {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
   }
 
   .connect-command {

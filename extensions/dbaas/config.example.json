@@ -11,6 +11,21 @@
       "reset_script": "mysql_reset.sh",
       "port": 3306
     },
+    "dbaas-mariadb-v2": {
+      "script": "mariadb.sh",
+      "reset_script": "mariadb_reset.sh",
+      "port": 3306
+    },
+    "dbaas-postgresql-v2": {
+      "script": "postgresql.sh",
+      "reset_script": "postgresql_reset.sh",
+      "port": 5432
+    },
+    "dbaas-mongodb-v2": {
+      "script": "mongodb.sh",
+      "reset_script": "mongodb_reset.sh",
+      "port": 27017
+    },
     "dbaas-mariadb": {
       "script": "mariadb.sh",
       "reset_script": "mariadb_reset.sh",

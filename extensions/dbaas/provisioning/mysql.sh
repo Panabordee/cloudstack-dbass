@@ -47,7 +47,14 @@ SQL
 # right for one of them. No match means the build already listens on every
 # interface — Oracle's package ships no bind-address line at all — and there
 # is nothing to rewrite.
-CONF_FILE=$(grep -rls '^bind-address' /etc/mysql /etc/my.cnf /etc/my.cnf.d 2>/dev/null | head -1)
+#
+# `|| true` is load-bearing: grep exits 2 when any argument path does not
+# exist -- even when it matched in another one -- and only two of these three
+# paths exist on any given packaging. Under `set -e -o pipefail` that status
+# killed this script silently right here, after the database and user had
+# already been created, with the error suppressed by 2>/dev/null: a database
+# that existed and worked, reported as a failure with an empty message.
+CONF_FILE=$(grep -rls '^bind-address' /etc/mysql /etc/my.cnf /etc/my.cnf.d 2>/dev/null | head -1 || true)
 if [[ -n "$CONF_FILE" ]]; then
   CURRENT_BIND=$(grep '^bind-address' "$CONF_FILE" | head -1)
   if [[ "$CURRENT_BIND" != *"0.0.0.0"* ]]; then
