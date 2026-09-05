@@ -1,11 +1,14 @@
 package com.dbaas;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.servlet.http.HttpServletRequest;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 
@@ -41,6 +44,8 @@ import com.cloud.api.response.ApiResponseSerializer;
         requestHasSensitiveInfo = true,
         responseHasSensitiveInfo = false)
 public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthenticator {
+
+    private static final Logger S_LOGGER = LogManager.getLogger(ReportProvisioningResultCmd.class);
 
     // The manager is NOT injected: APIAuthenticationManagerImpl constructs
     // this command with newInstance() and runs ComponentContext.inject() on
@@ -112,9 +117,8 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
         if (rateLimited(remoteAddress, limitPerMinute)) {
             logger.warn("reportDbaasProvisioningResult rate limited for {} (>{} calls/minute)",
                     remoteAddress, limitPerMinute);
-            // 429 SC_TOO_MANY_REQUESTS: the servlet-api this compiles against
-            // predates the constant, so the literal is used.
-            return serialize(resp, 429, false, responseType);
+            sendErrorQuietly(resp, 429, "report rate limited");
+            return "";
         }
 
         String vmUuid = param(params, "vmid");
@@ -126,7 +130,8 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
         if (manager == null) {
             logger.error("reportDbaasProvisioningResult: the DBaaS manager is not running --"
                     + " the report is NOT processed and the token is not consumed");
-            return serialize(resp, HttpServletResponse.SC_SERVICE_UNAVAILABLE, false, responseType);
+            sendErrorQuietly(resp, HttpServletResponse.SC_SERVICE_UNAVAILABLE, "DBaaS manager not running");
+            return "";
         }
 
         boolean validStatus = STATUS_CONFIRMED.equals(status) || STATUS_FAILED.equals(status);
@@ -135,8 +140,28 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
 
         auditTrailSb.append("command=").append(command).append(" accepted=").append(accepted);
 
-        return serialize(resp, accepted ? HttpServletResponse.SC_OK : HttpServletResponse.SC_FORBIDDEN, accepted,
-                responseType);
+        if (!accepted) {
+            // Generic on the wire: every rejection reason looks identical.
+            // sendError commits the response, so the servlet's own write
+            // afterwards is a no-op (its IllegalStateException is swallowed) --
+            // this is how the 403 survives instead of being reset to 200.
+            logger.warn("reportDbaasProvisioningResult rejected for VM {}: invalid request or no matching"
+                    + " pending token", vmUuid);
+            sendErrorQuietly(resp, HttpServletResponse.SC_FORBIDDEN, "provisioning report rejected");
+            return "";
+        }
+
+        return serialize(resp, HttpServletResponse.SC_OK, true, responseType);
+    }
+
+    // sendError throws IOException (checked): swallow it here -- a failure to
+    // write an error page must not mask the status code that was already set.
+    private static void sendErrorQuietly(HttpServletResponse resp, int status, String message) {
+        try {
+            resp.sendError(status, message);
+        } catch (IOException e) {
+            S_LOGGER.warn("could not write the {} error response: {}", status, e.getMessage());
+        }
     }
 
     private static String serialize(HttpServletResponse resp, int status, boolean success, String responseType) {

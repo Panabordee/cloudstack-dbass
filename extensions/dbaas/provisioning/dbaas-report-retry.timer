@@ -1,0 +1,17 @@
+[Unit]
+Description=DBaaS: retry the provisioning report until it lands
+Documentation=file:///opt/dbaas/report-retry.sh
+
+[Timer]
+# First attempt a minute after boot, then every two minutes. The unit
+# disables itself as soon as the report is accepted (or as soon as there is
+# nothing pending), so this is not a permanent background task -- it exists
+# only for the window between "database is ready" and "management server
+# knows it".
+OnBootSec=60
+OnUnitActiveSec=120
+AccuracySec=10
+Unit=dbaas-report-retry.service
+
+[Install]
+WantedBy=timers.target
