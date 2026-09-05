@@ -14,6 +14,9 @@ import java.util.stream.Collectors;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
 
@@ -23,6 +26,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import com.cloud.utils.concurrency.NamedThreadFactory;
 import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
 
@@ -47,6 +51,14 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "/usr/share/cloudstack-management/extensions/dbaas/extension.py",
             "Filesystem path to the DBaaS extension.py entrypoint.", true);
 
+    public static final ConfigKey<Integer> DbaasCredentialsCleanupInterval = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.credentials.cleanup.interval", "3600",
+            // Seconds between orphaned-credential sweeps: rows whose instance
+            // has been expunged (removed from vm_instance) are deleted, and
+            // orphaned DATADISK volumes are counted and logged for the admin.
+            "Interval in seconds between sweeps that delete stored credentials"
+                    + " of expunged instances and report orphaned data disks.", true);
+
     public static final ConfigKey<Integer> DbaasProvisionTimeout = new ConfigKey<>(
             "Advanced", Integer.class, "dbaas.provision.timeout", "600",
             // 600s: the extension retries transient SSH failures internally
@@ -63,6 +75,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     @Inject
     private NicDao _nicDao;
+
+    // Created when the sweep is scheduled at start() and shut down in
+    // stop(); null when the interval is configured to 0 (sweeping off).
+    private ScheduledExecutorService credentialsCleanupExecutor;
 
     /**
      * Runs one extension.py action against a VM and hands back the connection
@@ -130,7 +146,90 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     @Override
     public boolean start() {
         ensureCredentialsTableExists();
+        cleanupOrphanedCredentials();
+        reportOrphanedDataDisks();
+        scheduleCredentialsCleanup();
         return true;
+    }
+
+    @Override
+    public boolean stop() {
+        if (credentialsCleanupExecutor != null) {
+            credentialsCleanupExecutor.shutdown();
+        }
+        return true;
+    }
+
+    // The interval is configurable (dbaas.credentials.cleanup.interval, in
+    // seconds); the executor is created per start and shut down on stop, the
+    // same lifecycle StorageManagerImpl uses for its scavenger.
+    private void scheduleCredentialsCleanup() {
+        final long intervalSeconds = DbaasCredentialsCleanupInterval.value();
+        if (intervalSeconds <= 0) {
+            logger.info("dbaas.credentials.cleanup.interval is {} -- credential sweeping disabled", intervalSeconds);
+            return;
+        }
+        credentialsCleanupExecutor = Executors.newSingleThreadScheduledExecutor(
+                new NamedThreadFactory("Dbaas-Credentials-Cleanup"));
+        credentialsCleanupExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                cleanupOrphanedCredentials();
+                reportOrphanedDataDisks();
+            } catch (Throwable t) {
+                // The sweeper must never bring its thread down: a failed sweep
+                // simply retries on the next interval.
+                logger.warn("credentials cleanup sweep failed", t);
+            }
+        }, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+        logger.info("credentials cleanup sweep scheduled every {} s", intervalSeconds);
+    }
+
+    // Deletes stored credentials whose instance has been expunged: the row is
+    // keyed on the instance uuid and vm_instance rows that were expunged carry
+    // a removal timestamp, while rows for live, destroyed (recoverable) or
+    // missing-from-vm_instance edge cases are handled by the join criterion.
+    // Never throws: a failed sweep is logged and retried on the next interval.
+    private void cleanupOrphanedCredentials() {
+        final String sql = "DELETE c FROM dbaas_credentials c "
+                + "LEFT JOIN vm_instance v ON v.uuid = c.vm_id "
+                + "WHERE v.id IS NULL OR v.removed IS NOT NULL";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                final int deleted = pstmt.executeUpdate();
+                if (deleted > 0) {
+                    logger.info("credentials cleanup sweep deleted {} row(s) for expunged instances", deleted);
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("credentials cleanup sweep failed", e);
+        }
+    }
+
+    // Log-only on purpose: orphaned DATADISK volumes hold tenant data that
+    // cannot be recovered once deleted, and no human confirmed the removal --
+    // the sweeper only reports the count and total size so an admin can act.
+    private void reportOrphanedDataDisks() {
+        // Same orphan criterion as the credential sweep, restricted to data
+        // disks that are still attached to something that was expunged.
+        final String sql = "SELECT COUNT(*), COALESCE(SUM(v.size), 0) FROM volumes v "
+                + "LEFT JOIN vm_instance i ON i.id = v.instance_id "
+                + "WHERE v.volume_type = 'DATADISK' AND v.removed IS NULL "
+                + "AND v.instance_id IS NOT NULL AND v.instance_id > 0 "
+                + "AND (i.id IS NULL OR i.removed IS NOT NULL)";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    final long count = rs.getLong(1);
+                    final long totalSize = rs.getLong(2);
+                    if (count > 0) {
+                        logger.warn("found {} orphaned DATADISK volume(s) ({} bytes total) belonging to "
+                                + "expunged instances -- admin decision required before deleting them", count, totalSize);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("orphaned data disk report failed", e);
+        }
     }
 
     static final String SCHEMA_RESOURCE = "db/schema-dbaas-credentials.sql";
@@ -433,6 +532,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     @Override
     public ConfigKey<?>[] getConfigKeys() {
-        return new ConfigKey<?>[] {DbaasExtensionPath, DbaasProvisionTimeout};
+        return new ConfigKey<?>[] {DbaasExtensionPath, DbaasProvisionTimeout, DbaasCredentialsCleanupInterval};
     }
 }

@@ -59,21 +59,23 @@ defects.
       router/CreateMenu/AutogenView/api-index/plugins hooks, and the 42
       `en.json` keys
 - [x] Spike: is there a VM lifecycle hook that removes the need for the UI to
-      clean up credentials and data disks itself? **Yes.**
-      `UserVmManagerImpl.publishVmLifecycleMessageBus()` publishes every state
-      transition on the MessageBus under
-      `VirtualMachineManager.Topics.VM_LIFECYCLE_STATE`, carrying
-      `INSTANCE_ID`, `ACCOUNT_ID`, `OLD_STATE` and `NEW_STATE`. A plugin can
-      subscribe with `_messageBus.subscribe(VM_LIFECYCLE_STATE, ...)` — the
-      pattern several bundled plugins already use. v1's claim that the
-      Extensions Framework exposes no lifecycle event was about the extensions
-      framework specifically; the message bus was always there.
-- [ ] Use it: subscribe to `VM_LIFECYCLE_STATE`, and on a transition into
-      `Expunging` delete that instance's credential rows and its data disks
-      server-side. Removes the UI's `deleteDbaasCredentials` /
-      `deleteDataDisks` calls, and covers instances destroyed from anywhere —
-      the generic Instances page, the API, or the expunge worker — which the
-      UI path never did.
+      clean up credentials and data disks itself? **Not a usable one.**
+      `VirtualMachineManager.Topics.VM_LIFECYCLE_STATE` exists and plugins do
+      subscribe to it (`DnsProviderManagerImpl.configure()`), but 4.23 only
+      publishes on it from two call sites in `UserVmManagerImpl`: `Destroyed`
+      (:3767) and `Running` (:5560). Expunge sets the state without
+      publishing, so a subscriber waiting for `Expunging` never fires, and
+      acting on `Destroyed` would delete the credentials and data disks of an
+      instance the tenant can still recover. Superseded by the sweeper below.
+- [x] Credential/data-disk cleanup after expunge. Corrected premise: 4.23's
+      `publishVmLifecycleMessageBus` only publishes **Destroyed** and
+      **Running** (2 call sites) — no Expunging publish exists, and deleting
+      on Destroyed would wipe credentials of recoverable instances. Instead:
+      a sweeper in `DbaasManagerImpl` (interval `dbaas.credentials.cleanup.interval`,
+      default 3600s) deletes credential rows of expunged instances with the
+      documented join and **logs** orphaned DATADISK volumes (count + size,
+      no auto-delete — tenant data, no human confirmation = too risky). The
+      UI's expunge-time cleanup stays as the explicit path.
 
 ### Phase B — config-drive provisioning (new-instance flow)
 
