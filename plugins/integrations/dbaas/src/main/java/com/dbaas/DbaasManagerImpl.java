@@ -5,11 +5,13 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.SecureRandom;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.stream.Collectors;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,6 +29,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import com.cloud.utils.concurrency.NamedThreadFactory;
+import org.apache.cloudstack.api.BaseCmd;
 import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
 
@@ -41,6 +44,9 @@ import com.cloud.utils.exception.CloudRuntimeException;
 import com.cloud.utils.script.OutputInterpreter;
 import com.cloud.utils.script.Script;
 import com.cloud.vm.NicVO;
+import com.cloud.vm.UserVm;
+import com.cloud.vm.UserVmManager;
+import com.cloud.vm.UserVmService;
 import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.dao.NicDao;
 
@@ -76,9 +82,83 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     @Inject
     private NicDao _nicDao;
 
+    @Inject
+    private UserVmManager userVmManager;
+
+    @Inject
+    private UserVmService userVmService;
+
     // Created when the sweep is scheduled at start() and shut down in
     // stop(); null when the interval is configured to 0 (sweeping off).
     private ScheduledExecutorService credentialsCleanupExecutor;
+
+    // A credential is 'pending' from the moment it is generated until the
+    // instance confirms it configured the engine with it. The SSH path
+    // verifies the login itself before returning, so it stores 'confirmed'
+    // directly. 'failed' is written when an instance reports it could not
+    // apply the credential.
+    static final String STATUS_PENDING = "pending";
+    static final String STATUS_CONFIRMED = "confirmed";
+
+    // Alphanumeric only: the generated value travels through shell and SQL on
+    // the instance, and quoting bugs there are worse than the entropy lost by
+    // dropping symbols. 24 characters of [A-Za-z0-9] is ~143 bits.
+    private static final String PASSWORD_ALPHABET =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    private static final int PASSWORD_LENGTH = 24;
+    private static final SecureRandom RANDOM = new SecureRandom();
+
+    static String generatePassword() {
+        StringBuilder sb = new StringBuilder(PASSWORD_LENGTH);
+        for (int i = 0; i < PASSWORD_LENGTH; i++) {
+            sb.append(PASSWORD_ALPHABET.charAt(RANDOM.nextInt(PASSWORD_ALPHABET.length())));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * The provisioning request the instance reads at first boot. cloud-init
+     * writes the JSON document out and runs the engine's first-boot script
+     * against it; the script lives in the image, so nothing about which engine
+     * this is needs to be encoded here.
+     * <p>
+     * Base64 because that is what the user data API takes.
+     */
+    static String buildUserData(String dbName, String dbUsername, String dbPassword) {
+        JsonObject request = new JsonObject();
+        request.addProperty("db_name", dbName);
+        request.addProperty("db_user", dbUsername);
+        request.addProperty("db_password", dbPassword);
+
+        String cloudConfig = "#cloud-config\n"
+                + "write_files:\n"
+                + "  - path: /var/lib/dbaas/request.json\n"
+                + "    permissions: '0600'\n"
+                + "    owner: root:root\n"
+                + "    content: |\n"
+                + "      " + request.toString() + "\n"
+                + "runcmd:\n"
+                + "  - [ /opt/dbaas/firstboot.sh ]\n";
+        return Base64.getEncoder().encodeToString(cloudConfig.getBytes(StandardCharsets.UTF_8));
+    }
+
+    // The instance's first IPv4 address, or null while it has none yet (a
+    // stopped instance that has never started has no NIC address).
+    private String primaryIpAddress(VirtualMachine vm) {
+        if (vm == null) {
+            return null;
+        }
+        for (NicVO nic : _nicDao.listByVmIdOrderByDeviceId(vm.getId())) {
+            if (nic.getIPv4Address() != null) {
+                return nic.getIPv4Address();
+            }
+        }
+        return null;
+    }
+
+    private Integer enginePort(JsonObject engineConfig) {
+        return engineConfig != null && engineConfig.has("port") ? engineConfig.get("port").getAsInt() : null;
+    }
 
     /**
      * Runs one extension.py action against a VM and hands back the connection
@@ -303,6 +383,111 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     @Override
     public DbaasResponse createDatabase(CreateDatabaseCmd cmd) {
+        if (PROVISION_MODE_CONFIG_DRIVE.equals(provisionModeForVm(cmd.getVirtualMachineId()))) {
+            return createDatabaseViaConfigDrive(cmd);
+        }
+        return createDatabaseOverSsh(cmd);
+    }
+
+    // The engine entry for the template this instance was deployed from, or
+    // null when config.json does not know it (the SSH path reports that as a
+    // failure with the list of known engines, so this stays quiet).
+    private JsonObject engineConfigForVm(Long vmId) {
+        try {
+            VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
+            if (vm == null) {
+                return null;
+            }
+            VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
+            if (template == null) {
+                return null;
+            }
+            JsonObject engines = readEnginesConfig().getAsJsonObject("engines");
+            JsonElement entry = engines.get(template.getName());
+            return entry == null ? null : entry.getAsJsonObject();
+        } catch (Exception e) {
+            logger.warn("could not resolve the engine config for VM {}", vmId, e);
+            return null;
+        }
+    }
+
+    private String provisionModeForVm(Long vmId) {
+        return provisionMode(engineConfigForVm(vmId));
+    }
+
+    /**
+     * Config-drive provisioning: the management server writes the request onto
+     * the instance's config drive and starts it, and the instance configures
+     * its own engine at first boot. Nothing here connects to the instance, so
+     * it works on networks the management server has no route to, and with the
+     * virtual router down.
+     * <p>
+     * The credential is stored before the instance starts, so Show Password
+     * has something to show immediately; it stays 'pending' until the instance
+     * reports back that its engine really was configured.
+     */
+    private DbaasResponse createDatabaseViaConfigDrive(CreateDatabaseCmd cmd) {
+        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, cmd.getVirtualMachineId());
+        if (vm == null) {
+            throw new InvalidParameterValueException("VM not found: " + cmd.getVirtualMachineId());
+        }
+        // User data is only picked up when the instance boots, so it has to be
+        // attached while the instance is still stopped. The wizard deploys
+        // with startvm=false for exactly this reason.
+        if (vm.getState() != VirtualMachine.State.Stopped) {
+            throw new InvalidParameterValueException("this engine provisions from its config drive, which is only"
+                    + " read at boot: the instance must be stopped when the database is created, but it is "
+                    + vm.getState() + ". Deploy with startvm=false, or use an instance that is stopped.");
+        }
+        VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
+        String engineName = template != null ? template.getName() : null;
+
+        String dbUsername = cmd.getDbUsername();
+        if (dbUsername == null || dbUsername.trim().isEmpty()) {
+            dbUsername = cmd.getDbName();
+        }
+        String dbPassword = generatePassword();
+
+        String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword);
+        try {
+            userVmManager.updateVirtualMachine(vm.getId(), null, null, null, null, null, null,
+                    userData, null, null, null, BaseCmd.HTTPMethod.POST, null, null, null, null, null);
+        } catch (Exception e) {
+            throw new CloudRuntimeException("failed to attach the provisioning request to instance "
+                    + vm.getUuid() + ": " + e.getMessage(), e);
+        }
+
+        // Stored before the start, not after: a start that fails leaves an
+        // instance the tenant can start themselves, and the credential it will
+        // provision with must already be recoverable when they do.
+        storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING);
+
+        // Looked up as a UserVm rather than cast: the entity manager hands back
+        // whatever VO backs the row, and a cast would only fail at runtime.
+        UserVm userVm = _entityMgr.findById(UserVm.class, cmd.getVirtualMachineId());
+        if (userVm == null) {
+            throw new CloudRuntimeException("instance " + vm.getUuid()
+                    + " carries the provisioning request but is not a user instance, so it cannot be started here");
+        }
+        try {
+            userVmService.startVirtualMachine(userVm, null);
+        } catch (Exception e) {
+            throw new CloudRuntimeException("the provisioning request was attached to instance " + vm.getUuid()
+                    + " but it could not be started: " + e.getMessage(), e);
+        }
+
+        DbaasResponse response = new DbaasResponse();
+        response.setEngine(engineName);
+        response.setHost(primaryIpAddress(vm));
+        response.setPort(enginePort(engineConfigForVm(cmd.getVirtualMachineId())));
+        response.setDatabase(cmd.getDbName());
+        response.setUsername(dbUsername);
+        response.setPassword(dbPassword);
+        response.setObjectName("dbaas");
+        return response;
+    }
+
+    private DbaasResponse createDatabaseOverSsh(CreateDatabaseCmd cmd) {
         JsonObject parameters = new JsonObject();
         parameters.addProperty("db_name", cmd.getDbName());
         // The username is optional: the form banner advertises that an empty
@@ -441,13 +626,19 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // instance login password is intentionally not stored here; it is shown
     // exactly once on the creation screen / notification.
     private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine) {
-        String sql = "INSERT INTO dbaas_credentials (vm_id, db_username, db_password_encrypted, engine) VALUES (?, ?, ?, ?)";
+        storeCredential(vmId, dbUsername, dbPassword, engine, STATUS_CONFIRMED);
+    }
+
+    private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status) {
+        String sql = "INSERT INTO dbaas_credentials (vm_id, db_username, db_password_encrypted, engine, status)"
+                + " VALUES (?, ?, ?, ?, ?)";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.setString(1, vmId);
             pstmt.setString(2, dbUsername);
             pstmt.setString(3, DBEncryptionUtil.encrypt(dbPassword));
             pstmt.setString(4, engine);
+            pstmt.setString(5, status);
             pstmt.executeUpdate();
         } catch (Exception e) {
             // The provisioning call already succeeded and the tenant already
