@@ -303,7 +303,12 @@ export default {
         message: this.$t('message.error.database.identifier')
       }
       const required = { required: true, message: this.$t('message.error.required.input') }
+      // Kept on the instance: fetchNetworks() adds or drops the network rule
+      // as the selected zone changes (advanced zones need one, basic zones
+      // reject the parameter outright).
+      this.requiredRule = required
       this.rules = reactive({
+        networkid: [],
         engine: [required],
         zoneid: [required],
         serviceofferingid: [required],
@@ -378,11 +383,23 @@ export default {
       this.form.networkid = undefined
       if (!this.needsNetwork) {
         this.networks = []
+        // Basic zones take no networkids at all, so the field cannot be
+        // required there -- a rule left in place would block every submit.
+        this.rules.networkid = []
         return
       }
+      // Leaving this empty in an advanced zone does NOT mean "no network":
+      // deployVirtualMachine then creates the account's default isolated
+      // network and puts the instance behind its virtual router, where the
+      // management server has no route to it -- provisioning fails with an
+      // opaque SSH "timed out" after the instance is already running.
+      this.rules.networkid = [this.requiredRule]
       this.networkLoading = true
       getAPI('listNetworks', { zoneid: this.form.zoneid }).then(json => {
         this.networks = json.listnetworksresponse.network || []
+        if (this.networks.length === 1) {
+          this.form.networkid = this.networks[0].id
+        }
       }).catch(error => {
         this.$notifyError(error)
       }).finally(() => {

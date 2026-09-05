@@ -263,9 +263,39 @@ export default {
             ? h(Checkbox, {
               onChange: e => { expungeRef.value = e.target.checked }
             }, { default: () => this.$t('label.expunge') })
+            : null,
+          // Expunging also drops the instance's data disks, which is the only
+          // way they ever get cleaned up -- say so before it happens.
+          this.canExpunge
+            ? h('p', { style: { marginTop: '8px', color: 'rgba(0, 0, 0, 0.45)' } },
+              this.$t('message.dbaas.expunge.datadisks'))
             : null
         ]),
         onOk: () => this.destroyInstance(record, expungeRef.value)
+      })
+    },
+    // Data disks survive their instance: CloudStack detaches them on expunge
+    // and leaves them Ready but unattached, where they keep holding their full
+    // allocation against the primary storage pool. Nothing in the UI shows
+    // them (the Database page lists instances, not volumes), so they pile up
+    // silently until the allocator refuses new deploys with "No destination
+    // found for a deployment". Collect the ids BEFORE the destroy runs: once
+    // the instance is expunged the volume no longer names it.
+    fetchDataDiskIds (vmId) {
+      return getAPI('listVolumes', { virtualmachineid: vmId, type: 'DATADISK', listall: true })
+        .then(json => (json.listvolumesresponse.volume || []).map(v => v.id))
+        .catch(e => {
+          console.warn('could not list data disks for', vmId, e)
+          return []
+        })
+    },
+    // Only ever called for an expunged instance. A destroyed-but-recoverable
+    // one keeps its disks: recovering it and finding the data gone would be
+    // worse than the leak this cleans up.
+    deleteDataDisks (volumeIds) {
+      volumeIds.forEach(id => {
+        postAPI('deleteVolume', { id })
+          .catch(e => console.warn('deleteVolume failed for', id, e))
       })
     },
     destroyInstance (record, expunge) {
@@ -273,6 +303,9 @@ export default {
       if (expunge) {
         params.expunge = true
       }
+      // Resolved before the destroy call so the lookup still sees the
+      // attachment; empty for a non-expunging destroy, which keeps its disks.
+      const dataDisks = expunge ? this.fetchDataDiskIds(record.id) : Promise.resolve([])
       return postAPI('destroyVirtualMachine', params).then(json => {
         const jobId = json.destroyvirtualmachineresponse?.jobid
         if (!jobId) {
@@ -291,6 +324,7 @@ export default {
           successMethod: () => {
             postAPI('deleteDbaasCredentials', { virtualmachineid: record.id })
               .catch(e => console.warn('deleteDbaasCredentials failed for', record.id, e))
+            dataDisks.then(ids => this.deleteDataDisks(ids))
             this.fetchData()
           },
           errorMethod: () => this.fetchData(),

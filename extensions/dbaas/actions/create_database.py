@@ -90,6 +90,29 @@ def provisioning_time_budget(config):
     return max(BUDGET_FLOOR_SECONDS, min(budget, BUDGET_CEILING_SECONDS))
 
 
+def _failure_message(error, vm_ip):
+    """Turns a provisioning exception into something a tenant can act on.
+
+    A database that failed because the management server cannot reach the
+    instance reads as "timed out" or "Unable to connect to port 22" -- true,
+    but it looks like the instance is broken when the instance is fine and
+    the path to it is not (an instance deployed onto a network the management
+    server has no route to is the usual cause). Say which one it is, and say
+    that the instance is still usable, because nothing else in the flow tells
+    the user that the database can simply be created again later.
+    """
+    message = str(error)
+    if any(t in message for t in TRANSIENT_CONNECT_ERRORS):
+        return (
+            f"the management server could not reach the instance at {vm_ip}:22 "
+            f"({message}). The instance itself is running and was not deleted, "
+            f"but its database was not created: check that its network is "
+            f"reachable from the management server, then run Create Database "
+            f"on the instance again."
+        )
+    return f"provisioning failed: {message}"
+
+
 def run(payload, config):
     vm_id = payload.get("virtualmachineid")
     if not vm_id:
@@ -147,10 +170,10 @@ def run(payload, config):
                 time.sleep(PROVISION_RETRY_SLEEP_SECONDS)
                 continue
             logging.exception("provisioning script failed")
-            return {"status": "failed", "message": f"provisioning failed: {e}"}
+            return {"status": "failed", "message": _failure_message(e, vm_ip)}
     if not provisioned:
         logging.exception("provisioning failed after %d attempts", PROVISION_ATTEMPTS)
-        return {"status": "failed", "message": f"provisioning failed: {last_error}"}
+        return {"status": "failed", "message": _failure_message(last_error, vm_ip)}
 
     # Best-effort tenant shell access, and deliberately gated: the login
     # password is only set when the caller asked for it (reset_vm_password,
