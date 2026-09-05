@@ -243,6 +243,8 @@ export default {
       keyPairs: [],
       keyPairLoading: false,
       credentials: {},
+      // template name -> 'configdrive' | 'ssh', from listDbaasEngines
+      provisionModes: {},
       dbPasswordCopied: false,
       vmPasswordCopied: false,
       failureMessage: '',
@@ -341,9 +343,16 @@ export default {
         getAPI('listDiskOfferings'),
         hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
       ]).then(([tpl, zone, off, diskOff, engines]) => {
+        const engineList = engines?.listdbaasenginesresponse?.dbaasengine || []
         const engineNames = engines
-          ? new Set((engines.listdbaasenginesresponse?.dbaasengine || []).map(e => e.template))
+          ? new Set(engineList.map(e => e.template))
           : null
+        // Which transport each engine provisions with. Absent on management
+        // servers running an older plugin, where every engine is ssh.
+        this.provisionModes = engineList.reduce((acc, e) => {
+          acc[e.template] = e.provisionmode || 'ssh'
+          return acc
+        }, {})
         this.templates = (tpl.listtemplatesresponse.template || [])
           .filter(t => t.name && t.isready && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
           // Same label source DatabaseInstances uses: the template's own
@@ -378,6 +387,10 @@ export default {
       }).finally(() => {
         this.optionsLoading = false
       })
+    },
+    provisionModeFor (templateId) {
+      const template = this.templates.find(t => t.id === templateId)
+      return template ? (this.provisionModes[template.name] || 'ssh') : 'ssh'
     },
     fetchNetworks () {
       this.form.networkid = undefined
@@ -462,6 +475,13 @@ export default {
         // selected zone actually needs one.
         if (this.needsNetwork && values.networkid) {
           params.networkids = values.networkid
+        }
+        // A config-drive engine reads its provisioning request from the
+        // config drive at boot, so the request has to be attached before the
+        // instance ever starts: deploy it stopped and let createDatabase
+        // start it once the request is in place.
+        if (this.provisionModeFor(values.engine) === 'configdrive') {
+          params.startvm = false
         }
         this.step = 'deploying'
         // ignoreCancelToken: leaving mid-deploy must not abort the deploy

@@ -79,13 +79,20 @@ defects.
 
 ### Phase B — config-drive provisioning (new-instance flow)
 
-- [ ] Per-engine first-boot script baked into the template: read the config
-      drive, configure the engine, report the result
-- [ ] `provision_mode` (`configdrive` | `ssh`) per engine in `config.json`,
+- [x] First-boot script baked into the template
+      (`extensions/dbaas/provisioning/firstboot.sh`): reads the request cloud-init
+      wrote from the config drive and pipes it into the engine script the image
+      already ships, so the engine SQL has one implementation, not two. Which
+      engine an image is comes from `/opt/dbaas/engine`, written at build time,
+      so a template can never be asked to provision an engine it lacks.
+      Reporting the result back is Phase C; for now it lands in
+      `/var/lib/dbaas/result.json`.
+- [x] `provision_mode` (`configdrive` | `ssh`) per engine in `config.json`,
       exposed through `listDbaasEngines` as `provisionmode`
-- [ ] `createDatabase`: build the user data document, attach it to the stopped
-      instance, store the credential, start the instance, return immediately
-- [ ] Wizard deploys with `startvm=false` when the engine reports `configdrive`
+- [x] `createDatabase`: build the user data document, attach it to the stopped
+      instance, store the credential (`pending`), start the instance, return
+      immediately
+- [x] Wizard deploys with `startvm=false` when the engine reports `configdrive`
 - [ ] Template rebuild: mysql first, `passwordenabled=true`
 - [ ] Acceptance: deploy onto a network the management server cannot reach,
       with the VR down, and still get a working database and a visible password
