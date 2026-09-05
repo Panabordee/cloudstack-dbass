@@ -90,7 +90,12 @@ export const pollJobPlugin = {
       })
 
       options.originalPage = options.originalPage || this.$router.currentRoute.value.path
-      getAPI('queryAsyncJobResult', { jobId }).then(json => {
+      // A caller that must survive navigation (e.g. the DBaaS provisioning
+      // flow, whose dialog may be closed while the job runs) passes
+      // ignoreCancelToken: route changes cancel the shared source app-wide,
+      // and a cancelled poll below would otherwise silently stop polling.
+      const pollOptions = options.ignoreCancelToken ? { ignoreCancelToken: true } : {}
+      getAPI('queryAsyncJobResult', { jobId }, pollOptions).then(json => {
         const result = json.queryasyncjobresultresponse
         eventBus.emit('update-job-details', { jobId, resourceId })
         if (result.jobstatus === 1) {

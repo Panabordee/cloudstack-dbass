@@ -1,0 +1,25 @@
+{
+  "_comment_engines": "Template name -> provisioning scripts + port. Add a new engine here and drop its scripts into every dbaas-* image's /opt/dbaas/ (see TEMPLATES.md) -- never hardcode this mapping in the Java source. 'script' is invoked by firstboot.sh INSIDE the instance, reading the request from the config drive; 'reset_script' is not called by anything yet (resetting a database password needs the in-VM agent, PLAN.md Phase D) but is kept here so that agent can reuse it without a config change.",
+  "engines": {
+    "dbaas-mysql": {
+      "script": "mysql.sh",
+      "reset_script": "mysql_reset.sh",
+      "port": 3306
+    },
+    "dbaas-mariadb": {
+      "script": "mariadb.sh",
+      "reset_script": "mariadb_reset.sh",
+      "port": 3306
+    },
+    "dbaas-postgresql": {
+      "script": "postgresql.sh",
+      "reset_script": "postgresql_reset.sh",
+      "port": 5432
+    },
+    "dbaas-mongodb": {
+      "script": "mongodb.sh",
+      "reset_script": "mongodb_reset.sh",
+      "port": 27017
+    }
+  }
+}
