@@ -22,6 +22,7 @@ import { getAPI, postAPI, getBaseUrl } from '@/api'
 import { getLatestKubernetesIsoParams } from '@/utils/acsrepo'
 import kubernetesIcon from '@/assets/icons/kubernetes.svg?inline'
 import { escapeHtml } from '@/utils/util'
+import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 const attachedIsoCount = (record) => (record.isos && record.isos.length) || (record.isoid ? 1 : 0)
 // Server pre-computes the effective cap (cluster-scoped vm.iso.max.count clamped to the
@@ -44,6 +45,11 @@ export default {
       docHelp: 'adminguide/virtual_machines.html',
       permission: ['listVirtualMachinesMetrics'],
       resourceType: 'UserVm',
+      // DBaaS instances live in their own Database section; keeping them out
+      // of the generic Instances list here (client-side filter in
+      // AutogenView). Server-side pagination is unaffected, so a page can
+      // show slightly fewer rows than the page size when one is filtered.
+      excludeTemplatePrefix: DBAAS_TEMPLATE_PREFIX,
       params: () => {
         var params = { details: 'group,nics,secgrp,tmpl,servoff,diskoff,iso,volume,affgrp,backoff' }
         if (store.getters.metrics) {
@@ -425,6 +431,47 @@ export default {
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetUserData')))
         },
         {
+          api: 'createDatabase',
+          icon: 'database-outlined',
+          label: 'label.create.database',
+          message: 'message.desc.create.database',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running'].includes(record.state) &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabase.vue')))
+        },
+        {
+          api: 'resetDatabasePassword',
+          icon: 'key-outlined',
+          label: 'label.reset.database.password',
+          message: 'message.desc.reset.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running'].includes(record.state) &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
+        },
+        {
+          api: 'getDatabasePassword',
+          icon: 'eye-outlined',
+          label: 'label.show.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running', 'Stopped'].includes(record.state) &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ShowDatabasePassword.vue')))
+        },
+        {
           api: 'assignVirtualMachine',
           icon: 'user-add-outlined',
           label: 'label.assign.instance.another',
@@ -492,6 +539,27 @@ export default {
           groupMap: (selection, values) => { return selection.map(x => { return { id: x, expunge: values.expunge } }) },
           show: (record) => { return ['Running', 'Stopped', 'Error'].includes(record.state) && record.vmtype !== 'sharedfsvm' },
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DestroyVM.vue')))
+        }
+      ]
+    },
+    {
+      name: 'database',
+      title: 'label.database',
+      icon: 'database-outlined',
+      // Gated purely on the createDatabase permission, not on any DBaaS
+      // template existing yet -- a user who can't call the API shouldn't see
+      // an empty page inviting them to try.
+      permission: ['createDatabase'],
+      component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DatabaseInstances.vue'))),
+      actions: [
+        {
+          api: 'createDatabase',
+          icon: 'plus-outlined',
+          label: 'label.create.database.instance',
+          listView: true,
+          popup: true,
+          show: isZoneCreated,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
         }
       ]
     },

@@ -64,6 +64,13 @@ export default {
         route: { path: '/action/deployVirtualMachine' }
       },
       {
+        api: 'createDatabase',
+        title: 'label.database',
+        subtitle: 'label.create.database.instance',
+        icon: 'database-outlined',
+        route: { path: '/action/createDatabase' }
+      },
+      {
         api: 'createKubernetesCluster',
         title: 'label.kubernetes',
         subtitle: 'label.kubernetes.cluster.create',

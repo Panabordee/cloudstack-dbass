@@ -37,7 +37,9 @@ const additionalGetAPICommandsList = [
   'verifyoauthcodeandgetuser'
 ]
 
-export function getAPI (command, args = {}) {
+// `options` is merged into the axios config, e.g. { ignoreCancelToken: true }
+// for calls that must keep running after the caller navigates away.
+export function getAPI (command, args = {}, options = {}) {
   args.command = command
   args.response = 'json'
 
@@ -51,11 +53,14 @@ export function getAPI (command, args = {}) {
       ...args
     },
     url: '/',
-    method: 'GET'
+    method: 'GET',
+    ...options
   })
 }
 
-export function postAPI (command, data = {}) {
+// `options` is merged into the axios config, e.g. { ignoreCancelToken: true }
+// for calls that must keep running after the caller navigates away.
+export function postAPI (command, data = {}, options = {}) {
   const params = new URLSearchParams()
   params.append('command', command)
   params.append('response', 'json')
@@ -74,7 +79,8 @@ export function postAPI (command, data = {}) {
   return axios({
     url: '/',
     method: 'POST',
-    data: params
+    data: params,
+    ...options
   })
 }
 
