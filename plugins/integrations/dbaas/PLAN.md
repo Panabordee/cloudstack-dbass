@@ -58,9 +58,22 @@ defects.
       `ShowDatabasePassword.vue`, `utils/dbaas.js`, the `compute.js` section,
       router/CreateMenu/AutogenView/api-index/plugins hooks, and the 42
       `en.json` keys
-- [ ] Spike (2–3 h): does 4.23's expanded Extensions Framework offer a VM
-      lifecycle hook that removes the need for the UI to clean up credentials
-      and data disks itself?
+- [x] Spike: is there a VM lifecycle hook that removes the need for the UI to
+      clean up credentials and data disks itself? **Yes.**
+      `UserVmManagerImpl.publishVmLifecycleMessageBus()` publishes every state
+      transition on the MessageBus under
+      `VirtualMachineManager.Topics.VM_LIFECYCLE_STATE`, carrying
+      `INSTANCE_ID`, `ACCOUNT_ID`, `OLD_STATE` and `NEW_STATE`. A plugin can
+      subscribe with `_messageBus.subscribe(VM_LIFECYCLE_STATE, ...)` — the
+      pattern several bundled plugins already use. v1's claim that the
+      Extensions Framework exposes no lifecycle event was about the extensions
+      framework specifically; the message bus was always there.
+- [ ] Use it: subscribe to `VM_LIFECYCLE_STATE`, and on a transition into
+      `Expunging` delete that instance's credential rows and its data disks
+      server-side. Removes the UI's `deleteDbaasCredentials` /
+      `deleteDataDisks` calls, and covers instances destroyed from anywhere —
+      the generic Instances page, the API, or the expunge worker — which the
+      UI path never did.
 
 ### Phase B — config-drive provisioning (new-instance flow)
 
@@ -122,8 +135,8 @@ the first NIC).
 - Deploying a database on an instance that already has one fails hard on
   "user already exists" — correct, but the UI could say so more clearly
 - `storeCredential` inserts a new row per create/reset; only the latest is read
-- Data disks are only cleaned up by the UI's destroy path (Phase A spike may
-  replace this with a lifecycle hook)
+- Data disks and credential rows are only cleaned up by the UI's destroy path;
+  the lifecycle-hook item in Phase A replaces it
 
 ## 5. Sequencing
 
