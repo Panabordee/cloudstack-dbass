@@ -143,7 +143,9 @@ def run(payload, config):
         logging.exception("failed to resolve VM IP")
         return {"status": "failed", "message": f"could not resolve VM IP: {e}"}
 
-    db_password = generate_password()
+    # The management server validates a caller-supplied password before it
+    # reaches here, so an empty value simply means "generate one".
+    db_password = extract_param(payload, "db_password") or generate_password()
 
     provisioned = False
     last_error = None

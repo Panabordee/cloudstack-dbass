@@ -43,6 +43,14 @@
             v-model:value="form.dbusername"
             :placeholder="apiParams.dbusername.description"/>
         </a-form-item>
+        <a-form-item name="dbpassword" ref="dbpassword">
+          <template #label>
+            <tooltip-label :title="$t('label.dbpassword')" :tooltip="$t('message.dbaas.password.optional')"/>
+          </template>
+          <a-input-password
+            v-model:value="form.dbpassword"
+            :placeholder="$t('message.dbaas.password.optional')"/>
+        </a-form-item>
         <a-form-item name="resetvmpassword">
           <a-checkbox v-model:checked="form.resetvmpassword">
             {{ $t('label.reset.vm.password') }}
@@ -158,7 +166,9 @@ export default {
       }
       this.rules = reactive({
         dbname: [{ required: true, message: this.$t('message.error.required.input') }, identifier],
-        dbusername: [{ required: true, message: this.$t('message.error.required.input') }, identifier]
+        dbusername: [{ required: true, message: this.$t('message.error.required.input') }, identifier],
+        // Optional: an empty field means the backend generates one.
+        dbpassword: [{ pattern: DBAAS_PASSWORD_PATTERN, message: this.$t('message.error.database.password') }]
       })
     },
     handleSubmit (e) {
@@ -170,6 +180,7 @@ export default {
           virtualmachineid: this.resource.id,
           dbname: values.dbname,
           dbusername: values.dbusername,
+          dbpassword: values.dbpassword,
           resetvmpassword: values.resetvmpassword ? true : undefined
         }).then(json => {
           const dbaas = json.createdatabaseresponse?.dbaas

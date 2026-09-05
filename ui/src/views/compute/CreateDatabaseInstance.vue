@@ -119,6 +119,11 @@
         <a-form-item name="dbusername" ref="dbusername" :label="$t('label.dbusername')">
           <a-input v-model:value="form.dbusername" :placeholder="form.dbname || $t('label.dbusername')" />
         </a-form-item>
+        <a-form-item name="dbpassword" ref="dbpassword" :label="$t('label.dbpassword')">
+          <a-input-password
+            v-model:value="form.dbpassword"
+            :placeholder="$t('message.dbaas.password.optional')" />
+        </a-form-item>
 
         <div :span="24" class="action-button">
           <a-button @click="closeAction">{{ $t('label.cancel') }}</a-button>
@@ -220,6 +225,7 @@ import {
   credentialNotification,
   DBAAS_TEMPLATE_PREFIX,
   DBAAS_IDENTIFIER_PATTERN,
+  DBAAS_PASSWORD_PATTERN,
   DBAAS_MIN_OFFERING,
   DBAAS_PROVISION_RETRIES,
   DBAAS_TRANSIENT_ERRORS
@@ -318,7 +324,9 @@ export default {
         // Optional: when left empty the backend defaults the user to the
         // database name (see the banner above the form). The identifier
         // pattern still applies to whatever is typed.
-        dbusername: [identifier]
+        dbusername: [identifier],
+        // Optional: an empty field means the backend generates one.
+        dbpassword: [{ pattern: DBAAS_PASSWORD_PATTERN, message: this.$t('message.error.database.password') }]
       })
     },
     fetchOptions () {
@@ -538,6 +546,7 @@ export default {
         virtualmachineid: vmId,
         dbname: values.dbname,
         dbusername: values.dbusername,
+        dbpassword: values.dbpassword,
         // This view only ever deploys a freshly created instance, so setting
         // the tenant login password here is safe; later createDatabase calls
         // on the same VM (Create Database action) must not rotate it.

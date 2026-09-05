@@ -4554,5 +4554,8 @@
   "message.warning.reset.vm.password": "This overwrites the current instance login password. Anyone using the existing password will be locked out until you share the new one shown here.",
   "message.confirm.close.database.dbpassword": "You haven't copied the database password yet. It can be recovered later via Show Password, but do you want to close this window now?",
   "message.dbaas.status.pending": "The credential below is the one this instance will use, but it has not confirmed yet that its database engine came up with it. If it never confirms, use the Create Database action to run provisioning again.",
-  "message.dbaas.status.failed": "The instance reported that it could not configure its database engine with this credential."
+  "message.dbaas.status.failed": "The instance reported that it could not configure its database engine with this credential.",
+  "label.dbpassword": "Database password (optional)",
+  "message.dbaas.password.optional": "Leave empty to have one generated. If you set one, use 8-64 characters: letters, digits, underscore, dot or hyphen.",
+  "message.error.database.password": "Must be 8-64 characters and contain only letters, digits, underscore, dot or hyphen. Leave empty to have one generated."
 }

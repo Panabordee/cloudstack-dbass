@@ -35,9 +35,12 @@ defects.
   it. With ConfigDrive as the password provider this works without the VR.
   Consequence: the tenant cannot choose their own VM password (no such API);
   they can reset it as often as they like.
-- **DB password may be chosen by the tenant**, generated when left empty. A
-  supplied password means `requestHasSensitiveInfo = true` on the command and
-  no string interpolation into SQL.
+- **DB password may be chosen by the tenant**, generated when left empty.
+  Implemented: `dbpassword` is optional on `createDatabase`, the command is
+  marked `requestHasSensitiveInfo = true`, and a supplied value must match
+  `[A-Za-z0-9_.-]{8,64}` — narrow on purpose, because the engine scripts still
+  interpolate it into a quoted SQL literal. Widening the set means
+  parameterising that first.
 - **Status is recorded, not inferred.** Show Password stops guessing between
   "still provisioning" and "failed".
 

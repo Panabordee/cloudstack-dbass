@@ -108,6 +108,25 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     private static final int PASSWORD_LENGTH = 24;
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    // A supplied password ends up inside the engine's own SQL on the
+    // instance, where the scripts interpolate it into a quoted literal. Until
+    // that quoting is parameterised, the accepted set stays narrow enough that
+    // no value can terminate the literal. Callers who want symbols can leave
+    // the field empty and take a generated one.
+    private static final java.util.regex.Pattern PASSWORD_PATTERN =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9_.-]{8,64}$");
+
+    static String validateOrGeneratePassword(String supplied) {
+        if (supplied == null || supplied.trim().isEmpty()) {
+            return generatePassword();
+        }
+        if (!PASSWORD_PATTERN.matcher(supplied).matches()) {
+            throw new InvalidParameterValueException("dbpassword must be 8-64 characters long and may contain"
+                    + " letters, digits, underscore, dot and hyphen only; leave it empty to have one generated");
+        }
+        return supplied;
+    }
+
     static String generatePassword() {
         StringBuilder sb = new StringBuilder(PASSWORD_LENGTH);
         for (int i = 0; i < PASSWORD_LENGTH; i++) {
@@ -446,7 +465,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         if (dbUsername == null || dbUsername.trim().isEmpty()) {
             dbUsername = cmd.getDbName();
         }
-        String dbPassword = generatePassword();
+        String dbPassword = validateOrGeneratePassword(cmd.getDbPassword());
 
         String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword);
         try {
@@ -500,6 +519,11 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             dbUsername = cmd.getDbName();
         }
         parameters.addProperty("db_username", dbUsername);
+        // Validated here rather than in the extension: a rejected password
+        // must fail before anything is deployed or connected to.
+        if (cmd.getDbPassword() != null && !cmd.getDbPassword().trim().isEmpty()) {
+            parameters.addProperty("db_password", validateOrGeneratePassword(cmd.getDbPassword()));
+        }
         parameters.addProperty("reset_vm_password", Boolean.TRUE.equals(cmd.isResetVmPassword()));
 
         JsonObject details = runExtensionAction("create_database", cmd.getVirtualMachineId(), parameters);

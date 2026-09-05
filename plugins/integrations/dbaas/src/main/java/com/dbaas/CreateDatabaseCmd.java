@@ -16,7 +16,9 @@ import com.cloud.vm.VirtualMachine;
 @APICommand(name = "createDatabase",
         description = "Provisions a database and user on the specified DBaaS VM",
         responseObject = DbaasResponse.class,
-        requestHasSensitiveInfo = false,
+        // A caller may supply the database password, so the request itself
+        // carries a secret and must not be logged verbatim.
+        requestHasSensitiveInfo = true,
         responseHasSensitiveInfo = true)
 public class CreateDatabaseCmd extends BaseCmd {
 
@@ -63,6 +65,19 @@ public class CreateDatabaseCmd extends BaseCmd {
     @Parameter(name = "dbusername", type = CommandType.STRING, required = false,
             description = "name of the database user to create; defaults to the database name when omitted")
     private String dbUsername;
+
+    // Optional: an empty value means "generate one". A supplied password is
+    // restricted to a conservative character set (see DbaasManagerImpl):
+    // it is interpolated into SQL on the instance, and widening the set here
+    // without fixing that quoting first would be an injection waiting to
+    // happen.
+    @Parameter(name = "dbpassword", type = CommandType.STRING, required = false,
+            description = "password for the database user; generated when omitted")
+    private String dbPassword;
+
+    public String getDbPassword() {
+        return dbPassword;
+    }
 
     public Long getVirtualMachineId() {
         return virtualMachineId;

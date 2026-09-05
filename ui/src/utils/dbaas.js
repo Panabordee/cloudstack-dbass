@@ -30,6 +30,12 @@ export const DBAAS_TEMPLATE_PREFIX = 'dbaas-'
 // same two fields and they must not drift apart.
 export const DBAAS_IDENTIFIER_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/
 
+// Mirrors DbaasManagerImpl.PASSWORD_PATTERN. Deliberately narrow: a supplied
+// password is interpolated into the engine's own SQL on the instance, so until
+// that quoting is parameterised nothing that could terminate a quoted literal
+// is accepted. An empty field means "generate one", which is unrestricted.
+export const DBAAS_PASSWORD_PATTERN = /^[A-Za-z0-9_.-]{8,64}$/
+
 // The engines starve a small vCPU badly enough that sshd cannot answer the
 // SSH banner in time, so the offering picker filters to at least this much.
 // These are minimums the API filters on, not exact matches -- and the picker
