@@ -34,7 +34,10 @@ import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
 
 import com.cloud.exception.InvalidParameterValueException;
+import com.cloud.storage.VolumeApiService;
+import com.cloud.storage.VolumeVO;
 import com.cloud.storage.dao.VMTemplateDetailsDao;
+import com.cloud.storage.dao.VolumeDao;
 import com.cloud.template.VirtualMachineTemplate;
 import com.cloud.utils.component.ManagerBase;
 import com.cloud.utils.component.PluggableService;
@@ -47,6 +50,8 @@ import com.cloud.uservm.UserVm;
 import com.cloud.vm.UserVmManager;
 import com.cloud.vm.UserVmService;
 import com.cloud.vm.VirtualMachine;
+import com.cloud.user.Account;
+import com.cloud.user.dao.AccountDao;
 import com.cloud.vm.dao.NicDao;
 
 public class DbaasManagerImpl extends ManagerBase implements DbaasManager, PluggableService, Configurable,
@@ -79,6 +84,19 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // hands back carries no details) -- read them through the details dao.
     @Inject
     private VMTemplateDetailsDao _templateDetailsDao;
+
+    // Orphaned data-disk cleanup goes through the volume service so the
+    // storage file, capacity accounting, resource counts and usage events are
+    // handled together -- a bare UPDATE on volumes would leave the qcow2 on
+    // primary storage and take the admin's only handle to it away.
+    @Inject
+    private VolumeApiService volumeApiService;
+
+    @Inject
+    private VolumeDao volumeDao;
+
+    @Inject
+    private AccountDao accountDao;
 
     @Inject
     private UserVmManager userVmManager;
@@ -390,40 +408,62 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             reportOrphanedDataDisks();
             return;
         }
-        final String find = "SELECT v.id, v.uuid, v.name, COALESCE(v.size, 0) FROM volumes v"
+        final String find = "SELECT v.id FROM volumes v"
                 + " JOIN volume_details vd ON vd.volume_id = v.id AND vd.name = 'dbaas.instance'"
                 + " LEFT JOIN vm_instance i ON i.uuid = vd.value"
                 + " WHERE v.volume_type = 'DATADISK' AND v.removed IS NULL"
                 + " AND (v.instance_id IS NULL OR v.instance_id = 0)"
                 + " AND (i.id IS NULL OR i.removed IS NOT NULL)"
                 + " AND v.created < DATE_SUB(NOW(), INTERVAL " + DATA_DISK_GRACE_SECONDS + " SECOND)";
+        int deleted = 0;
+        int failed = 0;
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-            final List<long[]> candidates = new ArrayList<>();
-            final List<String> descriptions = new ArrayList<>();
-            long removed = 0;
+            final List<Long> candidates = new ArrayList<>();
             try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
                 while (rs.next()) {
-                    candidates.add(new long[] {rs.getLong(1), rs.getLong(4)});
-                    descriptions.add(rs.getString(3) + " (" + rs.getString(2) + ")");
+                    candidates.add(rs.getLong(1));
                 }
             }
-            for (int i = 0; i < candidates.size(); i++) {
-                try (PreparedStatement del = txn.prepareStatement("UPDATE volumes SET removed = NOW() WHERE id = ?")) {
-                    del.setLong(1, candidates.get(i)[0]);
-                    if (del.executeUpdate() > 0) {
-                        removed++;
-                        logger.warn("dbaas sweeper marked orphaned data disk {} ({} bytes) removed --"
-                                + " the primary storage file must still be reclaimed by an admin",
-                                descriptions.get(i), candidates.get(i)[1]);
+            for (final Long volumeId : candidates) {
+                // Deletion goes through the volume service so the storage
+                // file, capacity accounting, resource counts and usage events
+                // are handled together. A bare UPDATE on volumes would hide
+                // the row and leave the qcow2 on primary storage.
+                final VolumeVO volume = volumeDao.findById(volumeId);
+                if (volume == null) {
+                    continue;
+                }
+                final Account caller = accountDao.findById(volume.getAccountId());
+                if (caller == null) {
+                    logger.warn("dbaas sweeper could not resolve the owner account of orphaned data disk {}"
+                            + " ({}), leaving it in place", volume.getName(), volume.getUuid());
+                    failed++;
+                    continue;
+                }
+                try {
+                    if (volumeApiService.deleteVolume(volumeId, caller)) {
+                        deleted++;
+                        logger.warn("dbaas sweeper deleted orphaned data disk {} ({}, {} bytes) past the"
+                                + " {}s grace period", volume.getName(), volume.getUuid(), volume.getSize(),
+                                DATA_DISK_GRACE_SECONDS);
+                    } else {
+                        failed++;
+                        logger.warn("dbaas sweeper could not delete orphaned data disk {} ({}), the row stays"
+                                + " visible for the admin", volume.getName(), volume.getUuid());
                     }
+                } catch (Exception e) {
+                    failed++;
+                    logger.warn("dbaas sweeper failed to delete orphaned data disk {} ({}), the row stays"
+                            + " visible for the admin", volume.getName(), volume.getUuid(), e);
                 }
-            }
-            if (removed > 0) {
-                logger.warn("dbaas sweeper removed {} orphaned data disk(s) past the {}s grace period",
-                        removed, DATA_DISK_GRACE_SECONDS);
             }
         } catch (Exception e) {
             logger.warn("orphaned data disk cleanup failed", e);
+            return;
+        }
+        if (deleted > 0 || failed > 0) {
+            logger.warn("dbaas data-disk cleanup pass: {} deleted through the volume service, {} left in place",
+                    deleted, failed);
         }
     }
 
