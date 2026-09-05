@@ -12,23 +12,28 @@
   "ssh_connect_timeout_seconds": 60,
   "log_file": "/var/log/cloudstack/management/dbaas-extension.log",
   "_comment_engines": "Template name -> provisioning scripts + port. Add a new engine here and drop its scripts into every dbaas-* image's /opt/dbaas/ (see TEMPLATES.md) -- never hardcode this mapping in the Python source.",
+  "_comment_provision_mode": "How the engine is configured after deployment. \"ssh\": the management server connects to the instance and runs the script above -- needs a route to port 22. \"configdrive\": the instance configures itself at first boot from the config drive, and the management server never connects to it. Templates built before the config-drive script existed must stay on \"ssh\"; the default when the key is absent is \"ssh\".",
   "engines": {
     "dbaas-mysql": {
+      "provision_mode": "ssh",
       "script": "mysql.sh",
       "reset_script": "mysql_reset.sh",
       "port": 3306
     },
     "dbaas-mariadb": {
+      "provision_mode": "ssh",
       "script": "mariadb.sh",
       "reset_script": "mariadb_reset.sh",
       "port": 3306
     },
     "dbaas-postgresql": {
+      "provision_mode": "ssh",
       "script": "postgresql.sh",
       "reset_script": "postgresql_reset.sh",
       "port": 5432
     },
     "dbaas-mongodb": {
+      "provision_mode": "ssh",
       "script": "mongodb.sh",
       "reset_script": "mongodb_reset.sh",
       "port": 27017

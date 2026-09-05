@@ -459,6 +459,27 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
+    // Provisioning transport for one engine, straight from config.json. An
+    // entry without the key is an image built before the config-drive script
+    // existed, which can only be provisioned over SSH -- so that, not the new
+    // path, is the default. Never hardcode the mapping itself here.
+    static final String PROVISION_MODE_SSH = "ssh";
+    static final String PROVISION_MODE_CONFIG_DRIVE = "configdrive";
+
+    private String provisionMode(JsonObject engineConfig) {
+        if (engineConfig == null || !engineConfig.has("provision_mode")) {
+            return PROVISION_MODE_SSH;
+        }
+        String mode = engineConfig.get("provision_mode").getAsString();
+        if (PROVISION_MODE_CONFIG_DRIVE.equalsIgnoreCase(mode)) {
+            return PROVISION_MODE_CONFIG_DRIVE;
+        }
+        if (!PROVISION_MODE_SSH.equalsIgnoreCase(mode)) {
+            logger.warn("unknown provision_mode {} in config.json -- treating it as {}", mode, PROVISION_MODE_SSH);
+        }
+        return PROVISION_MODE_SSH;
+    }
+
     @Override
     public List<DbaasEngineResponse> listEngines() {
         // A broken config.json must not take the whole API down: the UI's
@@ -473,6 +494,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 DbaasEngineResponse engine = new DbaasEngineResponse();
                 engine.setTemplate(entry.getKey());
                 engine.setPort(cfg.get("port").getAsInt());
+                engine.setProvisionMode(provisionMode(cfg));
                 engine.setObjectName("dbaasengine");
                 result.add(engine);
             }
