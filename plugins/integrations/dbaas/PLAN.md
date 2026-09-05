@@ -106,13 +106,28 @@ defects.
       the config-drive path, `confirmed` on the SSH path, which verifies the
       login itself), returned by `getDatabasePassword`, and rendered by Show
       Password instead of being inferred
-- [ ] Report-back endpoint validated by a one-time token: bound to one instance
-      UUID, single use, TTL, stored hashed, rate limited, every call logged
-- [ ] Instance reports `confirmed` / `failed` with a reason
+- [x] Report-back endpoint validated by a one-time token: bound to one instance
+      UUID (`vm_id`), single use (the redeeming `UPDATE` clears the hash so a
+      replay matches nothing), TTL (`dbaas.report.token.ttl`), stored hashed
+      (SHA-256, raw token never persisted), every call logged (accept and
+      reject both). **Not yet done: rate limiting** — a brute-force attempt
+      against the token is infeasible (256 bits of entropy) but nothing stops
+      hammering the endpoint itself; add a per-IP or per-command throttle
+      before this is internet-facing.
+- [x] Instance reports `confirmed` / `failed` with a reason
+      (`extensions/dbaas/provisioning/firstboot.sh`, 5 attempts with backoff,
+      best-effort — no automatic retry beyond that until the Phase D agent
+      exists, so a report that never lands leaves the credential visibly
+      `pending` rather than silently wrong)
 - [x] Show Password renders the real status and keeps polling while it is
       `pending`; the "is it still provisioning or did it fail" guess is gone
-- [ ] Decision recorded: the endpoint accepts an unauthenticated caller (the
-      instance holds no CloudStack credentials) — accepted or rejected
+- [x] Decision recorded: **accepted**. `reportDbaasProvisioningResult` is
+      registered as a `PluggableAPIAuthenticator` command (the mechanism
+      SAML/OAuth login callbacks already use to bypass signature auth —
+      discovered automatically by CloudStack's own
+      `pluggableAPIAuthenticatorsRegistry`, no core changes). The one-time
+      token is the accepted tradeoff: a genuinely new unauthenticated surface,
+      scoped to one instance, one use, one hour by default.
 
 ### Phase D — in-VM agent, retire SSH
 
