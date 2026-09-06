@@ -6,10 +6,9 @@ import org.apache.cloudstack.api.BaseResponse;
 
 
 
+// jobId is inherited from BaseResponse -- redeclaring it made Gson refuse to
+// serialise the response ("declares multiple JSON fields named 'jobid'").
 public class DbaasJobResultResponse extends BaseResponse {
-    @SerializedName("jobid")
-    @Param(description = "the UUID of the console job")
-    private String jobId;
 
     @SerializedName("type")
     @Param(description = "the job type")
