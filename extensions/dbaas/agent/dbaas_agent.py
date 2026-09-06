@@ -40,8 +40,13 @@ def save_conf(conf):
 
 
 def api_post(api_url, fields, hold=None):
-    data = urllib.parse.urlencode(fields).encode()
-    url = api_url + "?" + urllib.parse.urlencode({"command": fields["command"], "response": "json"})
+    # command/response go in the query string only -- sending them again in the
+    # POST body makes CloudStack reject the poll with
+    # "Query parameter 'command' has multiple values".
+    query = {"command": fields["command"], "response": "json"}
+    body = {k: v for k, v in fields.items() if k not in ("command", "response")}
+    data = urllib.parse.urlencode(body).encode()
+    url = api_url + "?" + urllib.parse.urlencode(query)
     request = urllib.request.Request(url, data=data)
     try:
         with urllib.request.urlopen(request, timeout=(hold or 10) + 10) as response:
