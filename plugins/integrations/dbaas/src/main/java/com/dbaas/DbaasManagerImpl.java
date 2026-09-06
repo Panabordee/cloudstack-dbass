@@ -191,6 +191,23 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "Allows dropDbaasTable. Ships off and stays off until per-database backup exists"
                     + " (PLAN-DBAAS-CONSOLE.md section 8).", true);
 
+    public static final ConfigKey<Integer> DbaasAgentLongPollMaxWaiters = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.agent.longpoll.maxwaiters", "100",
+            "How many agents may hold a long-poll open at the same time. Each waiting agent parks one"
+                    + " API worker thread for up to dbaas.agent.longpoll.seconds.", true);
+
+    private static final java.util.concurrent.atomic.AtomicInteger LONG_POLL_WAITERS =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
+    public static boolean tryAcquireLongPollSlot() {
+        int waiters = LONG_POLL_WAITERS.incrementAndGet();
+        return waiters <= DbaasAgentLongPollMaxWaiters.value();
+    }
+
+    public static void releaseLongPollSlot() {
+        LONG_POLL_WAITERS.decrementAndGet();
+    }
+
     public static final ConfigKey<Integer> DbaasAgentLongPollSeconds = new ConfigKey<>(
             "Advanced", Integer.class, "dbaas.agent.longpoll.seconds", "25",
             "How long getDbaasAgentJob holds the request open waiting for a job.", true);
@@ -549,12 +566,14 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     public long getJobAccountId(String jobUuid) {
         String sql = "SELECT account_id FROM dbaas_jobs WHERE uuid = ?";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-            try (PreparedStatement pstmt = txn.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
                 pstmt.setString(1, jobUuid);
-                if (rs.next()) {
-                    return rs.getLong(1);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        return rs.getLong(1);
+                    }
+                    return -1;
                 }
-                return -1;
             }
         } catch (Exception e) {
             logger.warn("failed to look up the console job {}", jobUuid, e);
@@ -631,20 +650,23 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         String sql = "SELECT t.id, t.token_hash FROM dbaas_agent_tokens t"
                 + " JOIN vm_instance v ON v.id = t.vm_id WHERE v.uuid = ? AND v.removed IS NULL";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-            try (PreparedStatement pstmt = txn.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()) {
-                if (!rs.next()) {
-                    return false;
-                }
-                long tokenId = rs.getLong(1);
-                boolean matches = sha256Hex(token).equals(rs.getString(2));
-                if (matches) {
-                    try (PreparedStatement touch = txn.prepareStatement(
-                            "UPDATE dbaas_agent_tokens SET last_seen_at = NOW() WHERE id = ?")) {
-                        touch.setLong(1, tokenId);
-                        touch.executeUpdate();
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                pstmt.setString(1, vmUuid);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (!rs.next()) {
+                        return false;
                     }
+                    long tokenId = rs.getLong(1);
+                    boolean matches = sha256Hex(token).equals(rs.getString(2));
+                    if (matches) {
+                        try (PreparedStatement touch = txn.prepareStatement(
+                                "UPDATE dbaas_agent_tokens SET last_seen_at = NOW() WHERE id = ?")) {
+                            touch.setLong(1, tokenId);
+                            touch.executeUpdate();
+                        }
+                    }
+                    return matches;
                 }
-                return matches;
             }
         } catch (Exception e) {
             logger.warn("agent token validation failed for VM {}", vmUuid, e);
@@ -719,12 +741,14 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         String tokenHash = null;
         java.sql.Timestamp rotatedAt = null;
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-            try (PreparedStatement pstmt = txn.prepareStatement(vmIdSql); ResultSet rs = pstmt.executeQuery()) {
+            try (PreparedStatement pstmt = txn.prepareStatement(vmIdSql)) {
                 pstmt.setString(1, vmUuid);
-                if (rs.next()) {
-                    vmId = rs.getLong(1);
-                    tokenHash = rs.getString(2);
-                    rotatedAt = rs.getTimestamp(3);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        vmId = rs.getLong(1);
+                        tokenHash = rs.getString(2);
+                        rotatedAt = rs.getTimestamp(3);
+                    }
                 }
             }
         } catch (Exception e) {
@@ -745,14 +769,16 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     + " WHERE vm_id = ? AND state = 'pending' AND expires_at > NOW()"
                     + " ORDER BY created_at ASC LIMIT 1";
             try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-                try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
+                try (PreparedStatement pstmt = txn.prepareStatement(find)) {
                     pstmt.setLong(1, vmId);
-                    if (rs.next()) {
-                        jobId[0] = rs.getLong(1);
-                        jobUuid = rs.getString(2);
-                        type = rs.getString(3);
-                        dbRole = rs.getString(4);
-                        payloadEncrypted = rs.getString(5);
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) {
+                            jobId[0] = rs.getLong(1);
+                            jobUuid = rs.getString(2);
+                            type = rs.getString(3);
+                            dbRole = rs.getString(4);
+                            payloadEncrypted = rs.getString(5);
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -827,12 +853,14 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 + " WHERE j.uuid = ? AND v.uuid = ? AND t.token_hash = ? AND j.state = 'dispatched'";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             long jobId = -1;
-            try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
+            try (PreparedStatement pstmt = txn.prepareStatement(find)) {
                 pstmt.setString(1, jobUuid);
                 pstmt.setString(2, vmUuid);
                 pstmt.setString(3, sha256Hex(token));
-                if (rs.next()) {
-                    jobId = rs.getLong(1);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        jobId = rs.getLong(1);
+                    }
                 }
             }
             if (jobId < 0) {
@@ -888,16 +916,18 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             long rowCount = -1;
             boolean truncated = false;
             String error = null;
-            try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
+            try (PreparedStatement pstmt = txn.prepareStatement(find)) {
                 pstmt.setString(1, jobUuid);
                 pstmt.setLong(2, accountId);
-                if (rs.next()) {
-                    jobId = rs.getLong(1);
-                    state = rs.getString(2);
-                    type = rs.getString(3);
-                    rowCount = rs.getLong(4);
-                    truncated = rs.getBoolean(5);
-                    error = rs.getString(6);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        jobId = rs.getLong(1);
+                        state = rs.getString(2);
+                        type = rs.getString(3);
+                        rowCount = rs.getLong(4);
+                        truncated = rs.getBoolean(5);
+                        error = rs.getString(6);
+                    }
                 }
             }
             if (jobId < 0) {
@@ -914,17 +944,19 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             }
             if (STATUS_CONFIRMED.equals(state)) {
                 String resultSql = "SELECT result FROM dbaas_job_results WHERE job_id = ?";
-                try (PreparedStatement pstmt = txn.prepareStatement(resultSql); ResultSet rs = pstmt.executeQuery()) {
+                try (PreparedStatement pstmt = txn.prepareStatement(resultSql)) {
                     pstmt.setLong(1, jobId);
-                    if (rs.next()) {
-                        response.addProperty("result", DBEncryptionUtil.decrypt(rs.getString(1)));
-                        try (PreparedStatement del = txn.prepareStatement(
-                                "DELETE FROM dbaas_job_results WHERE job_id = ?")) {
-                            del.setLong(1, jobId);
-                            del.executeUpdate();
+                    try (ResultSet rs = pstmt.executeQuery()) {
+                        if (rs.next()) {
+                            response.addProperty("result", DBEncryptionUtil.decrypt(rs.getString(1)));
+                            try (PreparedStatement del = txn.prepareStatement(
+                                    "DELETE FROM dbaas_job_results WHERE job_id = ?")) {
+                                del.setLong(1, jobId);
+                                del.executeUpdate();
+                            }
+                        } else {
+                            response.addProperty("collected", true);
                         }
-                    } else {
-                        response.addProperty("collected", true);
                     }
                 }
             }
@@ -1592,6 +1624,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 DbaasReportTokenTtl, DbaasReportApiUrl, DbaasReportRateLimit, DbaasDataDiskCleanupEnabled,
                 DbaasConsoleEnabled, DbaasConsoleRowLimit, DbaasConsoleBytesLimit,
                 DbaasConsoleStatementTimeout, DbaasConsoleWriteEnabled, DbaasConsoleDropEnabled,
-                DbaasAgentLongPollSeconds, DbaasAgentTokenRotateDays, DbaasJobTtl, DbaasJobResultTtl};
+                DbaasAgentLongPollSeconds, DbaasAgentTokenRotateDays, DbaasJobTtl, DbaasJobResultTtl,
+                DbaasAgentLongPollMaxWaiters};
     }
 }
