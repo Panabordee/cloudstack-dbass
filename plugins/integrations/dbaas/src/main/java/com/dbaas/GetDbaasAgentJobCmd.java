@@ -55,6 +55,13 @@ public class GetDbaasAgentJobCmd extends BaseCmd implements APIAuthenticator {
     public String authenticate(String command, Map<String, Object[]> params, HttpSession session,
             InetAddress remoteAddress, String responseType, StringBuilder auditTrailSb,
             HttpServletRequest req, HttpServletResponse resp) throws ServerApiException {
+        int limitPerMinute = DbaasManagerImpl.DbaasReportRateLimit.value();
+        if (ReportProvisioningResultCmd.rateLimited(remoteAddress, limitPerMinute)) {
+            S_LOGGER.warn("getDbaasAgentJob rate limited for {} (>{} calls/minute)", remoteAddress, limitPerMinute);
+            sendErrorQuietly(resp, 429, "agent rate limited");
+            return "";
+        }
+
         DbaasManager manager = DbaasManagerImpl.getRunningManager();
         if (manager == null) {
             S_LOGGER.error("getDbaasAgentJob: the DBaaS manager is not running");
@@ -71,15 +78,24 @@ public class GetDbaasAgentJobCmd extends BaseCmd implements APIAuthenticator {
         }
 
         int longPollSeconds = Math.min(DbaasManagerImpl.DbaasAgentLongPollSeconds.value(), 30);
-        String jobJson = manager.agentPollJob(vmUuid, longPollSeconds);
-        auditTrailSb.append("command=").append(command)
-                .append(" job=").append(jobJson.isEmpty() ? "none" : "delivered");
-
-        // Empty string = the hold expired with nothing to do: the agent
-        // simply re-polls. A delivered job returns through the servlet's own
-        // writer as 200 + application/json.
-        return jobJson;
+        // The hold parks a Jetty worker for its whole duration: cap how many
+        // agents may wait at once so 20 instances cannot occupy 20 threads of
+        // the API pool indefinitely.
+        if (DbaasManagerImpl.tryAcquireLongPollSlot()) {
+            try {
+                String jobJson = manager.agentPollJob(vmUuid, longPollSeconds);
+                auditTrailSb.append("command=").append(command)
+                        .append(" job=").append(jobJson.isEmpty() ? "none" : "delivered");
+                return jobJson;   // "" = the hold expired with nothing to do
+            } finally {
+                DbaasManagerImpl.releaseLongPollSlot();
+            }
+        }
+        S_LOGGER.warn("getDbaasAgentJob waiter ceiling reached -- VM {} answered 503", vmUuid);
+        sendErrorQuietly(resp, HttpServletResponse.SC_SERVICE_UNAVAILABLE, "too many waiting agents");
+        return "";
     }
+
 
     private static void sendErrorQuietly(HttpServletResponse resp, int status, String message) {
         try {

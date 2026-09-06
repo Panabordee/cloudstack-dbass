@@ -61,6 +61,13 @@ public class ReportDbaasJobResultCmd extends BaseCmd implements APIAuthenticator
             return "";
         }
 
+        int limitPerMinute = DbaasManagerImpl.DbaasReportRateLimit.value();
+        if (ReportProvisioningResultCmd.rateLimited(remoteAddress, limitPerMinute)) {
+            S_LOGGER.warn("reportDbaasJobResult rate limited for {} (>{} calls/minute)", remoteAddress, limitPerMinute);
+            sendErrorQuietly(resp, 429, "agent rate limited");
+            return "";
+        }
+
         String vmUuid = ReportProvisioningResultCmd.param(params, "vmid");
         String token = ReportProvisioningResultCmd.param(params, "token");
         String jobUuid = ReportProvisioningResultCmd.param(params, "jobid");
