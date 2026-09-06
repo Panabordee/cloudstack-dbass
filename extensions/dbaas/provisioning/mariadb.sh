@@ -38,6 +38,19 @@ GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'%';
 FLUSH PRIVILEGES;
 SQL
 
+# Read-only role for the DBaaS console (optional: only when the request
+# carries db_user_ro / db_password_ro). SELECT on the tenant's own database,
+# nothing else -- browse and query run as this role, DDL as the owner.
+db_user_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_user_ro",""))')
+db_password_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_password_ro",""))')
+if [[ -n "$db_user_ro" && -n "$db_password_ro" ]]; then
+  mysql --protocol=socket -uroot <<SQL
+CREATE USER IF NOT EXISTS '${db_user_ro}'@'%' IDENTIFIED BY '${db_password_ro}';
+GRANT SELECT ON \`${db_name}\`.* TO '${db_user_ro}'@'%';
+FLUSH PRIVILEGES;
+SQL
+fi
+
 # Make sure mariadbd is listening on the private interface, not left on
 # 127.0.0.1-only (perimeter access control stays with CloudStack Security
 # Groups / Network ACLs, not with this script).

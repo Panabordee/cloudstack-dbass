@@ -94,7 +94,9 @@
         :footer="null"
         :title="$t(activeRowAction === 'createDatabase'
           ? 'label.create.database'
-          : 'label.show.database.password')"
+          : activeRowAction === 'console'
+            ? 'label.dbaas.console'
+            : 'label.show.database.password')"
         :width="activeRowAction === 'createDatabase' ? '500px' : '450px'"
         :closable="true"
         @cancel="closeModal">
@@ -103,6 +105,9 @@
           :resource="activeRecord"
           @close-action="closeModal"
           @refresh-data="fetchData" />
+        <dbaas-console
+          v-else-if="activeRowAction === 'console'"
+          :resource="activeRecord" />
         <show-database-password
           v-else-if="activeRowAction === 'getDatabasePassword'"
           :resource="activeRecord"
@@ -119,12 +124,13 @@ import { Checkbox, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
 import Status from '@/components/widgets/Status.vue'
 import CreateDatabase from '@/views/compute/CreateDatabase.vue'
+import DbaasConsole from '@/views/compute/DbaasConsole.vue'
 import ShowDatabasePassword from '@/views/compute/ShowDatabasePassword.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 export default {
   name: 'DatabaseInstances',
-  components: { Status, CreateDatabase, ShowDatabasePassword },
+  components: { Status, CreateDatabase, DbaasConsole, ShowDatabasePassword },
   data () {
     return {
       loading: false,
@@ -184,6 +190,9 @@ export default {
       if ((isRunning || isStopped) && 'getDatabasePassword' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'getDatabasePassword', label: 'label.show.database.password' })
       }
+      if (isRunning && 'listDbaasTables' in apis && this.isEngineMember(record)) {
+        actions.push({ key: 'console', label: 'label.dbaas.console' })
+      }
       if (isStopped && 'startVirtualMachine' in apis) {
         actions.push({ key: 'startVirtualMachine', label: 'label.action.start.instance' })
       }
@@ -204,6 +213,11 @@ export default {
       return (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
     },
     runRowAction (key, record) {
+      if (key === 'console') {
+        this.activeRecord = record
+        this.activeRowAction = key
+        return
+      }
       if (key === 'createDatabase' || key === 'getDatabasePassword') {
         this.activeRecord = record
         this.activeRowAction = key

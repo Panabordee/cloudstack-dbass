@@ -171,7 +171,7 @@ public class ReportProvisioningResultCmd extends BaseCmd implements APIAuthentic
         return ApiResponseSerializer.toSerializedString(response, responseType);
     }
 
-    private static String param(Map<String, Object[]> params, String name) {
+    static String param(Map<String, Object[]> params, String name) {
         Object[] values = params.get(name);
         if (values == null || values.length == 0 || values[0] == null) {
             return null;

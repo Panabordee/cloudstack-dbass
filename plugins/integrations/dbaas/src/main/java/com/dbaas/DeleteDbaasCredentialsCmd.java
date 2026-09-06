@@ -16,6 +16,7 @@
 // under the License.
 package com.dbaas;
 
+import org.apache.cloudstack.context.CallContext;
 import javax.inject.Inject;
 
 import org.apache.cloudstack.api.APICommand;
@@ -24,10 +25,10 @@ import org.apache.cloudstack.api.BaseCmd;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.ServerApiException;
 import org.apache.cloudstack.api.response.SuccessResponse;
-import org.apache.cloudstack.context.CallContext;
 
 import com.cloud.utils.db.EntityManager;
 import com.cloud.vm.VirtualMachine;
+// (VirtualMachine used below for the expunge-time credential cleanup)
 
 // The plugin has no expunge hook, so the Database page (which destroys its
 // instances itself) calls this once the destroy job succeeds. Wiping the

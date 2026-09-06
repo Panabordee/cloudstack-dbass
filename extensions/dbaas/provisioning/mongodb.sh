@@ -49,6 +49,21 @@ CREATE_OUTPUT=$(mongosh --quiet "mongodb://${admin_user}:${admin_password}@127.0
   });
 " 2>&1) || { echo "mongodb createUser failed: $CREATE_OUTPUT" >&2; exit 1; }
 
+# Read-only role for the DBaaS console (optional: only when the request
+# carries db_user_ro / db_password_ro). Mongo gets browse only -- a read user
+# on the tenant's own database, no free-form query path exists for Mongo.
+db_user_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_user_ro",""))')
+db_password_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_password_ro",""))')
+if [[ -n "$db_user_ro" && -n "$db_password_ro" ]]; then
+  RO_OUTPUT=$(mongosh --quiet "mongodb://${admin_user}:${admin_password}@127.0.0.1:27017/admin" --eval "
+    db.getSiblingDB('${db_name}').createUser({
+      user: '${db_user_ro}',
+      pwd: '${db_password_ro}',
+      roles: [{ role: 'read', db: '${db_name}' }]
+    });
+  " 2>&1) || { echo "mongodb ro user creation failed: $RO_OUTPUT" >&2; exit 1; }
+fi
+
 if echo "$CREATE_OUTPUT" | grep -Eqi 'MongoServerError|Uncaught|error:'; then
   echo "mongodb createUser reported an error: $CREATE_OUTPUT" >&2
   exit 1

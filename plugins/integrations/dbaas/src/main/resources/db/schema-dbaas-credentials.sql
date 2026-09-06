@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS `dbaas_credentials` (
   -- credential is generated, and the instance moves it to confirmed/failed.
   -- 'confirmed' is the only state in which the credential is known to work.
   `status` varchar(32) NOT NULL DEFAULT 'pending',
+  -- Which console role this credential is for: 'owner' (DDL + writes) or
+  -- 'readonly' (browse and query). The read path is newest row per
+  -- (instance, role), not per instance alone.
+  `db_role` varchar(16) NOT NULL DEFAULT 'owner',
   `status_message` varchar(1024) DEFAULT NULL,
   -- Lets the instance report its own provisioning outcome through
   -- reportDbaasProvisioningResult without holding any CloudStack credential:

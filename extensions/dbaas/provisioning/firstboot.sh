@@ -184,13 +184,31 @@ ENGINE_RC=$?
 set -e
 if [[ $ENGINE_RC -eq 0 ]]; then
     write_result confirmed "database provisioned"
-    # The request holds the password in cleartext and should not linger, but
-    # it also holds the *only* copy of the one-time report token. Deleting it
-    # regardless of whether the report landed -- as this did until 2026-09-05 --
-    # makes a missed report permanent: the credential is stuck 'pending' and
-    # the instance can never confirm itself, so the only recovery is deploying
-    # a new one. Delete it only once the report is in, and leave the retry
-    # timer to finish the job otherwise.
+    # The agent reads its credentials from /var/lib/dbaas/roles.json (0600,
+    # root-only): owner for DDL and write mode, readonly for browse and
+    # query. Written from the request now -- the request itself is removed
+    # once the report lands, and the agent must not depend on it. The
+    # readonly entry is optional: instances provisioned without
+    # db_user_ro / db_password_ro simply have no readonly role, and the
+    # console falls back to the owner credential.
+    python3 - "$REQUEST_FILE" /var/lib/dbaas/roles.json <<'PY'
+import json, os, sys
+req = json.load(open(sys.argv[1]))
+out = {"owner": {"user": req.get("db_user", ""), "password": req.get("db_password", "")}}
+ro_user = req.get("db_user_ro", "")
+ro_password = req.get("db_password_ro", "")
+if ro_user and ro_password:
+    out["readonly"] = {"user": ro_user, "password": ro_password}
+fd = os.open(sys.argv[2], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as f:
+    json.dump(out, f)
+PY
+    chmod 0600 /var/lib/dbaas/roles.json
+    # The console agent gets its identity (api base, vm uuid, agent token)
+    # from the request and starts long-polling for jobs.
+    if [[ -x /opt/dbaas/agent/dbaas-agent-env.sh ]]; then
+        /opt/dbaas/agent/dbaas-agent-env.sh "$REQUEST_FILE" || log "agent bootstrap failed -- the agent service will retry"
+    fi
     if report_result confirmed "database provisioned" "$REQUEST_FILE"; then
         rm -f "$REQUEST_FILE"
     else

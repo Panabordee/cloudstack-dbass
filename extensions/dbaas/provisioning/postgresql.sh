@@ -33,6 +33,19 @@ GRANT ALL PRIVILEGES ON DATABASE "${db_name}" TO "${db_user}";
 REVOKE CONNECT ON DATABASE "${db_name}" FROM PUBLIC;
 SQL
 
+# Read-only role for the DBaaS console (optional: only when the request
+# carries db_user_ro / db_password_ro). pg_read_all_data covers SELECT on
+# every table of every database this role can connect to -- the tenant's own
+# database is the only one its owner grants CONNECT on.
+db_user_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_user_ro",""))')
+db_password_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_password_ro",""))')
+if [[ -n "$db_user_ro" && -n "$db_password_ro" ]]; then
+  sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
+CREATE ROLE "${db_user_ro}" LOGIN PASSWORD '${db_password_ro}';
+GRANT pg_read_all_data TO "${db_user_ro}";
+SQL
+fi
+
 # Don't trust exit code alone — verify the new credential actually authenticates,
 # same discipline as mongodb.sh after its equivalent bug.
 VERIFY_OUTPUT=$(PGPASSWORD="${db_password}" psql -h 127.0.0.1 -U "${db_user}" -d "${db_name}" -tAc "SELECT 1" 2>&1) \

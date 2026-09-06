@@ -40,8 +40,19 @@ public class GetDatabasePasswordCmd extends BaseCmd {
                     "defaults to the most recently created one")
     private String dbUsername;
 
+    // Credentials are per (instance, role): 'owner' for DDL and writes,
+    // 'readonly' for browse and query. Defaults to 'owner' -- Show Password
+    // keeps its current behaviour unless the caller asks for the readonly one.
+    @Parameter(name = "dbrole", type = CommandType.STRING, required = false,
+            description = "which role's credential to retrieve: owner (default) or readonly")
+    private String dbRole;
+
     public Long getVirtualMachineId() {
         return virtualMachineId;
+    }
+
+    public String getDbRole() {
+        return dbRole;
     }
 
     public String getDbUsername() {

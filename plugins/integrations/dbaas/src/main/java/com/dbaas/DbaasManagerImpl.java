@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.UUID;
 
 import javax.inject.Inject;
 
@@ -126,6 +127,8 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     static final String STATUS_PENDING = "pending";
     static final String STATUS_CONFIRMED = "confirmed";
     static final String STATUS_FAILED = "failed";
+    static final String ROLE_OWNER = "owner";
+    static final String ROLE_READONLY = "readonly";
 
     // The instance has no CloudStack credential of its own, so
     // reportDbaasProvisioningResult is registered as an unauthenticated
@@ -161,6 +164,48 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "When true, the sweeper marks removed the unattached data disks marked dbaas.instance whose"
                     + " instance is expunged and that are older than 24 hours. Default false -- deletion of"
                     + " tenant data must be switched on by an admin.", true);
+
+    public static final ConfigKey<Boolean> DbaasConsoleEnabled = new ConfigKey<>(
+            "Advanced", Boolean.class, "dbaas.console.enabled", "false",
+            "Master switch for the DBaaS console (query, browse tables, schema management)."
+                    + " Ships off.", true);
+
+    public static final ConfigKey<Integer> DbaasConsoleRowLimit = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.console.row.limit", "1000",
+            "Maximum rows a console job may return.", true);
+
+    public static final ConfigKey<Integer> DbaasConsoleBytesLimit = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.console.bytes.limit", "1048576",
+            "Maximum serialized result size in bytes before a console job is truncated.", true);
+
+    public static final ConfigKey<Integer> DbaasConsoleStatementTimeout = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.console.statement.timeout", "30",
+            "Statement timeout in seconds, enforced by the agent against the database engine.", true);
+
+    public static final ConfigKey<Boolean> DbaasConsoleWriteEnabled = new ConfigKey<>(
+            "Advanced", Boolean.class, "dbaas.console.write.enabled", "false",
+            "Allows runDbaasQuery with write=true (the owner credential). Ships off.", true);
+
+    public static final ConfigKey<Boolean> DbaasConsoleDropEnabled = new ConfigKey<>(
+            "Advanced", Boolean.class, "dbaas.console.drop.enabled", "false",
+            "Allows dropDbaasTable. Ships off and stays off until per-database backup exists"
+                    + " (PLAN-DBAAS-CONSOLE.md section 8).", true);
+
+    public static final ConfigKey<Integer> DbaasAgentLongPollSeconds = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.agent.longpoll.seconds", "25",
+            "How long getDbaasAgentJob holds the request open waiting for a job.", true);
+
+    public static final ConfigKey<Integer> DbaasAgentTokenRotateDays = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.agent.token.rotate.days", "7",
+            "Days after which a successful poll returns a fresh agent token.", true);
+
+    public static final ConfigKey<Integer> DbaasJobTtl = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.job.ttl", "120",
+            "Seconds before an undispatched console job expires.", true);
+
+    public static final ConfigKey<Integer> DbaasJobResultTtl = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.job.result.ttl", "300",
+            "Seconds before an uncollected console job result is swept.", true);
 
     // Grace period before the opt-in sweeper may remove an orphaned data disk.
     private static final long DATA_DISK_GRACE_SECONDS = 24 * 3600;
@@ -264,15 +309,24 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
      * Base64 because that is what the user data API takes.
      */
     static String buildUserData(String dbName, String dbUsername, String dbPassword,
-            String vmUuid, String reportUrl, String reportToken) {
+            String dbUserRo, String dbPasswordRo, String vmUuid, String reportUrl,
+            String reportToken, String agentToken) {
         JsonObject request = new JsonObject();
         request.addProperty("db_name", dbName);
         request.addProperty("db_user", dbUsername);
         request.addProperty("db_password", dbPassword);
+        if (dbUserRo != null && !dbUserRo.isEmpty()) {
+            request.addProperty("db_user_ro", dbUserRo);
+            request.addProperty("db_password_ro", dbPasswordRo);
+        }
         if (reportUrl != null && !reportUrl.isEmpty()) {
             request.addProperty("vm_id", vmUuid);
             request.addProperty("report_url", reportUrl);
+            request.addProperty("api_url", reportUrl);
             request.addProperty("report_token", reportToken);
+            if (agentToken != null && !agentToken.isEmpty()) {
+                request.addProperty("agent_token", agentToken);
+            }
         }
 
         String cloudConfig = "#cloud-config\n"
@@ -309,6 +363,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     public boolean start() {
         s_runningManager = this;
         ensureCredentialsTableExists();
+        ensureConsoleTablesExists();
         cleanupOrphanedCredentials();
         cleanupOrphanedDataDisks();
         scheduleCredentialsCleanup();
@@ -339,6 +394,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             try {
                 cleanupOrphanedCredentials();
                 cleanupOrphanedDataDisks();
+                sweepConsole();
             } catch (Throwable t) {
                 // The sweeper must never bring its thread down: a failed sweep
                 // simply retries on the next interval.
@@ -467,6 +523,452 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
+    // ===== console transport (PLAN-DBAAS-CONSOLE.md C1) =====
+
+    @Override
+    public boolean isConsoleEnabled() {
+        return DbaasConsoleEnabled.value();
+    }
+
+    @Override
+    public boolean isConsoleWriteEnabled() {
+        return DbaasConsoleWriteEnabled.value();
+    }
+
+    @Override
+    public boolean isConsoleDropEnabled() {
+        return DbaasConsoleDropEnabled.value();
+    }
+
+    @Override
+    public int consoleRowLimit() {
+        return DbaasConsoleRowLimit.value();
+    }
+
+    @Override
+    public long getJobAccountId(String jobUuid) {
+        String sql = "SELECT account_id FROM dbaas_jobs WHERE uuid = ?";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()) {
+                pstmt.setString(1, jobUuid);
+                if (rs.next()) {
+                    return rs.getLong(1);
+                }
+                return -1;
+            }
+        } catch (Exception e) {
+            logger.warn("failed to look up the console job {}", jobUuid, e);
+            return -1;
+        }
+    }
+
+
+    static final String CONSOLE_SCHEMA_RESOURCE = "db/schema-dbaas-console.sql";
+
+    private void ensureConsoleTablesExists() {
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB);
+                InputStream in = DbaasManagerImpl.class.getClassLoader()
+                        .getResourceAsStream(CONSOLE_SCHEMA_RESOURCE)) {
+            if (in == null) {
+                throw new IOException("console schema resource not found on the classpath: " + CONSOLE_SCHEMA_RESOURCE);
+            }
+            String contents = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+            String cleaned = Arrays.stream(contents.split("\n"))
+                    .filter(line -> !line.trim().startsWith("--"))
+                    .collect(Collectors.joining("\n"));
+            for (String stmt : cleaned.split(";")) {
+                String sql = stmt.trim();
+                if (sql.isEmpty()) {
+                    continue;
+                }
+                try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                    pstmt.executeUpdate();
+                }
+            }
+            logger.info("console tables ensured");
+        } catch (Exception e) {
+            logger.error("failed to ensure the console tables exist -- the console will not work", e);
+        }
+    }
+
+    // Instances provisioned before the db_role column existed get 'owner':
+    // their one credential was the owner credential.
+    private void ensureDbRoleColumn(TransactionLegacy txn) throws SQLException {
+        String check = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()"
+                + " AND TABLE_NAME = 'dbaas_credentials' AND COLUMN_NAME = 'db_role'";
+        try (PreparedStatement pstmt = txn.prepareStatement(check); ResultSet rs = pstmt.executeQuery()) {
+            if (rs.next() && rs.getInt(1) > 0) {
+                return;
+            }
+        }
+        try (PreparedStatement pstmt = txn.prepareStatement(
+                "ALTER TABLE `dbaas_credentials` ADD COLUMN `db_role` varchar(16) NOT NULL DEFAULT 'owner'")) {
+            pstmt.executeUpdate();
+            logger.info("added db_role column to dbaas_credentials (existing rows default to owner)");
+        }
+    }
+
+    // One live agent token per instance: minted at createDatabase, rotated by
+    // the agent itself, revoked with the instance by the sweeper.
+    private void recordAgentToken(Long vmId, String tokenHash) {
+        String sql = "INSERT INTO dbaas_agent_tokens (vm_id, token_hash) VALUES (?, ?)"
+                + " ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), rotated_at = NOW(),"
+                + " last_seen_at = NULL";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                pstmt.setLong(1, vmId);
+                pstmt.setString(2, tokenHash);
+                pstmt.executeUpdate();
+            }
+        } catch (Exception e) {
+            logger.warn("failed to record the agent token for VM {}", vmId, e);
+        }
+    }
+
+    // Validates vmid + token against dbaas_agent_tokens (hash only; the raw
+    // token is never stored) and touches last_seen_at for the online flag.
+    public boolean isAgentTokenValid(String vmUuid, String token) {
+        String sql = "SELECT t.id, t.token_hash FROM dbaas_agent_tokens t"
+                + " JOIN vm_instance v ON v.id = t.vm_id WHERE v.uuid = ? AND v.removed IS NULL";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()) {
+                if (!rs.next()) {
+                    return false;
+                }
+                long tokenId = rs.getLong(1);
+                boolean matches = sha256Hex(token).equals(rs.getString(2));
+                if (matches) {
+                    try (PreparedStatement touch = txn.prepareStatement(
+                            "UPDATE dbaas_agent_tokens SET last_seen_at = NOW() WHERE id = ?")) {
+                        touch.setLong(1, tokenId);
+                        touch.executeUpdate();
+                    }
+                }
+                return matches;
+            }
+        } catch (Exception e) {
+            logger.warn("agent token validation failed for VM {}", vmUuid, e);
+            return false;
+        }
+    }
+
+    // Creates a console job. The caller has validated every parameter and
+    // resolved the target role; this only persists and timestamps.
+    public String createConsoleJob(Long vmId, long accountId, String type, String payload, String dbRole) {
+        String uuid = UUID.randomUUID().toString();
+        String sql = "INSERT INTO dbaas_jobs (uuid, vm_id, account_id, type, db_role, payload, state, expires_at)"
+                + " VALUES (?, ?, ?, ?, ?, ?, 'pending', DATE_ADD(NOW(), INTERVAL ? SECOND))";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                pstmt.setString(1, uuid);
+                pstmt.setLong(2, vmId);
+                pstmt.setLong(3, accountId);
+                pstmt.setString(4, type);
+                pstmt.setString(5, dbRole);
+                pstmt.setString(6, DBEncryptionUtil.encrypt(payload));
+                pstmt.setInt(7, DbaasJobTtl.value());
+                pstmt.executeUpdate();
+            }
+        } catch (Exception e) {
+            throw new CloudRuntimeException("failed to create the console job: " + e.getMessage(), e);
+        }
+        // Audit line: job uuid, type, account, instance, role -- never the
+        // payload, which can carry SQL text as sensitive as the data.
+        logger.info("console job {} created: type={} vm={} account={} role={}", uuid, type, vmId, accountId, dbRole);
+        return uuid;
+    }
+
+    // The engine type for a template, derived from its script entry in
+    // config.json (mysql.sh -> mysql): the key the type allowlist is keyed by.
+    public String consoleEngineTypeForVm(Long vmId) {
+        JsonObject engine = engineConfigForVm(vmId);
+        if (engine == null || !engine.has("script")) {
+            return null;
+        }
+        String script = engine.get("script").getAsString();
+        return script.endsWith(".sh") ? script.substring(0, script.length() - 3) : script;
+    }
+
+    // The per-engine column-type allowlist, read from config.json -- never a
+    // hardcoded list in Java, same rule as the engines map.
+    public List<String> consoleTypeAllowlist(String engineType) {
+        try {
+            JsonObject types = readEnginesConfig().getAsJsonObject("types");
+            if (types == null || !types.has(engineType)) {
+                return new ArrayList<>();
+            }
+            List<String> result = new ArrayList<>();
+            for (JsonElement e : types.get(engineType).getAsJsonArray()) {
+                result.add(e.getAsString());
+            }
+            return result;
+        } catch (Exception e) {
+            logger.warn("could not read the type allowlist for engine {}", engineType, e);
+            return new ArrayList<>();
+        }
+    }
+
+    // Long-poll for the agent: holds up to longPollSeconds waiting for a
+    // pending job, marks it dispatched exactly once, and returns the job as
+    // JSON (payload decrypted, limits included, plus a rotated token when due).
+    // Returns an empty string when the hold expired with nothing to do.
+    public String agentPollJob(String vmUuid, int longPollSeconds) {
+        String vmIdSql = "SELECT t.vm_id, t.token_hash, t.rotated_at FROM dbaas_agent_tokens t"
+                + " JOIN vm_instance v ON v.id = t.vm_id WHERE v.uuid = ? AND v.removed IS NULL";
+        long vmId = -1;
+        String tokenHash = null;
+        java.sql.Timestamp rotatedAt = null;
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(vmIdSql); ResultSet rs = pstmt.executeQuery()) {
+                pstmt.setString(1, vmUuid);
+                if (rs.next()) {
+                    vmId = rs.getLong(1);
+                    tokenHash = rs.getString(2);
+                    rotatedAt = rs.getTimestamp(3);
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("agent poll failed to resolve the VM {}", vmUuid, e);
+            return "";
+        }
+        if (vmId < 0) {
+            return "";
+        }
+        long deadline = System.nanoTime() + longPollSeconds * 1_000_000_000L;
+        long[] jobId = {-1};
+        String jobUuid = null;
+        String type = null;
+        String dbRole = null;
+        String payloadEncrypted = null;
+        while (System.nanoTime() < deadline) {
+            String find = "SELECT id, uuid, type, db_role, payload FROM dbaas_jobs"
+                    + " WHERE vm_id = ? AND state = 'pending' AND expires_at > NOW()"
+                    + " ORDER BY created_at ASC LIMIT 1";
+            try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+                try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
+                    pstmt.setLong(1, vmId);
+                    if (rs.next()) {
+                        jobId[0] = rs.getLong(1);
+                        jobUuid = rs.getString(2);
+                        type = rs.getString(3);
+                        dbRole = rs.getString(4);
+                        payloadEncrypted = rs.getString(5);
+                    }
+                }
+            } catch (Exception e) {
+                logger.warn("agent poll failed for VM {}", vmUuid, e);
+                return "";
+            }
+            if (jobId[0] > 0) {
+                break;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return "";
+            }
+        }
+        if (jobId[0] < 0) {
+            return "";
+        }
+        // Mark dispatched exactly once: the state predicate makes a concurrent
+        // second dispatch update zero rows.
+        String dispatch = "UPDATE dbaas_jobs SET state = 'dispatched', dispatched_at = NOW()"
+                + " WHERE id = ? AND state = 'pending'";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(dispatch)) {
+                pstmt.setLong(1, jobId[0]);
+                if (pstmt.executeUpdate() == 0) {
+                    return "";   // someone else took it; the agent re-polls
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("agent poll failed to dispatch job {} for VM {}", jobUuid, vmUuid, e);
+            return "";
+        }
+        JsonObject response = new JsonObject();
+        response.addProperty("jobid", jobUuid);
+        response.addProperty("type", type);
+        response.addProperty("db_role", dbRole);
+        response.addProperty("payload", DBEncryptionUtil.decrypt(payloadEncrypted));
+        response.addProperty("row_limit", DbaasConsoleRowLimit.value());
+        response.addProperty("bytes_limit", DbaasConsoleBytesLimit.value());
+        response.addProperty("timeout_seconds", DbaasConsoleStatementTimeout.value());
+        // Token rotation: a successful poll past the rotation age hands the
+        // agent a fresh token, which replaces the old one on its next call.
+        if (rotatedAt == null || rotatedAt.getTime() < System.currentTimeMillis()
+                - DbaasAgentTokenRotateDays.value() * 86_400_000L) {
+            String fresh = generateReportToken();
+            try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+                try (PreparedStatement pstmt = txn.prepareStatement(
+                        "UPDATE dbaas_agent_tokens SET token_hash = ?, rotated_at = NOW() WHERE vm_id = ?")) {
+                    pstmt.setString(1, sha256Hex(fresh));
+                    pstmt.setLong(2, vmId);
+                    pstmt.executeUpdate();
+                }
+            } catch (Exception e) {
+                logger.warn("agent token rotation failed for VM {}", vmUuid, e);
+            }
+            response.addProperty("new_token", fresh);
+        }
+        return response.toString();
+    }
+
+    // The agent reports a finished job. Validates that the job belongs to
+    // this VM+token and is in the dispatched state, writes the encrypted
+    // result row, and closes the job. Returns false when anything does not
+    // line up -- the caller answers 403 with an identical body either way.
+    public boolean agentReportResult(String vmUuid, String token, String jobUuid, String status,
+            int rowCount, boolean truncated, String result, String error) {
+        String find = "SELECT j.id FROM dbaas_jobs j"
+                + " JOIN dbaas_agent_tokens t ON t.vm_id = j.vm_id"
+                + " JOIN vm_instance v ON v.id = t.vm_id"
+                + " WHERE j.uuid = ? AND v.uuid = ? AND t.token_hash = ? AND j.state = 'dispatched'";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            long jobId = -1;
+            try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
+                pstmt.setString(1, jobUuid);
+                pstmt.setString(2, vmUuid);
+                pstmt.setString(3, sha256Hex(token));
+                if (rs.next()) {
+                    jobId = rs.getLong(1);
+                }
+            }
+            if (jobId < 0) {
+                return false;
+            }
+            boolean ok = STATUS_CONFIRMED.equals(status);
+            try (PreparedStatement ins = txn.prepareStatement(
+                    "INSERT INTO dbaas_job_results (job_id, result) VALUES (?, ?)")) {
+                ins.setLong(1, jobId);
+                ins.setString(2, DBEncryptionUtil.encrypt(result == null ? "" : result));
+                ins.executeUpdate();
+            }
+            try (PreparedStatement upd = txn.prepareStatement(
+                    "UPDATE dbaas_jobs SET state = ?, finished_at = NOW(), row_count = ?, truncated = ?,"
+                    + " error = ? WHERE id = ? AND state = 'dispatched'")) {
+                upd.setString(1, ok ? STATUS_CONFIRMED : STATUS_FAILED);
+                if (rowCount >= 0) {
+                    upd.setInt(2, rowCount);
+                } else {
+                    upd.setNull(2, java.sql.Types.INTEGER);
+                }
+                upd.setInt(3, truncated ? 1 : 0);
+                if (error != null && !error.isEmpty()) {
+                    upd.setString(4, error.length() > 1000 ? error.substring(0, 1000) : error);
+                } else {
+                    upd.setNull(4, java.sql.Types.VARCHAR);
+                }
+                upd.setLong(5, jobId);
+                int updated = upd.executeUpdate();
+                if (updated > 0) {
+                    logger.info("console job {} {}: rows={} truncated={}", jobUuid,
+                            ok ? "done" : "failed", rowCount, truncated);
+                    return true;
+                }
+                return false;
+            }
+        } catch (Exception e) {
+            logger.warn("failed to record the console result for job {}", jobUuid, e);
+            return false;
+        }
+    }
+
+    // Delete-on-read: the result row is removed the moment it is fetched,
+    // the job row stays as the audit trail. Returns null when the job does
+    // not exist for this account; the caller turns that into a not-found.
+    public String getUserJobResult(String jobUuid, long accountId) {
+        String find = "SELECT id, state, type, row_count, truncated, error FROM dbaas_jobs"
+                + " WHERE uuid = ? AND account_id = ?";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            long jobId = -1;
+            String state = null;
+            String type = null;
+            long rowCount = -1;
+            boolean truncated = false;
+            String error = null;
+            try (PreparedStatement pstmt = txn.prepareStatement(find); ResultSet rs = pstmt.executeQuery()) {
+                pstmt.setString(1, jobUuid);
+                pstmt.setLong(2, accountId);
+                if (rs.next()) {
+                    jobId = rs.getLong(1);
+                    state = rs.getString(2);
+                    type = rs.getString(3);
+                    rowCount = rs.getLong(4);
+                    truncated = rs.getBoolean(5);
+                    error = rs.getString(6);
+                }
+            }
+            if (jobId < 0) {
+                return null;
+            }
+            JsonObject response = new JsonObject();
+            response.addProperty("jobid", jobUuid);
+            response.addProperty("type", type);
+            response.addProperty("state", state);
+            response.addProperty("row_count", rowCount);
+            response.addProperty("truncated", truncated);
+            if (error != null) {
+                response.addProperty("error", error);
+            }
+            if (STATUS_CONFIRMED.equals(state)) {
+                String resultSql = "SELECT result FROM dbaas_job_results WHERE job_id = ?";
+                try (PreparedStatement pstmt = txn.prepareStatement(resultSql); ResultSet rs = pstmt.executeQuery()) {
+                    pstmt.setLong(1, jobId);
+                    if (rs.next()) {
+                        response.addProperty("result", DBEncryptionUtil.decrypt(rs.getString(1)));
+                        try (PreparedStatement del = txn.prepareStatement(
+                                "DELETE FROM dbaas_job_results WHERE job_id = ?")) {
+                            del.setLong(1, jobId);
+                            del.executeUpdate();
+                        }
+                    } else {
+                        response.addProperty("collected", true);
+                    }
+                }
+            }
+            return response.toString();
+        } catch (Exception e) {
+            throw new CloudRuntimeException("failed to read the console job result: " + e.getMessage(), e);
+        }
+    }
+
+    // Sweeps the console tables: undispatched jobs expire by TTL, uncollected
+    // results die by their own TTL, and agent tokens of expunged instances
+    // are revoked.
+    private void sweepConsole() {
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(
+                    "UPDATE dbaas_jobs SET state = 'expired', finished_at = NOW()"
+                    + " WHERE state = 'pending' AND expires_at < NOW()")) {
+                int expired = pstmt.executeUpdate();
+                if (expired > 0) {
+                    logger.info("console sweep expired {} undispatched job(s)", expired);
+                }
+            }
+            try (PreparedStatement pstmt = txn.prepareStatement(
+                    "DELETE FROM dbaas_job_results"
+                    + " WHERE created_at < DATE_SUB(NOW(), INTERVAL " + DbaasJobResultTtl.value() + " SECOND)")) {
+                int swept = pstmt.executeUpdate();
+                if (swept > 0) {
+                    logger.info("console sweep removed {} uncollected result(s)", swept);
+                }
+            }
+            try (PreparedStatement pstmt = txn.prepareStatement(
+                    "DELETE t FROM dbaas_agent_tokens t"
+                    + " LEFT JOIN vm_instance v ON v.id = t.vm_id"
+                    + " WHERE v.id IS NULL OR v.removed IS NOT NULL")) {
+                int revoked = pstmt.executeUpdate();
+                if (revoked > 0) {
+                    logger.info("console sweep revoked {} agent token(s) of expunged instances", revoked);
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("console sweep failed", e);
+        }
+    }
+
     static final String SCHEMA_RESOURCE = "db/schema-dbaas-credentials.sql";
 
     /**
@@ -506,6 +1008,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.executeUpdate();
             ensureLegacyVmColumnsDropped(txn);
+            ensureDbRoleColumn(txn);
         } catch (Exception e) {
             // Credential storage degrades gracefully (see storeCredential), so
             // a management server that can't create this table should still
@@ -575,6 +1078,11 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         validateIdentifier(cmd.getDbName(), "dbname");
         validateIdentifier(dbUsername, "dbusername");
         String dbPassword = validateOrGeneratePassword(cmd.getDbPassword());
+        // The console's read-only role: same charset rules, name derived from
+        // the owner. Created by the engine script from the request; stored as
+        // a second credential row with db_role='readonly'.
+        final String dbUserRo = dbUsername + "_ro";
+        final String dbPasswordRo = generatePassword();
 
         VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
         if (template == null) {
@@ -607,8 +1115,11 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
         try {
             String reportUrl = DbaasReportApiUrl.value();
-            String reportToken = (reportUrl != null && !reportUrl.isEmpty()) ? generateReportToken() : null;
-            String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword, vm.getUuid(), reportUrl, reportToken);
+            boolean reportingConfigured = reportUrl != null && !reportUrl.isEmpty();
+            String reportToken = reportingConfigured ? generateReportToken() : null;
+            String agentToken = reportingConfigured ? generateReportToken() : null;
+            String userData = buildUserData(cmd.getDbName(), dbUsername, dbPassword, dbUserRo, dbPasswordRo,
+                    vm.getUuid(), reportUrl, reportToken, agentToken);
             userVmManager.updateVirtualMachine(vm.getId(), null, null, null, null, null, null,
                     userData, null, null, null, BaseCmd.HTTPMethod.POST, null, null, null, null, null);
 
@@ -621,11 +1132,19 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 java.sql.Timestamp expiresAt = new java.sql.Timestamp(
                         System.currentTimeMillis() + DbaasReportTokenTtl.value() * 1000L);
                 storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
-                        sha256Hex(reportToken), expiresAt);
+                        sha256Hex(reportToken), expiresAt, ROLE_OWNER);
             } else {
                 logger.warn("dbaas.report.api.url is not set -- instance {} cannot report its provisioning result,"
                         + " and its credential will stay 'pending'", vm.getUuid());
-                storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING);
+                storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
+                        null, null, ROLE_OWNER);
+            }
+            // The console's read-only credential, stored as its own row so
+            // Show Password per role and the agent's roles.json both resolve.
+            storeCredential(vm.getUuid(), dbUserRo, dbPasswordRo, engineName, STATUS_PENDING,
+                    null, null, ROLE_READONLY);
+            if (agentToken != null) {
+                recordAgentToken(vm.getId(), sha256Hex(agentToken));
             }
 
             // Looked up as a UserVm rather than cast: the entity manager hands back
@@ -759,15 +1278,25 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         // findById + ACL already ran in getEntityOwnerId before execute() was
         // reached; this just resolves the UUID the table is keyed on.
         String vmId = vmUuid(cmd.getVirtualMachineId());
+        // Credentials are per (instance, role): the owner row for DDL and
+        // writes, the readonly row for browse and query. Older rows --
+        // provisioned before the column existed -- default to 'owner' via
+        // the ALTER in ensureDbRoleColumn.
+        String dbRole = cmd.getDbRole() == null || cmd.getDbRole().isEmpty()
+                ? DbaasManagerImpl.ROLE_OWNER : cmd.getDbRole();
 
         String sql = "SELECT db_username, db_password_encrypted, engine, status, status_message FROM dbaas_credentials WHERE vm_id = ?"
                 + (cmd.getDbUsername() != null ? " AND db_username = ?" : "")
+                + " AND db_role = ?"
                 + " ORDER BY created_at DESC, id DESC LIMIT 1";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.setString(1, vmId);
             if (cmd.getDbUsername() != null) {
                 pstmt.setString(2, cmd.getDbUsername());
+                pstmt.setString(3, dbRole);
+            } else {
+                pstmt.setString(2, dbRole);
             }
             try (ResultSet rs = pstmt.executeQuery()) {
                 DbaasResponse response = new DbaasResponse();
@@ -832,14 +1361,15 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // instance login password is intentionally not stored here; it is shown
     // exactly once on the creation screen / notification.
     private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status) {
-        storeCredential(vmId, dbUsername, dbPassword, engine, status, null, null);
+        storeCredential(vmId, dbUsername, dbPassword, engine, status, null, null, ROLE_OWNER);
     }
 
     private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status,
-            String reportTokenHash, java.sql.Timestamp reportTokenExpiresAt) {
+            String reportTokenHash, java.sql.Timestamp reportTokenExpiresAt, String dbRole) {
         String sql = "INSERT INTO dbaas_credentials"
-                + " (vm_id, db_username, db_password_encrypted, engine, status, report_token_hash, report_token_expires_at)"
-                + " VALUES (?, ?, ?, ?, ?, ?, ?)";
+                + " (vm_id, db_username, db_password_encrypted, engine, status, report_token_hash,"
+                + " report_token_expires_at, db_role)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.setString(1, vmId);
@@ -849,6 +1379,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             pstmt.setString(5, status);
             pstmt.setString(6, reportTokenHash);
             pstmt.setTimestamp(7, reportTokenExpiresAt);
+            pstmt.setString(8, dbRole);
             pstmt.executeUpdate();
         } catch (Exception e) {
             // The provisioning call already succeeded and the tenant already
@@ -949,6 +1480,18 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         cmdList.add(GetDatabasePasswordCmd.class);
         cmdList.add(ListDbaasEnginesCmd.class);
         cmdList.add(DeleteDbaasCredentialsCmd.class);
+        // console job commands (PLAN-DBAAS-CONSOLE.md section 4.1)
+        cmdList.add(ListDbaasTablesCmd.class);
+        cmdList.add(DescribeDbaasTableCmd.class);
+        cmdList.add(PreviewDbaasTableCmd.class);
+        cmdList.add(CreateDbaasTableCmd.class);
+        cmdList.add(DropDbaasTableCmd.class);
+        cmdList.add(AddDbaasColumnCmd.class);
+        cmdList.add(DropDbaasColumnCmd.class);
+        cmdList.add(CreateDbaasIndexCmd.class);
+        cmdList.add(DropDbaasIndexCmd.class);
+        cmdList.add(RunDbaasQueryCmd.class);
+        cmdList.add(GetDbaasJobResultCmd.class);
         return cmdList;
     }
 
@@ -961,6 +1504,9 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     public List<Class<?>> getAuthCommands() {
         List<Class<?>> cmdList = new ArrayList<>();
         cmdList.add(ReportProvisioningResultCmd.class);
+        // the console agent's long-poll and result reporting (PLAN-DBAAS-CONSOLE.md 4.3)
+        cmdList.add(GetDbaasAgentJobCmd.class);
+        cmdList.add(ReportDbaasJobResultCmd.class);
         return cmdList;
     }
 
@@ -1043,6 +1589,9 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     @Override
     public ConfigKey<?>[] getConfigKeys() {
         return new ConfigKey<?>[] {DbaasConfigPath, DbaasCredentialsCleanupInterval,
-                DbaasReportTokenTtl, DbaasReportApiUrl, DbaasReportRateLimit, DbaasDataDiskCleanupEnabled};
+                DbaasReportTokenTtl, DbaasReportApiUrl, DbaasReportRateLimit, DbaasDataDiskCleanupEnabled,
+                DbaasConsoleEnabled, DbaasConsoleRowLimit, DbaasConsoleBytesLimit,
+                DbaasConsoleStatementTimeout, DbaasConsoleWriteEnabled, DbaasConsoleDropEnabled,
+                DbaasAgentLongPollSeconds, DbaasAgentTokenRotateDays, DbaasJobTtl, DbaasJobResultTtl};
     }
 }
