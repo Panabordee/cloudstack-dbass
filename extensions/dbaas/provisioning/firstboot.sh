@@ -1,30 +1,119 @@
 #!/usr/bin/env bash
 # Lives at /opt/dbaas/firstboot.sh INSIDE each config-drive dbaas-* template.
+# Run by dbaas-provision.service, a systemd oneshot that fires on EVERY boot
+# -- not by cloud-init's runcmd, and that is deliberate (read on).
 #
-# cloud-init runs this once, on first boot, after writing the provisioning
-# request the management server put on the config drive to
-# /var/lib/dbaas/request.json. The request carries db_name, db_user and
-# db_password -- the same JSON document the SSH path sends on stdin, so the
-# per-engine scripts are reused unchanged and there is one implementation of
-# the engine SQL, not two.
+# The provisioning request the management server put on the config drive
+# carries db_name, db_user and db_password -- the same JSON document the SSH
+# path sent on stdin, so the per-engine scripts are reused unchanged and
+# there is one implementation of the engine SQL, not two.
 #
 # Provisioning itself never talks to the management server -- that is the
 # entire point of the config-drive path. Reporting the outcome does, over the
 # instance's normal network path, using the one-time token the management
 # server minted for this instance; it is best-effort here (a handful of
-# retries, then give up) and there is no built-in way to retry later yet --
-# that lands with the in-VM agent (Phase D). Until then a report that never
-# arrives leaves the credential 'pending', which is visible and recoverable
-# manually, not silently wrong.
+# retries, then give up) and dbaas-report-retry.timer picks it up if that
+# fails. A report that never arrives leaves the credential 'pending', which
+# is visible and recoverable manually, not silently wrong.
+#
+# Why this does not run under cloud-init's runcmd/write_files (2026-09-08):
+# createDatabase on a Running instance stops it, attaches a NEW config drive
+# carrying a real request, and starts it again. On that second boot
+# cloud-init logged "restored from checked cache: DataSourceConfigDrive" and
+# "Skipping modules '...,runcmd' because no applicable config is provided" --
+# it reused its cached datasource object from the instance's FIRST boot
+# instead of re-reading the reattached ISO, so write_files never wrote
+# request.json and runcmd never ran this script at all. No error anywhere;
+# the credential just sat 'pending' forever. Reproduced and confirmed by
+# reading the attached ISO directly: it had the correct data the whole time.
+# This script now reads the config drive itself (refresh_request_from_configdrive
+# below) instead of trusting cloud-init to have done it, and is triggered by
+# a systemd unit that runs unconditionally every boot rather than a
+# once-per-instance cloud-init module.
 set -euo pipefail
 
 DBAAS_DIR="${DBAAS_DIR:-/opt/dbaas}"
 STATE_DIR="${DBAAS_STATE_DIR:-/var/lib/dbaas}"
 REQUEST_FILE="${STATE_DIR}/request.json"
 RESULT_FILE="${STATE_DIR}/result.json"
-DONE_MARKER="${STATE_DIR}/provisioned"
+# Content-addressed, not a boolean "ever ran": holds the SHA-256 of the last
+# request that was successfully provisioned. A plain reboot re-extracts the
+# same request from the same (unchanged) config drive, hashes the same, and
+# is skipped -- it must not re-run engine SQL against a tenant's live
+# database. A NEW createDatabase call attaches a config drive with different
+# content, hashes differently, and runs. This is what a boolean marker
+# (the old /var/lib/dbaas/provisioned, removed 2026-09-08) could not do: it
+# recorded "has this VM ever provisioned", which permanently blocked any
+# second request, including the documented "create database on a running
+# instance" feature. An older image may still have that file lying around;
+# nothing here reads it, so it is inert and does not need cleaning up.
+PROCESSED_HASH_FILE="${STATE_DIR}/processed.sha256"
+CONFIGDRIVE_LABEL="${DBAAS_CONFIGDRIVE_LABEL:-config-2}"
 
 log() { echo "[dbaas-firstboot] $*" >&2; }
+
+# Reads the config drive directly and refreshes REQUEST_FILE from it,
+# regardless of whether cloud-init ever wrote (or rewrote) that file. Safe to
+# call every boot: it is a read-only mount of a read-only ISO. Returns
+# non-zero (never fatal, callers treat it as best-effort) if the drive or its
+# user-data cannot be found -- an instance deployed with no database attached
+# legitimately has neither.
+refresh_request_from_configdrive() {
+    local device mountpoint userdata_file extracted
+    device=$(blkid -t "LABEL=${CONFIGDRIVE_LABEL}" -o device 2>/dev/null | head -1)
+    if [[ -z "$device" ]]; then
+        log "no config drive labelled ${CONFIGDRIVE_LABEL} found"
+        return 1
+    fi
+    mountpoint=$(mktemp -d)
+    if ! mount -t iso9660 -o ro "$device" "$mountpoint" 2>/dev/null; then
+        log "could not mount config drive ${device}"
+        rmdir "$mountpoint" 2>/dev/null || true
+        return 1
+    fi
+    userdata_file="${mountpoint}/openstack/latest/user_data"
+    if [[ ! -f "$userdata_file" ]]; then
+        umount "$mountpoint"
+        rmdir "$mountpoint" 2>/dev/null || true
+        log "config drive has no openstack/latest/user_data"
+        return 1
+    fi
+    # user_data is the #cloud-config document DbaasManagerImpl.buildUserData
+    # writes: a single write_files entry whose content is exactly the request
+    # JSON, indented by the fixed amount that function always uses. Extract
+    # it directly rather than pulling in a YAML parser for one known, fixed
+    # field -- this project generates the document, so its shape is not a
+    # guess.
+    extracted=$(python3 - "$userdata_file" <<'PY'
+import re, sys
+text = open(sys.argv[1]).read()
+m = re.search(r'content: \|\n((?:^ {6}.*\n?)+)', text, re.MULTILINE)
+if not m:
+    sys.exit(1)
+lines = [line[6:] for line in m.group(1).splitlines()]
+print("\n".join(lines))
+PY
+    ) || { umount "$mountpoint"; rmdir "$mountpoint" 2>/dev/null || true; log "no write_files content found in user_data"; return 1; }
+    umount "$mountpoint"
+    rmdir "$mountpoint" 2>/dev/null || true
+    if [[ -z "$extracted" ]]; then
+        log "extracted an empty request from the config drive"
+        return 1
+    fi
+    # Validate it parses as JSON before trusting it -- a truncated or
+    # malformed extraction must fail loudly via the normal "no request"
+    # path below, not silently leave a broken REQUEST_FILE in place that
+    # every later step assumes is well-formed.
+    if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' <(printf '%s' "$extracted") 2>/dev/null; then
+        log "extracted request does not parse as JSON, discarding it"
+        return 1
+    fi
+    mkdir -p "$STATE_DIR"
+    printf '%s\n' "$extracted" > "$REQUEST_FILE"
+    chmod 0600 "$REQUEST_FILE"
+    chown root:root "$REQUEST_FILE"
+    return 0
+}
 
 write_result() {
     # status message -- recorded for anyone reading the instance's console.
@@ -100,15 +189,27 @@ report_result() {
     return 1
 }
 
-if [[ -e "$DONE_MARKER" ]]; then
-    log "already provisioned, nothing to do"
+# Always try to refresh from the config drive first -- see the header
+# comment for why this cannot be left to cloud-init. Best-effort: if it
+# fails (no drive, no database attached to this instance, a bad read),
+# fall through to whatever REQUEST_FILE already holds, which is exactly
+# the old behaviour for an instance with nothing to provision.
+refresh_request_from_configdrive || true
+
+if [[ ! -f "$REQUEST_FILE" ]]; then
+    # No request anywhere: this instance was deployed without a database,
+    # which is a normal thing to do. Not an error.
+    log "no provisioning request at ${REQUEST_FILE}, nothing to do"
     exit 0
 fi
 
-if [[ ! -f "$REQUEST_FILE" ]]; then
-    # No request on the config drive: this instance was deployed without a
-    # database, which is a normal thing to do. Not an error.
-    log "no provisioning request at ${REQUEST_FILE}, nothing to do"
+CURRENT_HASH=$(sha256sum "$REQUEST_FILE" | awk '{print $1}')
+if [[ -f "$PROCESSED_HASH_FILE" && "$(cat "$PROCESSED_HASH_FILE")" == "$CURRENT_HASH" ]]; then
+    log "this exact request was already provisioned, nothing to do"
+    # The extracted copy holds the database password in cleartext and has
+    # served no purpose since it matched what was already done -- do not
+    # leave it sitting on disk for the length of an uneventful reboot.
+    rm -f "$REQUEST_FILE"
     exit 0
 fi
 
@@ -215,8 +316,11 @@ PY
         log "report did not land -- keeping ${REQUEST_FILE} so dbaas-report-retry can finish it"
         systemctl start dbaas-report-retry.timer >/dev/null 2>&1 || true
     fi
-    : > "$DONE_MARKER"
-    chmod 0600 "$DONE_MARKER"
+    # Recorded by content, not by a boolean -- see the header comment. A
+    # later createDatabase call on this same instance attaches a config
+    # drive whose request hashes differently, so this does not block it.
+    printf '%s' "$CURRENT_HASH" > "$PROCESSED_HASH_FILE"
+    chmod 0600 "$PROCESSED_HASH_FILE"
     log "provisioned successfully"
     exit 0
 fi

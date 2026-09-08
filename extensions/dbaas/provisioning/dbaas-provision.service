@@ -1,0 +1,23 @@
+[Unit]
+Description=DBaaS: provision the database from the config drive, every boot
+Documentation=file:///opt/dbaas/firstboot.sh
+# Deliberately no ConditionPathExists on request.json: the whole point of
+# this unit is that firstboot.sh reads the config drive itself and decides
+# what to do (nothing / provision / already done), rather than trusting
+# something else to have staged a file first. See firstboot.sh's header
+# comment for why (cloud-init's datasource cache silently skipped a second
+# request on 2026-09-08).
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dbaas/firstboot.sh
+# firstboot.sh's own engine_ready() loop (up to 120s) is the readiness wait;
+# no engine-specific unit ordering is needed here, and naming one engine's
+# systemd unit in a file shared by all four templates would be exactly the
+# kind of hardcoding this project avoids everywhere else (config.json's
+# engines map, not a switch statement in Java, is the same rule).
+
+[Install]
+WantedBy=multi-user.target

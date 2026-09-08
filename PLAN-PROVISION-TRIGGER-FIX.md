@@ -4,8 +4,12 @@ Fixes the bug found on 2026-09-08 (`ACCEPTANCE-REPORT-2026-09-08-PART2.md`
 §5): `createDatabase` on an instance that has already booted once does
 nothing at all, silently, and the credential sits `pending` forever.
 
-Not started. Bundle this with the template rebuild that is already pending
-for other reasons (see §6) — it needs one rebuild, and so do they.
+**Code done, not yet baked into any image.** `firstboot.sh` and the new
+`dbaas-provision.service` are written and committed (§3.1–§3.3 below reflect
+what actually shipped, not just the design). What's left is entirely host
+work: bake both files into the four templates and run §4's acceptance cases
+for real — see §3.5 for exact commands. Bundle with the rebuild already
+pending for other reasons (§6) — it needs one rebuild, and so do they.
 
 ---
 
@@ -68,49 +72,60 @@ Rejected alternatives, with reasons, so this is not relitigated later:
 
 ## 3. The change
 
-### 3.1 New unit: `dbaas-provision.service`
+### 3.1 New unit: `dbaas-provision.service` — done
 
 Lives beside the existing units in `extensions/dbaas/provisioning/`.
 
-- `Type=oneshot`, `RemainAfterExit=no`, enabled in the image
-- `After=` the engine's unit and `network-online.target` — same ordering
-  `firstboot.sh` already needs for its readiness wait
-- `ExecStart=/opt/dbaas/firstboot.sh`
-- No `ConditionPathExists` on the request file: the script now sources the
-  request itself (§3.2), so the unit must run unconditionally each boot and
-  let the script decide
+- `Type=oneshot`, `ExecStart=/opt/dbaas/firstboot.sh`
+- `After=network-online.target` only — **deliberately not** ordered after any
+  specific engine's systemd unit. `firstboot.sh`'s own `engine_ready()` poll
+  (already there, up to 120s) is the readiness wait; naming one engine's unit
+  in a file shared by all four templates would be exactly the kind of
+  hardcoding the engines map in `config.json` already exists to avoid
+- no `ConditionPathExists` on the request file: the script sources the
+  request itself (§3.2) and decides what to do, so the unit must run
+  unconditionally every boot
 
-Keep cloud-init's `runcmd` entry in `buildUserData()` as well — harmless,
-and it makes the very first boot fire immediately rather than waiting on
-unit ordering. The script's idempotency (§3.3) makes a double invocation a
-no-op, and that belt-and-braces is worth more than the microseconds saved.
+Kept cloud-init's `runcmd` entry in `buildUserData()` as-is — harmless, and
+it makes the very first boot fire immediately rather than waiting on unit
+ordering. The script's idempotency (§3.3) makes a double invocation a no-op,
+and that belt-and-braces is worth more than the microseconds saved.
 
-### 3.2 `firstboot.sh` reads the config drive itself
+### 3.2 `firstboot.sh` reads the config drive itself — done
 
-New step before anything else: if `/var/lib/dbaas/request.json` is absent or
-stale, extract it from the config drive rather than depending on cloud-init
-having written it.
+Runs unconditionally at the top, before the old marker check ever did:
+`refresh_request_from_configdrive()` is best-effort (returns non-zero, never
+fatal — an instance deployed without a database legitimately has no config
+drive data to find).
 
-- locate the drive by label, the same way everything else in this project
-  does: `blkid -t LABEL='config-2' -o device` (cloud-init logged
-  `source=/dev/sr1`, so do not hardcode `/dev/sr0`)
-- mount read-only to a temp dir, read `openstack/latest/user_data`
-- the payload is the cloud-config this project writes in
-  `DbaasManagerImpl.buildUserData()`, so its shape is known exactly: pull
-  `write_files[0].content` out of it with a small `python3` snippet
-  (`python3` is already a hard requirement of these scripts)
-- write it to `$REQUEST_FILE` with the same `0600 root:root` the current
-  `write_files` block sets, unmount, and carry on with the existing flow
+- locates the drive by label: `blkid -t LABEL=config-2 -o device` (not
+  hardcoded to `/dev/sr0` — cloud-init's own log this session showed
+  `source=/dev/sr1`, so the label lookup is the only reliable way)
+- mounts read-only (`mount -t iso9660 -o ro`) to a `mktemp -d` dir, reads
+  `openstack/latest/user_data`
+- extracts the request with a small `python3` regex matched against the
+  exact, fixed shape `DbaasManagerImpl.buildUserData()` emits (single
+  6-space-indented line after `content: |` — verified against the real
+  generated format, not guessed), rather than pulling in a YAML parser for
+  one known field
+- **validates the extraction parses as JSON before trusting it** — a
+  truncated or malformed read fails loudly into the normal "no request"
+  path instead of leaving a broken file every later step assumes is
+  well-formed. This mirrors the exact failure mode being fixed: a step that
+  silently does nothing is the bug, so the fix must not have one either
+- writes `$REQUEST_FILE` at `0600 root:root`, unmounts, cleans up the temp dir
 
-### 3.3 Replace the boolean marker with a request hash
+### 3.3 Replaced the boolean marker with a request hash — done
 
-Delete `DONE_MARKER` (`/var/lib/dbaas/provisioned`) and the `:103` early
-exit. Replace with `/var/lib/dbaas/processed.sha256`, holding the SHA-256 of
-the request that was last provisioned successfully.
+`DONE_MARKER` (`/var/lib/dbaas/provisioned`) is gone. In its place,
+`/var/lib/dbaas/processed.sha256` holds the SHA-256 of the request that was
+last provisioned successfully.
 
-Logic on each run: compute the hash of the request just read; if it matches
-the stored one, log "request already provisioned" and exit 0; otherwise
-provision, and write the new hash only on success.
+On each run: compute the hash of the request just read; if it matches the
+stored one, log it and exit 0 (also removing the freshly-extracted
+`request.json`, which would otherwise sit on disk holding a cleartext
+password for no reason on every uneventful reboot); otherwise provision, and
+write the new hash only on success.
 
 This is what makes every case come out right, in one mechanism:
 
@@ -125,13 +140,39 @@ This is what makes every case come out right, in one mechanism:
 Keep writing `result.json` exactly as now — the retry timer and any operator
 reading the instance depend on it.
 
-### 3.4 Interaction with the report retry timer
+### 3.4 Interaction with the report retry timer — checked, no change needed
 
-`dbaas-report-retry.timer` keys off `/var/lib/dbaas/request.json` existing.
-Now that the request file is (re)created from the config drive on every boot,
-confirm the timer's `ConditionPathExists` still means what it did — a request
-that was already reported must not cause the timer to re-report. The hash
-file is the right thing to gate on there too; check this when implementing
+`dbaas-report-retry.timer` is not enabled at boot by default; `firstboot.sh`
+only starts it explicitly (`systemctl start dbaas-report-retry.timer`) on
+the branch where reporting failed, and `report-retry.sh` disables and stops
+itself once it succeeds. The success path in `firstboot.sh` never starts it.
+On a plain reboot, `refresh_request_from_configdrive()` may recreate
+`request.json`, but the hash-match branch (§3.3) removes it again before the
+retry timer could ever see it, and that branch is reached before anything
+resembling a report attempt happens. No change needed there.
+
+### 3.5 Deploying it — host work, not started
+
+Same offline `qemu-nbd` pattern as `dbaas-report-retry.*` in
+`RUNBOOK-PATCH-TEMPLATES-2026-09-05.md`. Per template:
+
+```bash
+sudo cp "$REPO/extensions/dbaas/provisioning/firstboot.sh" \
+  /mnt/tplpatch/opt/dbaas/firstboot.sh
+sudo chmod 0755 /mnt/tplpatch/opt/dbaas/firstboot.sh
+
+sudo cp "$REPO/extensions/dbaas/provisioning/dbaas-provision.service" \
+  /mnt/tplpatch/etc/systemd/system/dbaas-provision.service
+
+sudo ln -sf /etc/systemd/system/dbaas-provision.service \
+  /mnt/tplpatch/etc/systemd/system/multi-user.target.wants/dbaas-provision.service
+```
+
+Verify before unmounting: the enable symlink resolves, and
+`sudo chroot /mnt/tplpatch bash -n /opt/dbaas/firstboot.sh` parses clean.
+Remove the old `/var/lib/dbaas/provisioned` file from any already-deployed
+instance's disk only if you want to tidy it — nothing reads it, so leaving
+it is equally correct
 rather than assuming.
 
 ## 4. Acceptance
