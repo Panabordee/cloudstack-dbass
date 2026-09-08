@@ -41,5 +41,14 @@
       "reset_script": "mongodb_reset.sh",
       "port": 27017
     }
+  },
+  "_comment_types": "Per-engine column-type allowlist for the DBaaS console's createDbaasTable/addDbaasColumn (PLAN-DBAAS-CONSOLE.md section 4.2). Keyed by engine type -- the script name in 'engines' above with '.sh' stripped (mysql.sh -> mysql), not the template name. DbaasConsoleJobCmdBase.validateColumnType matches entries case-insensitively, exact or as a '(n)' parameterised prefix (VARCHAR(n) matches VARCHAR(255)). No entry for an engine means every column type is refused for it -- mongodb has none on purpose, since run_ddl_job in the agent refuses schema DDL there regardless (PLAN section 9). Missing entirely (as opposed to an engine simply not listed) makes every createDbaasTable/addDbaasColumn call fail with 'not in the allowlist: allowed are []' -- this key must exist on the deployed config.json, not just here.",
+  "types": {
+    "mysql": ["INT", "BIGINT", "SMALLINT", "TINYINT", "VARCHAR(n)", "CHAR(n)", "TEXT",
+      "DATE", "DATETIME", "TIMESTAMP", "BOOLEAN", "FLOAT", "DOUBLE"],
+    "mariadb": ["INT", "BIGINT", "SMALLINT", "TINYINT", "VARCHAR(n)", "CHAR(n)", "TEXT",
+      "DATE", "DATETIME", "TIMESTAMP", "BOOLEAN", "FLOAT", "DOUBLE"],
+    "postgresql": ["INTEGER", "BIGINT", "SMALLINT", "VARCHAR(n)", "CHAR(n)", "TEXT",
+      "DATE", "TIMESTAMP", "BOOLEAN", "REAL", "NUMERIC(n)"]
   }
 }

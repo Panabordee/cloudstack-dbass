@@ -838,7 +838,18 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             }
             response.addProperty("new_token", fresh);
         }
-        return response.toString();
+        // ApiServlet writes whatever authenticate() returns verbatim -- it does
+        // not wrap it the way the normal command path wraps a response object
+        // in its command name (GetDbaasAgentJobCmd.s_name =
+        // "getdbaasagentjobresponse"). The agent, like every other CloudStack
+        // client, expects that wrapper key. Without it, every dispatched job
+        // was silently dropped: the agent parsed an empty object, treated it
+        // as "no job", and never executed or reported back -- the job sat in
+        // 'dispatched' forever with no error anywhere. Found 2026-09-06 on the
+        // first real end-to-end run.
+        JsonObject wrapper = new JsonObject();
+        wrapper.add("getdbaasagentjobresponse", response);
+        return wrapper.toString();
     }
 
     // The agent reports a finished job. Validates that the job belongs to
