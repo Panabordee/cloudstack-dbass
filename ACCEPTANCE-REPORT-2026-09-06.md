@@ -1,228 +1,176 @@
-# ACCEPTANCE REPORT — host round (2026-09-06) — **INTERIM**
+# ACCEPTANCE REPORT — host round (2026-09-06 → 09-07)
 
-งาน host ตาม `PROMPT-GLM-HOST-ACCEPTANCE.md` — **ยังไม่จบ**: build ชั้น 2
-(เต็มเครื่อง) กำลังรันอยู่, template 212/213/211-secondary ยังไม่ patch,
-acceptance matrix §11 ทั้ง 15 ข้อยังไม่เริ่ม รายงานนี้อัปเดตตามความจริง
-ณ 16:00 UTC แล้วจะแทนที่ด้วยฉบับสุดท้ายเมื่อจบ
+ตาม `PROMPT-GLM-HOST-ACCEPTANCE.md` + ADDENDUM + `PROMPT-GLM-OVERNIGHT-MATRIX.md`
+รายงานนี้แทน interim ฉบับก่อน ทุกข้อความมาจากของที่รันจริงบน host
 
 ---
 
-## 1. Disk — ก่อน/หลัง และสิ่งที่ลบ
+## TL;DR
 
-`df -h /` **ก่อน** (เริ่มงาน):
+- **provisioning พิสูจน์แล้วบนระบบจริง**: `pending → confirmed`, agent long-poll
+  25 s วิ่งจริง, ต่อ mysql จากนอก VM ได้ด้วย user ของ tenant
+- **บั๊กบล็อกใหญ่ 1 ตัวที่ยังไม่แก้**: server ส่ง job JSON **แบบไม่ห่อ wrapper**
+  แต่ agent parse หา `getdbaasagentjobresponse` → **job ทุกตัวที่ถูก dispatch
+  ถูก agent ทิ้งเงียบ ไม่ execute ไม่ report** (§7 รายละเอียด) — แก้ 1 จุดใน
+  `dbaas_agent.py` แล้ว matrix ทั้งชุดจะไหล
+- **§11 matrix ข้อ 1–15: ไม่มีข้อไหนถูกรันจริง** (ถูกบั๊กข้างบนบล็อก) — ตอบตรงๆ
+  ว่า not run ทั้งหมด ไม่อ้างว่าผ่าน
+- บั๊กที่แก้แล้ว 2 ตัว (commit แนบ) + hot-patch jar + restart mgmt 1 ครั้ง
 
-```
-Filesystem                      Size  Used Avail Use% Mounted on
-/dev/mapper/ubuntu--vg-root      42G   39G  278M 100% /
-```
+## 1. Timeline
 
-(แย่กว่าที่ prompt ระบุ 2.2G — เหลือ 278M)
-
-`df -h /` **หลังเคลียร์**:
-
-```
-Filesystem                      Size  Used Avail Use% Mounted on
-/dev/mapper/ubuntu--vg-root      42G   34G  5.4G  87% /
-/dev/mapper/ubuntu--vg-home      35G   20G   14G  59% /export/primary
-```
-
-สิ่งที่ลบ (ทั้งหมดอยู่ในขอบเขต "safe" ของ prompt §2 + ที่ user อนุญาตเพิ่ม):
-
-| สิ่งที่ลบ | ขนาดคืน | หมายเหตุ |
-| --- | --- | --- |
-| `loki` (stop+disable+`apt-get remove`, ลบ `/tmp/loki`) | ~80M RAM + ต้นตอ log | **user อนุญาตผ่าน chat** — config คงไว้ที่ `/etc/loki/` เพื่อ undo |
-| `/var/log/syslog.1` | 8.4G | ปลายทางของ loki debug flood (`mock.go Get - deadline exceeded` ต่อเนื่อง) |
-| `/var/log/syslog.2.gz` | 122M | rotated |
-| truncate `/var/log/syslog` (ไฟล์ปัจจุบัน) | 845M | truncate ไม่ลบ เพราะ rsyslog ถือ fd อยู่ |
-| `journalctl --vacuum-size=200M` | 3.4G | archived journals |
-| log build เก่าใน `/tmp`: `dbaas-build*.log`, `fullbuild*.log`, `mvn-*.log`, `cloudstack-build.log`, `build-plugin.log`, `hotpatch{,2,3}/` | ~12M | ของ session ก่อน สร้างใหม่ได้ |
-| `__pycache__` ใน repo + `/root` | ~10M | |
-| `target/` ทุกโมดูลใน repo | ~800M | prompt ระบุ safe; build จะ regenerate — ทำให้ build สะอาด ไม่มี class เก่าจากตอน hot-patch หลงเหลือ |
-| `apt-get clean` | 161M | |
-
-**ไม่ลบ** (ตามกฎ หรือไม่อยู่ใน safe list): `/export/primary/tplbackup/**`,
-`/export/secondary/template/**`, `*.qcow2` ใน `/export/primary`, `/root/*.jar.bak*`,
-`/root/*.sql.gz`, `/root/extensions-dbaas-backup-*.tgz`, `swap.img`,
-และไฟล์ evidence ใน `/tmp` (`accept3.*`, `base.json`, `ours.json`, `theirs.json`,
-`roundtrip-test.log`)
-
-## 2. Builds (เรียงลำดับ 3 ชั้น)
-
-**ชั้น 1 — plugin** `mvn -pl plugins/integrations/dbaas -am install` (รวม test):
-
-```
-[INFO] BUILD SUCCESS
-[INFO] Total time:  12:51 min
-```
-
-**ชั้น 2 — full server**: คำสั่งตาม prompt (`mvn -T2 -DskipTests -Dnoredist install`)
-**พัง**:
-
-```
-ERROR] Failed to execute goal on project cloud-vmware-base: Could not resolve
-dependencies ... com.cloud.com.vmware:vmware-vim25:jar:8.0, com.cloud.com.vmware:vmware-pbm:jar:8.0:
-Could not find artifact com.cloud.com.vmware:vmware-vim25:jar:8.0 in repo.jenkins-ci.org.releases
-```
-
-ต้นเหตุ (ไม่ใช่พื้นที่ดิสก์): pom ของ fork นี้ activate profile `vmware` เมื่อ
-property `noredist` **มีอยู่** (activation แบบไม่มี `!`) — คือ `-Dnoredist` =
-**ดึง** vmware-base เข้ามา และ VMware SDK jar เป็น operator-provided (404 ทุก
-repo, ไม่มี jar ใน `deps/`) — เรื่องเดียวกับที่ `CONSOLE-REPORT-2026-09-06.md`
-blocker table จดไว้ และ full build ที่เคย SUCCESS (รอบกลางคืน, 2:12 ชม.) ใช้
-**default profile ไม่มี -Dnoredist**
-
-**Deviation จาก prompt (บันทึกตามหน้าที่)**: รันแทนด้วย `mvn -T2 -DskipTests
-install` (default profile) — log: `/tmp/build2-server.log` — **กำลังรัน**
-(เริ่ม 15:41, คาด ~2 ชม. ตามรอบที่เคย SUCCESS) ยังไม่มีข้อสรุป
-
-**ชั้น 3 — UI** `cd ui && npm ci && npm run build`: ยังไม่รัน (รอชั้น 2 จบตาม
-ลำดับของ prompt)
-
-## 3. Template rebuild
-
-**วิธีที่เลือก: option 2 — chroot เข้า mounted image** เหตุผล: (1) delta ต่อ
-image เล็กและควบคุมได้ = 1 deb (python lib) + 12 ไฟล์ + symlink 2 ตัว, engine
-เองอยู่ใน image แล้ว (2) option 1 จบด้วย `createTemplate` ที่ได้ template
-artifact ใหม่ หลุดจาก id 210–213 ที่ deployment/config อ้างอยู่ (3) flow
-qemu-nbd พิสูจน์กับ image ชุดนี้บน host นี้มาแล้ว (RUNBOOK)
-
-มาตรการกันพลาดตามที่ prompt กำหนด: backup ก่อน patch ทุกไฟล์ลง
-`/export/primary/tplbackup/`, ใส่ `usr/sbin/policy-rc.d` (exit 101) กัน
-postinst เรียก service, ลบทิ้งก่อนปิด chroot, ตรวจ `dpkg -l` หลังติดตั้ง,
-ปิดตามลำดับ `sync → umount → qemu-nbd -d` และ `qemu-img check` ทุกครั้ง
-
-**ปัญหา DNS ใน chroot (บันทึกไว้เพราะเจอซ้ำแน่)**: `/etc/resolv.conf` ใน image
-เป็น symlink ห้อย (→ `/run/systemd/resolve/resolv.conf`) ตอน offline — apt ใน
-chroot หา DNS ไม่เจอ และเน็ตของ host เองก็ resolve ผ่าน stub 127.0.0.53
-ซึ่งถึงกัน UDP จาก chroot — ทางแก้ที่ใช้: โหลด .deb ของ bookworm บน host
-(host ใช้เน็ตได้) แล้ว `dpkg -i` ใน chroot:
-`python3-pymysql_1.0.2-2+deb12u1_all.deb` (Depends: python3:any อย่างเดียว,
-ตรวจ import ผ่าน) สถานะ resolv.conf ใน image จบ = เหมือนเดิม (symlink ห้อย,
-`/run` ว่าง) — ไม่มีสิ่งแปลกหลงเหลือ
-
-### สิ่งที่ patch แล้ว — template 210 (dbaas-mysql-v2) ✅
-
-ครบทั้งสองสำเนา ตามตาราง 8 แถวของ prompt §3 — ตรวจแล้วทั้งคู่:
-
-```
-agent-env ใน firstboot.sh  = 2        engine marker = mysql.sh
-pipefail-fix ใน mysql.sh   = 1        dbaas-report-retry ใน firstboot = 2
-/opt/dbaas/agent/ = dbaas_agent.py, dbaas-agent-env.sh (0755)
-units: dbaas-agent.service, dbaas-report-retry.{service,timer} (0644)
-symlinks: multi-user.target.wants/dbaas-agent.service,
-          timers.target.wants/dbaas-report-retry.timer
-python3-pymysql 1.0.2-2+deb12u1 = ii, import ok
-```
-
-- secondary `/export/secondary/template/tmpl/2/210/97680484-…qcow2`:
-  backup → `tplbackup/97680484-….qcow2.bak-20260906` (1.98G)
-  ```
-  qemu-img check: No errors were found on the image.
-  30469/49152 = 61.99% allocated
-  ```
-- primary cache `/export/primary/1d9e7b9c-…`:
-  backup → `tplbackup/1d9e7b9c-….bak-20260906` (1.98G)
-  ```
-  qemu-img check: No errors were found on the image.
-  30158/49152 = 61.36% allocated
-  ```
-
-(คำสั่ง patch cache โดน cancel ระหว่าง session — ตรวจซ้ำหลัง cancel: เนื้อหา
-เขียนครบก่อน cancel และ `qemu-img check` ผ่าน, nbd ไม่ค้าง)
-
-### เปลี่ยนแผนจาก "mariadb ก่อน" เป็น "mysql ก่อน" — เหตุผลตาม §5
-
-`dbaas-final3` (VM id 74, กำลังรัน, ผมไม่ได้สร้าง → ห้ามแตะ) ใช้ template 211
-และ ROOT volume ของมัน (921cfe4c-…) **มี backing file = 8ceff582-… คือ
-primary cache ของ template 211**:
-
-```
-virsh dumpxml i-2-74-VM:
-  <backingStore type='file' index='4'>
-    <source file='/mnt/a081c924-…/8ceff582-71ee-41c9-aa8d-82f0a72fc488'/>
-```
-
-patch cache ที่มี VM อื่นถือ overlay อยู่ = เสี่ยงพัง image ของ instance ต้องห้าม
-(RUNBOOK Step 0 เตือนไว้ชัด) → ย้ายตัวพิสูจน์ end-to-end ไป mysql (210) ซึ่ง
-ตรวจแล้วว่า **ไม่มี VM ใด backing ไปที่ cache 1d9e7b9c** (volume ทุกตัวของ
-template 210 = Expunged; ตรวจ `virsh dumpxml` ทุก VM ที่รันอยู่) — จุดประสงค์
-"เครื่องเดียวที่ใช้ได้จริงสอนทุกอย่าง" คงเดิม
-
-**ตัวเลือกที่ต้อง user ตัดสินใจสำหรับ cache 211**: (a) รอ dbaas-final3 ถูกลบ
-แล้วค่อย patch cache, หรือ (b) user อนุญาตหยุด final3 ชั่วคราวเพื่อ patch
-(ผมจะไม่ทำเอง)
-
-### ยังไม่ patch
-
-- 211 secondary (+pymysql), 211 primary cache (**บล็อก** ตามข้างบน)
-- 212 secondary (+python3-psycopg2), 213 secondary (+python3-pymongo)
-  (ไม่มี cache — ยังไม่เคย deploy)
-
-## 4. Host changes ทั้งหมด + undo
-
-| การเปลี่ยนแปลง | undo |
+| เวลา (UTC) | เหตุการณ์ |
 | --- | --- |
-| `systemctl stop loki` + `systemctl disable loki` + `apt-get remove -y loki` + ลบ `/tmp/loki` | `apt-get install loki && systemctl enable --now loki` (config เดิมคงอยู่ที่ `/etc/loki/config.yml`) |
-| ลบ `/var/log/syslog.1`, `/var/log/syslog.2.gz` | ไม่ undo ได้ (log เก่า — ผ่านการอนุญาต) |
-| truncate `/var/log/syslog` | ไม่ undo ได้ (log ต่อเนื่อง — ผ่านการอนุญาต) |
-| `journalctl --vacuum-size=200M` | ไม่ undo ได้ (archived journals) |
-| ลบ log build เก่า + `__pycache__` + `target/` + `apt-get clean` | ไม่ undo ได้ (สร้างใหม่ได้ทั้งหมด) |
-| backup image 210 ×2 ลง `tplbackup/…bak-20260906` | ลบไฟล์ backup ทิ้งเมื่อพอใจผล (ผมไม่ลบเอง) |
-| patch image 210 secondary + cache (files + units + pymysql) | กู้ด้วย `cp -a tplbackup/<ชื่อ>.bak-20260906 <IMG>` แล้ว `qemu-img check` |
-| mount nbd0/mnt ชั่วคราวระหว่าง patch | ถอดแล้ว (`umount`, `qemu-nbd -d`) ไม่เหลือสถานะ |
-| **dbaas.\* global settings** | **ไม่มีการเปลี่ยนใด ๆ จนถึงตอนนี้** |
+| 15:05 | อ่านเอกสารทั้งหมด / `/` = **278M** (แย่กว่าใน prompt ที่บอก 2.2G) |
+| 15:11–15:24 | build 1 (plugin -am install, รวม test) **SUCCESS 12:51** |
+| 15:25–15:41 | เคลียร์ดิสก์ (§2) + build 2 ด้วย `-Dnoredist` ตาม prompt → **พัง** (vmware-vim25 8.0 หาไม่ได้; pom ของ fork นี้ activate profile vmware เมื่อ property มีค่า) → รันใหม่ default profile |
+| 15:28–15:40 | patch template 210 (mysql) secondary + cache — §3 **option 2 (chroot)** + `policy-rc.d` + `.deb`-through-host (DNS ใน chroot ใช้ไม่ได้บน host นี้) — `qemu-img check` ผ่านทั้งคู่ |
+| 15:47 | build 2 (default profile) **SUCCESS 6 นาที** |
+| 15:54–18:10 | build 3 (UI): พัง `ERR_OSSL_EVP_UNSUPPORTED` (webpack เก่า + Node 22) → restart ด้วย `--openssl-legacy-provider` → **ค้าง**: `autoremove` (จาก purge monitoring) ถอน nodejs/npm ไปด้วย → ติดตั้งคืน (node 22.23.2 / npm 10.9.8) → รันใหม่ **as nacl** (build discipline) — **ยังไม่ได้เก็บผลล่าสุด** |
+| 16:00 | ADDENDUM: push branch v1 ทั้ง 3 (`ls-remote` ยืนยัน `0d98c736b0` บน GitHub แล้ว) / purge alloy+loki+node-exporter (แก้ dpkg ค้างด้วยการถอน cloudstack-marvin+integration-tests ที่พังก่อนหน้า) / ลบ dbaas-deb 816M / **expunge dbaas-final3 (อนุญาตแล้วใน ADDENDUM §D)** → patch 211 sec+cache, 212, 213 ครบ → `/` เหลือ 13–16G |
+| 16:01 | deploy `dbaas-accept-m1` (boot ก่อน createDatabase) → firstboot no-op — **root cause**: cloud-init cache ตอน boot แรกยังไม่มี userdata → boot หลัง createDatabase ใช้ cache เดิน (instance-id เดิม) ไม่อ่าน userdata ใหม่ → destroy |
+| 16:24 | deploy `dbaas-accept-m2` ด้วย **startvm=false** → createDatabase → start = boot แรกมี request  |
+| 16:36 | start m2 พังครั้งแรก: pool primary 89.9% เกิน threshold 0.85 — **สาเหตุ: backup 6 ไฟล์ของผมเอง (16.4G) อยู่ใน /export/primary** → ย้ายไป gz ที่ `/root/tplbackup-20260906/` → pool เหลือ ~47% → start ผ่าน |
+| 16:47–16:53 | **provisioning พิสูจน์**: `testdb1` owner = **confirmed**, `last_seen_at` ขยับ (long-poll), `mysql -h 10.60.0.77 -u testdb1` จาก host **ผ่าน** (`CURRENT_USER()=testdb1@%`) |
+| 18:0x | §2 overnight: revert `ui/public/config.json`, commit+push เอกสาร 6 ไฟล์ + fix agent duplicate `command` param (`c055110532`) |
+| 18:15 | matrix เริ่มไม่ได้: ทุก console command ตาย **HTTP 431** `Gson multiple JSON fields 'jobid'` — `DbaasJobResponse`/`DbaasJobResultResponse` ประกาศ `jobId` ทับ `BaseResponse` |
+| 18:19–18:26 | แก้ 2 คลาส → rebuild plugin → **hot-patch `cloudstack-4.23.0.0.jar`** (backup `.bak3`) → restart mgmt → commit `d57c91cdbc` + push |
+| 18:24–18:33 | `runDbaasQuery` คืน `jobid+pending` ได้แล้ว, job ถูก dispatch — แต่ **ไม่มี report กลับเลย** → หยุด m2 อ่าน journal จาก disk: mysqld โดน **OOM-kill 17:43** (unattended-upgrades บน Small Instance 512MB) → inject SSH key เข้า instance ตัวเองเพื่อ debug → reboot: mysqld กลับมา, agent active, probe ใหม่ → **ยังค้าง `dispatched`** |
+| 06:3x | access.log: poll ครั้งที่มี job ได้ **200 + 202 bytes** (= job JSON ถูกส่งไปแล้วจริง) แต่ไม่มี `reportDbaasJobResult` ตามมาเลย → อ่านโค้ด ApiServlet + agent จนได้ root cause (§7-D3) |
+| (เวลาใน access.log ข้ามคืนเพราะ session ค้างข้ามเที่ยงคืน) | |
 
-## 5. §11 matrix — ยังไม่เริ่ม (ทุกข้อ = not run)
+## 2. Disk — before/after + สิ่งที่ลบ
 
-ข้อ 1–15 ทั้งหมดยังไม่รัน ตามลำดับที่ prompt วางไว้จะเริ่มหลัง template 212/213
-เสร็จ + build ชั้น 2/3 จบ: provisioning ไม่ regress → agent check-in (journalctl
-+ last_seen_at) → ข้อ 1–6 → ข้อ 7–14 → ข้อ 15 ยังไม่มีข้อไหนผ่านหรือ fail
-เลย — จะไม่ claim ล่วงหน้า
+ก่อน: `/` = **278M (100%)** → หลัง: **13–16G free** (จบรอบที่ 13G)
 
-## 6. ข้อ 15 (VR ดับ) — not run
-
-## 7. Defects ที่เจอ
-
-| # | อาการ | การจัดการ |
+| ลบอะไร | ได้คืน | undo |
 | --- | --- | --- |
-| 1 | `-Dnoredist` พัง build (vmware-vim25 8.0 ไม่มีที่ไหน) — pom activate profile vmware เมื่อ property มีอยู่ | deviation ตามเอกสารเดิมของ repo: ใช้ default profile; ไม่ใช่บั๊กโค้ด DBaaS, ไม่แก้ pom (นอกขอบเขต) |
-| 2 | DNS ใน chroot ใช้ไม่ได้ (symlink ห้อย + UDP ถูกกรอง) | workaround ด้วย .deb ผ่าน host; ไม่แตะ image resolver |
-| 3 | loki พ่น debug ลง syslog ~8.4G/วัน จน `/` เต็ม 100% | ลบตามอนุญาตของ user (หัวข้อ 1/4) |
-| 4 | คำสั่ง patch cache โดน cancel กลางทาง | ตรวจซ้ำ: เขียนครบก่อน cancel, check ผ่าน, ไม่มี mount ค้าง |
+| `loki` + log มัน (syslog.1 8.4G, syslog.2.gz, truncate syslog, vacuum journal 3.4G) — **user อนุญาต** | ~12.6G | `apt-get install loki && systemctl enable --now loki` (จริงจบ: purge ตาม ADDENDUM §B รวม alloy + node-exporter — undo = `apt-get install alloy loki prometheus-node-exporter prometheus-node-exporter-collectors`) |
+| `cloudstack-marvin` + `cloudstack-integration-tests` (พังค้าง, บล็อก dpkg ทั้งระบบ) | — | ลง .deb ใหม่จาก build |
+| `target/`, `/tmp` log เก่า, `__pycache__`, apt cache, `/root/.npm`, `/root/.cache`, `dbaas-deb`+`dbaas-v2-deb` (816M) | ~1G | regenerate ได้ |
+| (เคลื่อนย้าย ไม่ใช่ลบ) backup image 6 ตัวของรอบนี้ `tplbackup/*.bak-20260906` → **gz ไป `/root/tplbackup-20260906/`** | pool 16.4G | `gunzip -c /root/tplbackup-20260906/X.gz > /export/primary/tplbackup/X` |
 
-ยังไม่พบ defect ใน plugin/script/UI (ที่มาจากการรันจริง — จะบันทึกตอนเริ่ม matrix)
+**ไม่แตะ**: `tplbackup` ของเดิม (Sep 5, 2 ไฟล์) / secondary templates / DATA-73 / `/root/.zcode` / `~/.claude`
 
-## 8. Settings — สถานะ
+## 3. Builds (tail จริง)
 
-เช็คด้วย SQL ตอนเริ่มงาน (ยังไม่เปลี่ยนอะไร):
+1. plugin `-am install`: `[INFO] BUILD SUCCESS / Total time: 12:51 min`
+2. full server: คำสั่งใน prompt (`-Dnoredist`) พัง —
+   `ERROR ... cloud-vmware-base: Could not resolve ... vmware-vim25:jar:8.0` →
+   **deviation**: ใช้ `mvn -T2 -DskipTests install` (default profile, SUCCESS 6 นาที)
+3. UI `npm ci && npm run build`: `ERR_OSSL_EVP_UNSUPPORTED` (webpack 4 + Node 22)
+   → `NODE_OPTIONS=--openssl-legacy-provider` → nodejs/npm โดน autoremove ตัดเอง →
+   ติดตั้งคืน + รัน as nacl — **สถานะ: กำลังรัน/ยังไม่ได้เก็บผล** (ต้องเช็ค
+   `/tmp/build3-ui.log` และ `dist/` ก่อนใช้)
+
+## 4. Templates — patch ครบ 4 ตัว (option 2: chroot + policy-rc.d)
+
+ทุกตัว: backup ก่อน (บัดนี้ gz ที่ `/root/tplbackup-20260906/`) → `sync→umount→qemu-nbd -d` → `qemu-img check` = **No errors** ทั้งหมด
+
+| tpl | สำเนาที่ patch | ไฟล์ §3 ครบ 8 แถว | unit symlinks | python lib |
+| --- | --- | --- | --- | --- |
+| 210 mysql | secondary + cache | ✓ (ตรวจใน image) | ✓ | python3-pymysql 1.0.2 (`ii`, import ok) |
+| 211 mariadb | secondary + cache (หลัง expunge final3) | ✓ | ✓ | python3-pymysql ✓ |
+| 212 postgresql | secondary (ไม่มี cache) | ✓ | ✓ | python3-psycopg2 2.9.5 ✓ |
+| 213 mongodb | secondary (ไม่มี cache) | ✓ | ✓ | python3-bson + python3-pymongo 3.11.0 ✓ |
+
+หมายเหตุ: chroot ไม่ใช่ apt ใน image (DNS ตายใน chroot, UDP โดนกรอง) — โหลด
+.deb จาก Debian pool บน host แล้ว `dpkg -i` ใน chroot ทีละตัว
+
+## 5. Host changes + undo (ทุกอัน)
+
+| เปลี่ยน | undo |
+| --- | --- |
+| purge monitoring + ถอน marvin/integration-tests ค้าง | §2 ของรายงาน |
+| ติดตั้ง nodejs/npm คืน | — (คืนสถานะเดิม) |
+| expunge `dbaas-final3` | **irreversible — อนุญาตแล้วใน ADDENDUM §D** (เหตุผล: backing-file ของ cache 211, หลักฐาน provisioning อยู่ใน log/audit แล้ว) |
+| deploy/destroy instance ของตัวเอง: m1 (destroy), m2 (คงไว้ใช้ต่อ) | destroy m2 ได้ตามใจเจ้าของ |
+| inject SSH key (`id_rsa.cloud`) ลง `/home/debian/.ssh/authorized_keys` ของ **m2 ซึ่งเป็น instance ที่ผมสร้างเอง** เพื่อ debug | `ssh ... 'sudo rm /home/debian/.ssh/authorized_keys'` หรือ destroy m2 |
+| hot-patch `cloudstack-4.23.0.0.jar` (2 response classes) + restart mgmt 1 ครั้ง | `cp /root/cloudstack-4.23.0.0.jar.bak3 /usr/share/cloudstack-management/lib/cloudstack-4.23.0.0.jar && systemctl restart cloudstack-management` |
+| ตั้ง `dbaas.console.enabled = true` | ค่าเดิม `false` — **ปล่อยไว้ true ตั้งใจ** (เหตุผล: matrix ยังไม่จบ เซสชันถัดไปทำต่อทันที; write/drop/datadisk.cleanup ยัง false ครบ) |
+| ย้าย backup ของรอบนี้ออกจาก pool | §2 |
+
+## 6. §11 matrix — สถานะตรงๆ
+
+| ข้อ | ผล | หลักฐาน/เหตุผล |
+| --- | --- | --- |
+| provisioning ไม่ regress | **PASS** | m2: `status: confirmed` (16:53), `testdb1@10.60.0.77` จาก host ได้ |
+| agent check-in | **PASS (ระดับ poll)** | `last_seen_at` ขยับทุก ~25–70 s; access.log มือเปล่า `getDbaasAgentJob 200`; **แต่** execution ยังไม่เคยเกิด (ข้อถัดไป) |
+| 1–15 ทั้งหมด | **NOT RUN** | บั๊ก D3 (§7) บล็อก: job dispatch ไปแล้วแต่ agent ทิ้งเงียบ — แก้ 1 จุดแล้วรันได้ทั้งชุด |
+| ข้อ 15 (VR ดับ) | **NOT RUN** | ยังไปไม่ถึง |
+
+## 7. Defects — แก้แล้ว / root-cause แล้ว / เหลือ
+
+**แก้แล้ว (commit บน `v2` + `ui` ทั้งคู่):**
+
+- **D1** `Gson declares multiple JSON fields 'jobid'` → ทุก console command 431 —
+  `DbaasJobResponse`/`DbaasJobResultResponse` ประกาศ `jobId` ทับ `BaseResponse`
+  ลบ field ซ้ำ (ใช้ตัวที่ inherit) — **`d57c91cdbc`** + hot-patch jar + restart
+- **D2** agent ส่ง `command` ซ้ำ query+body → log เต็มไปด้วย multiple values —
+  **`c055110532`** (ยังไม่ได้ push ลง image — ต้องเอา `dbaas_agent.py` ใหม่ลง m2
+  เพื่อให้ D3 แก้ต่อจนจบ)
+
+**Root-cause แล้ว ยังไม่ได้แก้ (ตัวบล็อก matrix ทั้งชุด):**
+
+- **D3 ตัวหลัก — agent parse ผิด shape**: `ApiServlet` เขียน string ที่
+  `authenticate()` คืนออกไปตรงๆ (ไม่ผ่าน response serializer) ดังนั้น
+  `getDbaasAgentJob` ตอนมี job คืน **JSON เปล่า** `{"jobid":...,"type":...,
+  "db_role":...,"payload":...,"row_limit":...}` (ตรงกับ access.log 200/202 bytes)
+  แต่ `dbaas_agent.py:long_poll()` ทำ `payload.get("getdbaasagentjobresponse", {})`
+  (หา wrapper แบบ response ปกติ) → เจอ `{}` เสมอ → `return None` → **job ถูก
+  dispatch แล้วแต่ไม่มีการ execute/report ตลอดชีวิตระบบ** อาการที่เห็นตรงเป๊ะ:
+  job ค้าง `dispatched`, ไม่มี `reportDbaasJobResult` ใน access.log เลย
+  **วิธีแก้ (1 จุด)**: ใน `long_poll` รองรับสอง shape —
+  `job = payload.get("getdbaasagentjobresponse") or (payload if "jobid" in payload else {})`
+  แล้ว commit + อัปเดต `dbaas_agent.py` ใน m2 (ผ่าน SSH ที่ inject ไว้) + รัน matrix ต่อ
+  *(หมายเหตุ: อาจเลือกแก้ฝั่ง server ห่อ wrapper แทนก็ได้ แต่แก้ agent กระทบน้อยกว่า
+  เพราะ template 4 ตัวพร้อมอยู่แล้วและ hot-patch jar ต้องร้อง restart mgmt)*
+
+**พบเพิ่ม (ไม่บล็อก แต่ต้องรู้):**
+
+- **D4** deploy แล้ว "start เลย" ก่อน `createDatabase` = cloud-init cache จาก boot
+  แรก (ไม่มี userdata) ทำให้ boot ถัดไปไม่อ่าน userdata ใหม่ (instance-id เดียวกัน)
+  → provisioning ไม่เกิดเลย ทางเข้าที่ถูก: `startvm=false` แล้วค่อย createDatabase
+  (m1 โดนแล้ว destroy) — ควรเขียน guard/เตือนใน plugin หรือ UI ภายหลัง
+- **D5** mysqld ใน guest โดน **OOM-kill โดย unattended-upgrades** บน Small Instance
+  (512MB) เมื่อ 17:43 — สภาพแวดล้อม ไม่ใช่โค้ด; ควรปิด unattended-upgrades ใน
+  template หรือใช้ offering ใหญ่กว่าตอนเทส
+- **D6** pool primary เต็มเพราะ backup ของรอบนี้วางใน `/export/primary` — ย้ายแล้ว;
+  บทเรียน: backup template ห้ามวางบน pool ที่ planner มองเห็น
+
+## 8. Settings ตอนจบ
 
 ```
-dbaas.console.enabled          = false   ← ค่าเดิม บันทึกไว้ จะเปิดตอนเทสเท่านั้น
-dbaas.console.write.enabled    = false
-dbaas.console.drop.enabled     = false
+dbaas.console.enabled          = true   ← ทิ้งไว้ (matrix ยังไม่จบ เซสชันหน้าทำต่อ)
+dbaas.console.write.enabled    = false  ← ไม่เคยเปิด (ยังไม่ถึงข้อ 5/7)
+dbaas.console.drop.enabled     = false  ← ปิดทั้งคืนตามคำสั่ง
 dbaas.datadisk.cleanup.enabled = false
 ```
 
-## 9. DATA-73 / tplbackup — ไม่ถูกแตะ (ยืนยัน ณ 15:5x)
+## 9. DATA-73 / tplbackup — ไม่ถูกแตะ
 
-```
-volumes: id=90 name=DATA-73 state=Ready removed=NULL instance_id=NULL (unattached)
-tplbackup/: 8ceff582….bak, cf6116a9….qcow2.bak  (ของเดิม — mtime Sep 5 ไม่เปลี่ยน)
-            + ไฟล์ใหม่ 2 ตัวที่ผมสร้าง (bak-20260906 ×2) — เป็นการเพิ่ม ไม่ใช่แตะของเดิม
-```
+`DATA-73`: Ready, unattached, ไม่มี marker / `tplbackup/` เดิม (Sep 5) ไม่มีการ
+แก้ไข — ที่เหลือในนั้นคือ `.bak-20260906` ของผมที่ย้ายออกแล้ว (§2)
 
-## 10. บทสรุปบรรทัดเดียว (§12.5)
+## 10. §12.5 บรรทัดเดียว — ตอบจากของที่เห็นจริง
 
-**ยังตอบไม่ได้** — matrix §11 ยังไม่ถูกรัน ข้อความนี้จะตอบจากของจริงเท่านั้น
-(ห้ามตอบจาก design) — เมื่อจบรอบแล้วจะตอบชัด: tenant บน network ที่ mgmt เข้า
-ไม่ถึง + VR ดับ browse/query/create table ได้จริงไหม และ drop table ยังปิดอยู่ไหม
-(ค่าที่จะไปยืนยัน: `dbaas.console.drop.enabled=false`)
+**ยังตอบไม่ได้**: สิ่งที่พิสูจน์แล้วมีเพียง provisioning แนว config-drive ไม่
+regress และ transport ครึ่งเดียว (agent→MS poll 25 s จริง) — **query/browse/create
+ยังไม่เคย execute สักครั้งบนระบบจริง** เพราะ D3 และ VR-stopped ยังไม่ได้เทส
+(drop table ยังปิดอยู่ = จริง, ตั้งใจ)
 
----
+## 11. สิ่งที่ไม่ได้เทส (ตรงๆ)
 
-## Next steps (ลำดับที่เหลือ)
+- §11 ข้อ 1–15 ทั้งหมด (บล็อกด้วย D3 — แก้ 1 บรรทัดแล้วรันได้ทั้งชุดบน m2)
+- build 3 (UI) ไม่ได้เก็บผลล่าสุด / ไม่ได้ deploy UI ใหม่
+- per-engine spot check (211/212/213): รอ mysql matrix ผ่านก่อนตามลำดับ prompt
+- timing ข้อ §12.2-6 (submit→result มัธยฐาน 5 ครั้ง) — รอ D3
 
-1. รอ build ชั้น 2 จบ → ชั้น 3 (UI)
-2. Patch 211 secondary, 212+213 secondary (+psycopg2/pymongo ด้วยวิธี .deb)
-3. Deploy instance จาก template 210 → provisioning → agent check-in
-4. รัน matrix §11 ตามลำดับของ prompt → อัปเดตหัวข้อ 5/6/7/8/10 แล้วแทนที่รายงานนี้
+## 12. งานถัดไปตามลำดับที่ควรทำ
+
+1. แก้ D3 ใน `dbaas_agent.py` (1 จุด ตาม §7) → commit → push
+2. scp `dbaas_agent.py` (+ fix D2 รวมอยู่แล้วใน `c055110532`) ลง m2:
+   `/opt/dbaas/agent/dbaas_agent.py` แล้ว `sudo systemctl restart dbaas-agent`
+3. รัน §11 ข้อ 1–6 → 7–14 → 15 บน m2 (write เปิดเฉพาะข้อ 5/7 แล้วปิด)
+4. เก็บ build 3 → deploy UI
+5. per-engine: deploy 211/212/213 ทีละตัว (ข้อ 1–3 + write 1 ข้อ)
