@@ -161,18 +161,8 @@ export default {
       docHelp: 'adminguide/accounts.html#using-an-ldap-server-for-user-authentication',
       listView: true,
       dataView: true,
-      args: ['type', 'domainid', 'ldapdomain', 'accounttype', 'admin'],
-      mapping: {
-        type: {
-          options: ['GROUP', 'OU']
-        },
-        accounttype: {
-          options: ['0', '2']
-        },
-        domainid: {
-          value: (record) => { return record.id }
-        }
-      }
+      popup: true,
+      component: shallowRef(defineAsyncComponent(() => import('@/views/iam/LinkDomainToLdap.vue')))
     },
     {
       api: 'unlinkDomainFromLdap',

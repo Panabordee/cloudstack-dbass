@@ -563,7 +563,7 @@ const user = {
         }).catch(() => {
           resolve()
         }).finally(() => {
-          const paths = ['/', '/client']
+          const paths = ['/', '/client', '/client/api']
           const hostname = window.location.hostname
           const domains = [undefined, hostname, `.${hostname}`]
           Object.keys(Cookies.get()).forEach(cookieName => {

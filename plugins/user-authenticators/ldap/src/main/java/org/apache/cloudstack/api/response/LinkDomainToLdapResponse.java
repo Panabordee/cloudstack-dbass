@@ -46,16 +46,25 @@ public class LinkDomainToLdapResponse extends BaseResponse {
     @Param(description = "Type of the Account to auto import")
     private int accountType;
 
+    @SerializedName(ApiConstants.ROLE_ID)
+    @Param(description = "Id of the role under which the accounts of the auto imported users are created; 0 means the default role for the account type")
+    private long roleId;
+
     @SerializedName(ApiConstants.ACCOUNT_ID)
     @Param(description = "Domain Admin accountId that is created")
     private String adminId;
 
     public LinkDomainToLdapResponse(String domainId, String type, String ldapDomain, int accountType) {
+        this(domainId, type, ldapDomain, accountType, 0L);
+    }
+
+    public LinkDomainToLdapResponse(String domainId, String type, String ldapDomain, int accountType, long roleId) {
         this.domainId = domainId;
         this.name = ldapDomain;
         this.ldapDomain = ldapDomain;
         this.type = type;
         this.accountType = accountType;
+        this.roleId = roleId;
     }
 
     public String getDomainId() {
@@ -72,6 +81,10 @@ public class LinkDomainToLdapResponse extends BaseResponse {
 
     public int getAccountType() {
         return accountType;
+    }
+
+    public long getRoleId() {
+        return roleId;
     }
 
     public String getAdminId() {

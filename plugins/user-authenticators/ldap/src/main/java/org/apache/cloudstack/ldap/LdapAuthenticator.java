@@ -243,8 +243,7 @@ public class LdapAuthenticator extends AdapterBase implements UserAuthenticator 
         Pair<Boolean, ActionOnFailedAuthentication> rc = new Pair<>(false, null);
         try {
             LdapUser ldapUser = _ldapManager.getUser(username, ldapTrustMapVO.getType().toString(), ldapTrustMapVO.getName(), domainId);
-            final Account.Type accountType = ldapTrustMapVO.getAccountType();
-            processLdapUser(password, domainId, user, rc, ldapUser, accountType);
+            processLdapUser(password, domainId, user, rc, ldapUser, ldapTrustMapVO);
         } catch (NoLdapUserMatchingQueryException e) {
             logger.debug(e.getMessage());
             processLdapUserErrorMessage(user, e.getMessage(), rc);
@@ -252,13 +251,13 @@ public class LdapAuthenticator extends AdapterBase implements UserAuthenticator 
         return rc;
     }
 
-    private void processLdapUser(String password, Long domainId, UserAccount user, Pair<Boolean, ActionOnFailedAuthentication> rc, LdapUser ldapUser, Account.Type accountType) {
+    private void processLdapUser(String password, Long domainId, UserAccount user, Pair<Boolean, ActionOnFailedAuthentication> rc, LdapUser ldapUser, LdapTrustMapVO ldapTrustMapVO) {
         if (!ldapUser.isDisabled()) {
             rc.first(_ldapManager.canAuthenticate(ldapUser.getPrincipal(), password, domainId));
             if (rc.first()) {
                 if (user == null) {
                     // import user to cloudstack
-                    importLdapUserToCloudStack(ldapUser, domainId, accountType);
+                    importLdapUserToCloudStack(ldapUser, domainId, ldapTrustMapVO);
                 } else {
                     enableUserInCloudStack(user);
                 }
@@ -271,13 +270,13 @@ public class LdapAuthenticator extends AdapterBase implements UserAuthenticator 
         }
     }
 
-    private void importLdapUserToCloudStack(LdapUser ldapUser, Long domainId, Account.Type accountType) {
+    private void importLdapUserToCloudStack(LdapUser ldapUser, Long domainId, LdapTrustMapVO ldapTrustMapVO) {
         synchronized (LdapUserCreationLock.getLock(ldapUser.getUsername(), domainId)) {
             if (_accountManager.getActiveUserAccount(ldapUser.getUsername(), domainId) != null) {
                 logger.debug("User [name={}] already exists in domain [id={}], skipping auto-import", ldapUser.getUsername(), domainId);
                 return;
             }
-            createCloudStackUserAccount(ldapUser, domainId, accountType);
+            createCloudStackUserAccount(ldapUser, domainId, ldapTrustMapVO);
         }
     }
 
@@ -323,10 +322,12 @@ public class LdapAuthenticator extends AdapterBase implements UserAuthenticator 
         }
     }
 
-    private void createCloudStackUserAccount(LdapUser user, long domainId, Account.Type accountType) {
+    private void createCloudStackUserAccount(LdapUser user, long domainId, LdapTrustMapVO ldapTrustMapVO) {
         String username = user.getUsername();
+        Account.Type accountType = ldapTrustMapVO.getAccountType();
+        Long roleId = ldapTrustMapVO.getRoleId() > 0L ? ldapTrustMapVO.getRoleId() : RoleType.getByAccountType(accountType).getId();
         _accountManager.createUserAccount(username, "", user.getFirstname(), user.getLastname(), user.getEmail(), null, username,
-                                          accountType, RoleType.getByAccountType(accountType).getId(), domainId, null, null,
+                                          accountType, roleId, domainId, null, null,
                                           UUID.randomUUID().toString(), UUID.randomUUID().toString(), User.Source.LDAP);
     }
 

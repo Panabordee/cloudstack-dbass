@@ -427,7 +427,8 @@ public class LdapManagerImpl extends ComponentLifecycleBase implements LdapManag
 
         Validate.isTrue(baseDn != null, String.format("can not link a domain (with id = %d) unless a basedn (%s) is configured for it.", domainId, baseDn));
         Validate.notEmpty(ldapDomain, "ldapDomain cannot be empty, please supply a GROUP or OU name");
-        return linkDomainToLdap(cmd.getDomainId(),cmd.getType(), ldapDomain,cmd.getAccountType());
+        Validate.isTrue(cmd.getAccountType() != null || cmd.getRoleId() != null, "Either account type or role ID must be given");
+        return linkDomainToLdap(cmd.getDomainId(),cmd.getType(), ldapDomain,cmd.getAccountType(), cmd.getRoleId());
     }
 
     @Override
@@ -435,22 +436,30 @@ public class LdapManagerImpl extends ComponentLifecycleBase implements LdapManag
         return unlinkDomainFromLdap(cmd.getDomainId());
     }
 
-    private LinkDomainToLdapResponse linkDomainToLdap(Long domainId, String type, String name, Account.Type accountType) {
+    private LinkDomainToLdapResponse linkDomainToLdap(Long domainId, String type, String name, Account.Type accountType, Long roleId) {
         Validate.notNull(type, "type cannot be null. It should either be GROUP or OU");
         Validate.notNull(domainId, "domainId cannot be null.");
         Validate.notEmpty(name, "GROUP or OU name cannot be empty");
-        //Account type should be 0 or 2. check the constants in com.cloud.user.Account
-        Validate.isTrue(accountType== Account.Type.NORMAL || accountType== Account.Type.DOMAIN_ADMIN, "accountype should be either 0(normal user) or 2(domain admin)");
+        Validate.notNull(accountType, "account type could not be resolved, please provide a valid accounttype or roleid");
+        long roleIdToPersist = 0L;
+        if (roleId == null) {
+            //Account type should be 0 or 2 when no role is given. check the constants in com.cloud.user.Account
+            Validate.isTrue(accountType== Account.Type.NORMAL || accountType== Account.Type.DOMAIN_ADMIN, "accountype should be either 0(normal user) or 2(domain admin), or a valid roleid should be given");
+        } else {
+            roleIdToPersist = roleId;
+            if (accountType == Account.Type.ADMIN || accountType == Account.Type.RESOURCE_DOMAIN_ADMIN) {
+                logger.warn(String.format("linking domain %d to ldap %s will auto import accounts with the privileged role %d", domainId, name, roleId));
+            }
+        }
         LinkType linkType = LdapManager.LinkType.valueOf(type.toUpperCase());
-        return linkDomainToLdapAndGetResponse(domainId, name, accountType, linkType);
+        return linkDomainToLdapAndGetResponse(domainId, name, accountType, roleIdToPersist, linkType);
     }
 
     @NotNull
-    private LinkDomainToLdapResponse linkDomainToLdapAndGetResponse(Long domainId, String name, Account.Type accountType, LinkType linkType) {
+    private LinkDomainToLdapResponse linkDomainToLdapAndGetResponse(Long domainId, String name, Account.Type accountType, long roleId, LinkType linkType) {
         DomainVO domain = getDomainToLink(domainId);
-        LdapTrustMapVO vo = _ldapTrustMapDao.persist(new LdapTrustMapVO(domain.getId(), linkType, name, accountType, 0));
-        String domainUuid = domain.getUuid();
-        return new LinkDomainToLdapResponse(domainUuid, vo.getType().toString(), vo.getName(), vo.getAccountType().ordinal());
+        LdapTrustMapVO vo = _ldapTrustMapDao.persist(new LdapTrustMapVO(domain.getId(), linkType, name, accountType, 0, roleId));
+        return new LinkDomainToLdapResponse(domain.getUuid(), vo.getType().toString(), vo.getName(), vo.getAccountType().ordinal(), vo.getRoleId());
     }
 
     @NotNull
@@ -476,7 +485,7 @@ public class LdapManagerImpl extends ComponentLifecycleBase implements LdapManag
 
         long accountId = account.getAccountId();
         clearOldAccountMapping(cmd);
-        LdapTrustMapVO vo = _ldapTrustMapDao.persist(new LdapTrustMapVO(cmd.getDomainId(), linkType, cmd.getLdapDomain(), cmd.getAccountType(), accountId));
+        LdapTrustMapVO vo = _ldapTrustMapDao.persist(new LdapTrustMapVO(cmd.getDomainId(), linkType, cmd.getLdapDomain(), cmd.getAccountType(), accountId, cmd.getRoleId() == null ? 0L : cmd.getRoleId()));
         return new LinkAccountToLdapResponse(domain.getUuid(), vo.getType().toString(), vo.getName(), vo.getAccountType().ordinal(), account.getUuid(), cmd.getAccountName());
     }
 
