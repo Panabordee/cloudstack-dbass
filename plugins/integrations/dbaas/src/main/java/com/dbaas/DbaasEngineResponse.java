@@ -32,6 +32,13 @@ public class DbaasEngineResponse extends BaseResponse {
     @Param(description = "the port the database engine listens on")
     private Integer port;
 
+    @SerializedName("minmemorymb")
+    @Param(description = "minimum service offering RAM (MB) this engine should be deployed on -- the wizard"
+            + " filters offerings below this so a tenant cannot pick one the engine will struggle in;"
+            + " createDatabase enforces the same number server-side")
+    private Integer minMemoryMb;
+
     public void setTemplate(String template) { this.template = template; }
     public void setPort(Integer port) { this.port = port; }
+    public void setMinMemoryMb(Integer minMemoryMb) { this.minMemoryMb = minMemoryMb; }
 }

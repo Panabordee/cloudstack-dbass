@@ -60,14 +60,23 @@
           </a-select>
         </a-form-item>
         <a-form-item name="serviceofferingid" ref="serviceofferingid" :label="$t('label.serviceofferingid')">
-          <!-- Only offerings at or above Medium are listed: on smaller ones the
-               engine starves the vCPU and sshd cannot answer in time. -->
+          <!-- Filtered to offerings with enough RAM for the selected engine
+               (listDbaasEngines' minmemorymb) -- an offering too small has
+               been observed OOM-killing the database engine under console
+               load (ACCEPTANCE-REPORT-2026-09-08.md section 7). Filtering
+               here means a tenant cannot pick one; createDatabase enforces
+               the same number server-side for callers that bypass the
+               wizard. -->
           <a-select
             v-model:value="form.serviceofferingid"
             :loading="optionsLoading"
-            :placeholder="$t('label.serviceofferingid')">
-            <a-select-option v-for="o in offerings" :key="o.id" :label="o.label">{{ o.label }}</a-select-option>
+            :disabled="!form.engine"
+            :placeholder="form.engine ? $t('label.serviceofferingid') : $t('message.dbaas.select.engine.first')">
+            <a-select-option v-for="o in availableOfferings" :key="o.id" :label="o.label">{{ o.label }}</a-select-option>
           </a-select>
+          <p v-if="form.engine && availableOfferings.length === 0" class="offering-warning">
+            {{ $t('message.dbaas.no.offering.fits', { mb: selectedEngineMinMemory }) }}
+          </p>
         </a-form-item>
         <a-form-item
           name="rootdisksize"
@@ -231,6 +240,12 @@ export default {
       networkLoading: false,
       step: 'form',
       templates: [],
+      // Template id -> that engine's minimum offering RAM in MB, from
+      // listDbaasEngines' minmemorymb (cross-referenced by template name,
+      // since the engines response is keyed by name and templates by id).
+      // Falls back to 0 (no filtering) for a template with no matching
+      // engine entry or no minmemorymb set.
+      engineMinMemoryByTemplate: {},
       zones: [],
       offerings: [],
       diskOfferings: [],
@@ -266,6 +281,37 @@ export default {
     selectedOfferingIsCustomized () {
       const offering = this.offerings.find(o => o.id === this.form.serviceofferingid)
       return !!offering && !!offering.iscustomized
+    },
+    selectedEngineMinMemory () {
+      return this.engineMinMemoryByTemplate[this.form.engine] || 0
+    },
+    // The dropdown iterates this, not the raw list: an offering below the
+    // selected engine's minimum is not merely discouraged, it is not
+    // selectable at all. Nothing is filtered before an engine is chosen --
+    // the field is disabled at that point instead (see the template).
+    availableOfferings () {
+      const minMb = this.selectedEngineMinMemory
+      if (!minMb) {
+        return this.offerings
+      }
+      // A customized offering (memory chosen at deploy time, not fixed here)
+      // reports no memory value to filter on -- let it through rather than
+      // hide a legitimately fine choice because this dropdown cannot know
+      // the number yet.
+      return this.offerings.filter(o => o.memory == null || o.memory >= minMb)
+    }
+  },
+  watch: {
+    // Switching to an engine with a higher floor can strand a previously
+    // valid selection below the new minimum -- clear it rather than submit
+    // a choice the dropdown itself would no longer offer.
+    form: {
+      deep: true,
+      handler (form) {
+        if (form.serviceofferingid && !this.availableOfferings.some(o => o.id === form.serviceofferingid)) {
+          this.form.serviceofferingid = undefined
+        }
+      }
     }
   },
   beforeCreate () {
@@ -327,9 +373,13 @@ export default {
         getAPI('listDiskOfferings'),
         hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
       ]).then(([tpl, zone, off, diskOff, engines]) => {
-        const engineNames = engines
-          ? new Set((engines.listdbaasenginesresponse?.dbaasengine || []).map(e => e.template))
-          : null
+        const engineList = engines ? (engines.listdbaasenginesresponse?.dbaasengine || []) : []
+        const engineNames = engines ? new Set(engineList.map(e => e.template)) : null
+        // Keyed by template name here (matching the engines response); the
+        // per-id map below is what the offering filter actually reads,
+        // since the wizard tracks the selected engine by template id.
+        const minMemoryByEngineName = {}
+        engineList.forEach(e => { minMemoryByEngineName[e.template] = e.minmemorymb || 0 })
         this.templates = (tpl.listtemplatesresponse.template || [])
           .filter(t => t.name && t.isready && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
           // A template only provisions over the config drive when it carries
@@ -341,10 +391,15 @@ export default {
           // displaytext ("MySQL Community 8.0 on Debian 12 x86_64"), so a new
           // engine added to the backend config shows up without UI changes.
           .map(t => ({ id: t.id, name: t.name, engineLabel: t.displaytext || t.name }))
+        this.engineMinMemoryByTemplate = {}
+        this.templates.forEach(t => {
+          this.engineMinMemoryByTemplate[t.id] = minMemoryByEngineName[t.name] || 0
+        })
         this.zones = zone.listzonesresponse.zone || []
         const mapOffering = o => ({
           id: o.id,
           label: `${o.name} (${o.cpunumber} vCPU, ${o.memory} MB)`,
+          memory: o.memory,
           iscustomized: o.iscustomized
         })
         this.offerings = (off.listserviceofferingsresponse.serviceoffering || []).map(mapOffering)
@@ -626,6 +681,11 @@ export default {
 
   .form-banner {
     margin-bottom: 16px;
+  }
+
+  .offering-warning {
+    margin-top: 4px;
+    color: #cf1322;
   }
 
   .steps {

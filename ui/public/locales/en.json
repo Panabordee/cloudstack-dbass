@@ -4519,6 +4519,8 @@
   "label.copy.error": "Copy error",
   "label.dbaas.database.failed": "Instance created \u2014 database was not",
   "label.dbaas.database.submitted": "Database request submitted",
+  "message.dbaas.select.engine.first": "Select a database engine first",
+  "message.dbaas.no.offering.fits": "No listed offering has enough RAM for this engine (needs at least {mb} MB). Below that, the database engine has been observed crashing under load.",
   "label.go.to.instance": "Go to instance",
   "label.reset.database.password": "Reset Database Password",
   "label.database": "Database",

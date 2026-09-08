@@ -191,6 +191,17 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "Allows dropDbaasTable. Ships off and stays off until per-database backup exists"
                     + " (PLAN-DBAAS-CONSOLE.md section 8).", true);
 
+    // Reproduced twice on the "Small Instance" offering (512 MB): mysqld gets
+    // OOM-killed under console load (create table + a couple of queries is
+    // enough), leaving the tenant with a database that provisioned fine and
+    // then died. 1024 MB (Medium Instance) ran the same sequence cleanly.
+    // Refusing the deploy up front is cheaper than an OOM report later.
+    public static final ConfigKey<Integer> DbaasMinOfferingMemoryMb = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.offering.minmemory.mb", "1024",
+            "Minimum service offering RAM (MB) createDatabase will provision onto. Below this,"
+                    + " mysqld/postgres/mongod plus the console agent can OOM under load"
+                    + " (reproduced at 512 MB on 2026-09-08). 0 disables the check.", true);
+
     public static final ConfigKey<Integer> DbaasAgentLongPollMaxWaiters = new ConfigKey<>(
             "Advanced", Integer.class, "dbaas.agent.longpoll.maxwaiters", "100",
             "How many agents may hold a long-poll open at the same time. Each waiting agent parks one"
@@ -1139,6 +1150,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     + " of " + DbaasConfigPath.value() + ", so this plugin cannot serve databases from it;"
                     + " add an engines entry for it or deploy from a template that is listed");
         }
+        requireMinOfferingMemory(vm, engineConfig);
 
         if (vm.getState() == VirtualMachine.State.Running) {
             try {
@@ -1264,6 +1276,48 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     + " detail on an image built for config-drive provisioning (one carrying"
                     + " /opt/dbaas/firstboot.sh), or deploy from a template that has it -- otherwise the request"
                     + " would never be read and the credential would stay 'pending' forever");
+        }
+    }
+
+    // Per-engine override of the RAM floor: an optional "minmemorymb" integer
+    // on the engine's config.json entry. Falls back to the global
+    // dbaas.offering.minmemory.mb when the entry doesn't set one, so existing
+    // deployments need no config change to get the default protection, and a
+    // specific engine can be tuned (e.g. mongodb needing more, sqlite-simple
+    // engines needing less) without a code change -- same "config, never
+    // hardcoded" rule the engines map itself follows.
+    private int engineMinMemoryMb(JsonObject engineCfg) {
+        if (engineCfg != null && engineCfg.has("minmemorymb")) {
+            try {
+                return engineCfg.get("minmemorymb").getAsInt();
+            } catch (Exception e) {
+                logger.warn("engine config has a non-numeric minmemorymb, falling back to the global default", e);
+            }
+        }
+        return DbaasMinOfferingMemoryMb.value();
+    }
+
+    // Refuses to provision a database onto an offering too small to run the
+    // engine plus the console agent reliably. Checked before the instance's
+    // power state is touched, same as the other createDatabase preconditions.
+    // This is the last line of defense: the wizard (CreateDatabaseInstance.vue)
+    // filters the offering dropdown by the same per-engine minimum from
+    // listDbaasEngines so a tenant should never reach this error in the
+    // normal flow -- it exists for API callers that bypass the wizard.
+    private void requireMinOfferingMemory(VirtualMachine vm, JsonObject engineConfig) {
+        int minMb = engineMinMemoryMb(engineConfig);
+        if (minMb <= 0) {
+            return;
+        }
+        com.cloud.offering.ServiceOffering offering =
+                _entityMgr.findById(com.cloud.offering.ServiceOffering.class, vm.getServiceOfferingId());
+        Integer ramMb = offering == null ? null : offering.getRamSize();
+        if (ramMb != null && ramMb < minMb) {
+            throw new InvalidParameterValueException("service offering " + offering.getName() + " has " + ramMb
+                    + " MB RAM, below the " + minMb + " MB minimum for this engine: the database engine and the"
+                    + " console agent have been observed OOM-killed under load below that threshold. Redeploy on"
+                    + " a larger offering -- the wizard's offering list is filtered by this same minimum, so this"
+                    + " should only be reachable by calling createDatabase directly");
         }
     }
 
@@ -1472,6 +1526,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     DbaasEngineResponse engine = new DbaasEngineResponse();
                     engine.setTemplate(entry.getKey());
                     engine.setPort(cfg.get("port").getAsInt());
+                    engine.setMinMemoryMb(engineMinMemoryMb(cfg));
                     engine.setObjectName("dbaasengine");
                     result.add(engine);
                 } catch (Exception e) {
@@ -1636,6 +1691,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 DbaasConsoleEnabled, DbaasConsoleRowLimit, DbaasConsoleBytesLimit,
                 DbaasConsoleStatementTimeout, DbaasConsoleWriteEnabled, DbaasConsoleDropEnabled,
                 DbaasAgentLongPollSeconds, DbaasAgentTokenRotateDays, DbaasJobTtl, DbaasJobResultTtl,
-                DbaasAgentLongPollMaxWaiters};
+                DbaasAgentLongPollMaxWaiters, DbaasMinOfferingMemoryMb};
     }
 }

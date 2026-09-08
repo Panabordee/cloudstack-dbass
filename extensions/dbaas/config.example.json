@@ -1,47 +1,56 @@
 {
-  "_comment_engines": "Template name -> provisioning scripts + port. Every template that should be usable as a DBaaS engine MUST be listed here (the deployed config.json on the management server -- not only this example), or listDbaasEngines never returns it, the wizard cannot pick it and createDatabase refuses it. Add a new engine here and drop its scripts into every dbaas-* image's /opt/dbaas/ (see TEMPLATES.md) -- never hardcode this mapping in the Java source. 'script' is invoked by firstboot.sh INSIDE the instance, reading the request from the config drive; 'reset_script' is not called by anything yet (resetting a database password needs the in-VM agent, PLAN.md Phase D) but is kept here so that agent can reuse it without a config change. Templates must also carry the dbaas.configdrive=true template detail (see requireConfigDriveTemplate in DbaasManagerImpl).",
+  "_comment_engines": "Template name -> provisioning scripts + port. Every template that should be usable as a DBaaS engine MUST be listed here (the deployed config.json on the management server -- not only this example), or listDbaasEngines never returns it, the wizard cannot pick it and createDatabase refuses it. Add a new engine here and drop its scripts into every dbaas-* image's /opt/dbaas/ (see TEMPLATES.md) -- never hardcode this mapping in the Java source. 'script' is invoked by firstboot.sh INSIDE the instance, reading the request from the config drive; 'reset_script' is not called by anything yet (resetting a database password needs the in-VM agent, PLAN.md Phase D) but is kept here so that agent can reuse it without a config change. Templates must also carry the dbaas.configdrive=true template detail (see requireConfigDriveTemplate in DbaasManagerImpl). 'minmemorymb' is optional per entry (see _comment_minmemory below); omitting it falls back to dbaas.offering.minmemory.mb.",
   "engines": {
     "dbaas-mysql": {
       "script": "mysql.sh",
       "reset_script": "mysql_reset.sh",
-      "port": 3306
+      "port": 3306,
+      "minmemorymb": 1024
     },
     "dbaas-mysql-v2": {
       "script": "mysql.sh",
       "reset_script": "mysql_reset.sh",
-      "port": 3306
+      "port": 3306,
+      "minmemorymb": 1024
     },
     "dbaas-mariadb-v2": {
       "script": "mariadb.sh",
       "reset_script": "mariadb_reset.sh",
-      "port": 3306
+      "port": 3306,
+      "minmemorymb": 1024
     },
     "dbaas-postgresql-v2": {
       "script": "postgresql.sh",
       "reset_script": "postgresql_reset.sh",
-      "port": 5432
+      "port": 5432,
+      "minmemorymb": 1024
     },
     "dbaas-mongodb-v2": {
       "script": "mongodb.sh",
       "reset_script": "mongodb_reset.sh",
-      "port": 27017
+      "port": 27017,
+      "minmemorymb": 1024
     },
     "dbaas-mariadb": {
       "script": "mariadb.sh",
       "reset_script": "mariadb_reset.sh",
-      "port": 3306
+      "port": 3306,
+      "minmemorymb": 1024
     },
     "dbaas-postgresql": {
       "script": "postgresql.sh",
       "reset_script": "postgresql_reset.sh",
-      "port": 5432
+      "port": 5432,
+      "minmemorymb": 1024
     },
     "dbaas-mongodb": {
       "script": "mongodb.sh",
       "reset_script": "mongodb_reset.sh",
-      "port": 27017
+      "port": 27017,
+      "minmemorymb": 1024
     }
   },
+  "_comment_minmemory": "Only dbaas-mysql-v2 at 1024 MB is actually measured (OOM-killed at 512 MB, clean at 1024 MB under console load, 2026-09-08 -- see ACCEPTANCE-REPORT-2026-09-08.md section 7). The other engines carry the same number as a starting point, not a verified floor -- postgresql and especially mongodb are plausibly heavier and should be re-measured the same way (deploy, run the console matrix, watch `journalctl -u <engine>` for oom-kill) before this number is trusted for them. Do not raise or lower any of these without measuring; a guess here just moves the OOM problem from 'obvious and reproducible' to 'occasional and confusing'.",
   "_comment_types": "Per-engine column-type allowlist for the DBaaS console's createDbaasTable/addDbaasColumn (PLAN-DBAAS-CONSOLE.md section 4.2). Keyed by engine type -- the script name in 'engines' above with '.sh' stripped (mysql.sh -> mysql), not the template name. DbaasConsoleJobCmdBase.validateColumnType matches entries case-insensitively, exact or as a '(n)' parameterised prefix (VARCHAR(n) matches VARCHAR(255)). No entry for an engine means every column type is refused for it -- mongodb has none on purpose, since run_ddl_job in the agent refuses schema DDL there regardless (PLAN section 9). Missing entirely (as opposed to an engine simply not listed) makes every createDbaasTable/addDbaasColumn call fail with 'not in the allowlist: allowed are []' -- this key must exist on the deployed config.json, not just here.",
   "types": {
     "mysql": ["INT", "BIGINT", "SMALLINT", "TINYINT", "VARCHAR(n)", "CHAR(n)", "TEXT",
