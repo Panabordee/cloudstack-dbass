@@ -225,7 +225,7 @@ of it can be recovered or compared against.
 
 ## 8. Audit follow-ups (2026-09-05)
 
-The self-review (`AUDIT-v2.md`) and a second pass found defects that would
+The self-review and a second pass found defects that would
 surface on the first real deploy; all of the below are fixed in code now, but
 **nothing is re-verified against a live deploy yet** — the Phase B acceptance
 line still stands.

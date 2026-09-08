@@ -1,8 +1,8 @@
 # Plan — make provisioning fire on every new request, not just the first boot
 
-Fixes the bug found on 2026-09-08 (`ACCEPTANCE-REPORT-2026-09-08-PART2.md`
-§5): `createDatabase` on an instance that has already booted once does
-nothing at all, silently, and the credential sits `pending` forever.
+Fixes the bug found in the 2026-09-08 acceptance session: `createDatabase`
+on an instance that has already booted once does nothing at all, silently,
+and the credential sits `pending` forever.
 
 **Code done, not yet baked into any image.** `firstboot.sh` and the new
 `dbaas-provision.service` are written and committed (§3.1–§3.3 below reflect

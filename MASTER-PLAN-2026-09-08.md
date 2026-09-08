@@ -197,7 +197,7 @@ Dns           VirtualRouter     <-- should be ConfigDrive
 SourceNat, Firewall, PortForwarding   VirtualRouter (correct, must stay)
 ```
 
-`ACCEPTANCE-FIX-2026-09-05.md` "Fix 1b" called for all three of UserData,
+The 2026-09-05 fix session called for all three of UserData,
 Dhcp and Dns on ConfigDrive. It is constructible: `ConfigDriveNetworkElement`
 (`server/src/main/java/com/cloud/network/element/ConfigDriveNetworkElement.java:203`)
 advertises capabilities for `Service.UserData`, `Service.Dhcp` and
