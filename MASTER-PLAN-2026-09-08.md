@@ -135,7 +135,7 @@ primary cache. UUIDs: mysql `1d9e7b9c-afc2-4cfd-92a0-6a23ca5dfd48`, mariadb
 | `/opt/dbaas/firstboot.sh` | `extensions/dbaas/provisioning/` | 0755 |
 | `/opt/dbaas/report-retry.sh` | same | 0755 |
 | `/opt/dbaas/<engine>.sh`, `<engine>_reset.sh` | same (now with the `_ro` role) | 0755 |
-| `/opt/dbaas/engine` | copy of `<engine>.sh` | 0644 |
+| `/opt/dbaas/engine` | marker file containing only the script name (e.g. `mysql.sh`) — NOT a copy of the script; `firstboot.sh:225` appends its content to `/opt/dbaas/`, so a copied script makes the path garbage and provisioning fails with "engine script ... missing or not executable" (observed 2026-09-08) | 0644 |
 | `/opt/dbaas/agent/dbaas_agent.py` | `extensions/dbaas/agent/` | 0755 |
 | `/etc/systemd/system/dbaas-provision.service` | `extensions/dbaas/provisioning/` | 0644 |
 | `/etc/systemd/system/dbaas-report-retry.{service,timer}` | same | 0644 |
