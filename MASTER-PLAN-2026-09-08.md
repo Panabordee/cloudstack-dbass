@@ -46,6 +46,49 @@ The console works end to end **through the API** on all four engines, as
 
 ---
 
+## Scope — decided 2026-09-09: v1 is the three features, nothing else
+
+The product is three things a tenant does with their database: **run a
+query, create and drop a table, browse tables** — plus connecting a normal DB
+client, which already works.
+
+`NEON-ROADMAP.md` proposed seven further phases (project/branch model,
+same-instance branching, PITR, volume-clone branching, scale-to-zero, an HTTP
+SQL endpoint). **None of them is being built.** They were proposed because
+Neon was used as a comparison, not because this product needs them, and
+carrying them in the plan made the remaining work look several times larger
+than it is. Reasons, per phase, so this is not relitigated:
+
+| Phase | Why it is cut |
+| --- | --- |
+| N0 substrate decision | a gate for N4/N6 only; with those cut there is nothing to decide |
+| N1 project/branch/endpoint model | a data-model rewrite that exists to support branching; today's flat model works |
+| N2 same-instance branching | useful for a dev/test workflow, irrelevant to the three features |
+| N3 backup / PITR | the *goal* is kept (see below), full point-in-time restore is not |
+| N4 volume-clone branching | expensive, and it is not even known whether this storage does CoW clones |
+| N5 scale to zero | genuinely poor on this substrate — a 30–90 s wake exceeds most drivers' connect timeouts. Documented as the weakest item when it was proposed |
+| N6 HTTP SQL endpoint | a new externally reachable surface, and there is no TLS anywhere in this design yet |
+
+`NEON-ROADMAP.md` stays in the tree as the analysis behind that decision.
+`PLAN-NEON-STEPS.md` is deleted: it sequenced work that is not being done.
+
+### What survives from N3, in cheap form
+
+Data-loss protection is not a Neon feature, it is table stakes for any
+database service — but it does not require PITR:
+
+1. **Dump the table before dropping it** (item C2). A single-table
+   `mysqldump` / `pg_dump` to the instance's own disk before the `DROP`
+   executes, plus a typed confirmation of the table name. The real risk is a
+   mis-click in a console, not a need to rewind three days
+2. **CloudStack's own `createSnapshotPolicy`** on the data volume. Daily
+   volume snapshots, built into the platform, roughly an hour to configure
+
+Together, roughly five hours, for most of what PITR would have given.
+`dbaas.console.drop.enabled` may be turned on **only** once C2 ships.
+
+---
+
 ## Remaining work
 
 ### A. The console UI does not work in a browser — the only real blocker
@@ -90,13 +133,38 @@ log the plaintext. `<engine>_reset.sh` already has the SQL shape.
 
 **Guest-side change → needs an image pass. See "the batching rule" below.**
 
-### D. VM login password
+### C2. Dump before drop — what unlocks the third feature
+
+`DropDbaasTableCmd` → `table_drop` → `run_ddl_job` is complete and working;
+the only thing stopping it is `dbaas.console.drop.enabled=false`, held there
+because dropping a table is the first irreversible thing this product would
+offer a tenant.
+
+Rather than wait for PITR, make the drop recoverable: before the `DROP`
+executes, dump that one table (`mysqldump --single-transaction <db> <table>`,
+`pg_dump -t`, `mongodump --collection`) to a timestamped file under
+`/var/lib/dbaas/predrop/` on the instance's own disk, and **refuse the job if
+the dump fails**. Add a typed confirmation of the table name in the UI. Keep
+the last N dumps and say what N is.
+
+Then, and only then, `dbaas.console.drop.enabled` may be set to `true`.
+
+**Guest-side; rides the same image pass as C and E2.**
+
+### D. VM login password — cut, pending one confirmation
 
 Diagnosed in `VM-PASSWORD-DEFECT-2026-09-05.md`, never implemented.
 `createDatabase` deploys with `startvm=false` and starts the instance through
 the internal two-argument path, so `Param.VmPassword` is never populated.
-Fix: `resetPasswordForVirtualMachine` (or set `Param.VmPassword` on the
-plugin's own start call) before the config-drive attach, while Stopped.
+The fix is known: `resetPasswordForVirtualMachine` (or set
+`Param.VmPassword` on the plugin's own start call) before the config-drive
+attach, while Stopped.
+
+**Proposed cut.** A managed database service is one a tenant never SSHes
+into: they manage the database through the console and connect with a normal
+client, both of which work. An OS login password is only needed if tenants
+are meant to have shell access to the instance — a product decision, not a
+defect. Build it only if that answer is yes.
 
 ### E. Tenant self-service — decided 2026-09-09, now real work
 
@@ -177,10 +245,12 @@ the engine-marker bug, and the stale-agent gap).
 So: **do not do a guest-side change alone.** Collect them and pay for one
 pass. Currently queued for the next one:
 
-- C (`password_reset` job type)
+- C2 (dump before drop) — the one that unlocks the third feature
 - E2's atomic `save_conf` write (four lines, decided)
-- anything Neon Stage 3/4 needs in the guest (PgBouncer, pgBackRest) — see
-  `PLAN-NEON-STEPS.md`
+- C (`password_reset` job type), if wanted
+
+There is no later pass to save anything for: with the Neon phases cut, this
+is the last guest-side change on the plan.
 
 Everything else on this page — A, B, D, F, G — is server-side, UI-side or
 zone-side and needs **no image pass at all**.
@@ -191,21 +261,43 @@ zone-side and needs **no image pass at all**.
 A (browser UI)          ← blocker; nothing else makes the product usable
    │
 B (log redaction)       ← server-only, small, security
-D (VM login password)   ← server-only, small
 E (tenant role + first real ACL run)  ← server-only; the ACL run is the risk
 E2 monitoring alert     ← server-only, small
+snapshot policy         ← server-only, ~1h, CloudStack's own feature
    │
-one image pass: C + E2 atomic write
+one image pass: C2 + E2 atomic write (+ C if wanted)
    │
-F (VR-down proof)  ·  G (housekeeping)  ← both optional for a working product
+enable dbaas.console.drop.enabled   ← the third feature goes live here
+   │
+G (housekeeping)   ·   F (VR-down proof, optional)
+
+D is cut unless tenants need shell access to the instance.
 ```
 
-## What "finished" means here
+## What "finished" means — v1
 
-A tenant opens the UI, creates a database on any of the four engines, browses
-tables, runs a query, creates a table, connects a normal client, and resets
-their password. No SQL text or row value in `management-server.log`. Dropping
-a table is still disabled.
+A tenant, logged in as **their own account**, opens the UI and on any of the
+four engines: browses their tables, runs a query, creates a table, drops a
+table (with the pre-drop dump behind it), and connects a normal DB client
+from another machine. No tenant sees another tenant's anything. No SQL text
+or row value reaches `management-server.log`. A daily volume snapshot exists.
 
-After that, `PLAN-NEON-STEPS.md` Stage 1 (the four measurement gates) is the
-next thing, and it is one session.
+That is the product. When it is true, this project is done — not paused
+before a larger phase.
+
+## Rough remaining effort
+
+| | Hours |
+| --- | --- |
+| A browser console bug + full click-through | 2–4 |
+| B log redaction | ~1 |
+| E tenant role + the first real ACL run | 1–2 |
+| E2 monitoring alert | ~1 |
+| snapshot policy | ~1 |
+| C2 dump before drop | 3–4 |
+| one image pass (C2 + E2, plus C at +2–3) | 2–3 |
+| G housekeeping | ~1 |
+| **Total** | **12–17** |
+
+Optional on top: C reset-password (+2–3), D VM login (+1–2), F VR-down proof
+(+1–2).
