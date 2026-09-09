@@ -962,7 +962,12 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // the job row stays as the audit trail. Returns null when the job does
     // not exist for this account; the caller turns that into a not-found.
     public String getUserJobResult(String jobUuid, long accountId) {
-        String find = "SELECT id, state, type, row_count, truncated, error FROM dbaas_jobs"
+        // expires_at in the projection: an undispatched job past its TTL can
+        // never run again (the dispatch query filters on expires_at), but the
+        // hourly sweep is what flips the row to 'expired' -- without this the
+        // UI would show 'pending' for up to an hour after the job was already
+        // unrunnable (observed 2026-09-09, MASTER-PLAN item 6 / matrix item 14).
+        String find = "SELECT id, state, type, row_count, truncated, error, expires_at FROM dbaas_jobs"
                 + " WHERE uuid = ? AND account_id = ?";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             long jobId = -1;
@@ -982,6 +987,12 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                         rowCount = rs.getLong(4);
                         truncated = rs.getBoolean(5);
                         error = rs.getString(6);
+                        // Report 'expired' the moment the TTL is past, not
+                        // when the hourly sweep gets around to the row.
+                        if ("pending".equals(state) && rs.getTimestamp(7) != null
+                                && rs.getTimestamp(7).getTime() <= System.currentTimeMillis()) {
+                            state = "expired";
+                        }
                     }
                 }
             }
