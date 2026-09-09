@@ -115,7 +115,7 @@ export default {
       this.jobError = ''
       this.truncated = false
       return postAPI(command, { virtualmachineid: this.resource.id, ...params }).then(json => {
-        const body = json[command.toLowerCase() + 'response'] || {}
+        const body = (json[command.toLowerCase() + 'response'] || {}).dbaasjob || {}
         const jobId = body.jobid
         if (!jobId) {
           throw new Error(this.$t('message.dbaas.console.no.job'))
@@ -128,7 +128,7 @@ export default {
     pollResult (jobId, attempt) {
       const maxAttempts = 30
       return getAPI('getDbaasJobResult', { jobid: jobId }).then(json => {
-        const body = json['getdbaasjobresultresponse'] || {}
+        const body = (json.getdbaasjobresultresponse || {}).dbaasjobresult || {}
         const state = body.state || 'pending'
         if (state === 'pending' || state === 'dispatched') {
           if (attempt >= maxAttempts) {
