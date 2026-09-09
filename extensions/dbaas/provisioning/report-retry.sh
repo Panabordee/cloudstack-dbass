@@ -77,5 +77,19 @@ if [[ "$http_code" == "200" && "$body" == *success* && "$body" == *true* ]]; the
     exit 0
 fi
 
+if [[ "$http_code" == "403" ]]; then
+    # The token is no longer redeemable: already redeemed by an earlier
+    # report (the normal post-confirmation reboot -- firstboot's skip path
+    # now keeps the request file, see firstboot.sh) or expired. Retrying is
+    # hopeless, and looping would put a 403 into the management log every
+    # two minutes for the life of the instance. Stop the timer and drop the
+    # request file -- the credential's fate is recorded server-side, and the
+    # password itself lives on in roles.json.
+    log "report rejected with 403 -- token no longer redeemable, stopping the timer"
+    rm -f "$REQUEST_FILE"
+    systemctl disable --now dbaas-report-retry.timer >/dev/null 2>&1 || true
+    exit 0
+fi
+
 log "retry failed: ${out:-no output} -- will try again on the next timer tick"
 exit 0

@@ -442,8 +442,18 @@ def main():
         save_conf(conf)
     log("agent starting for VM " + conf["vm_id"])
     while True:
+        started = time.time()
         job, conf = long_poll(conf)
         if not job:
+            # A long poll is supposed to hold the connection for ~POLL_HOLD
+            # seconds, so an immediate return means the call failed -- refused,
+            # rate limited (429), server restarting. Retrying instantly would
+            # hammer the API and keep any per-IP rate limiter hot, and the
+            # limiter then 429s this guest's own provisioning report too
+            # (observed 2026-09-08: a 429 storm made a confirmed credential
+            # unreportable). Pace the retry to the same cadence as a held
+            # poll that returned nothing.
+            time.sleep(max(1.0, POLL_HOLD_DEFAULT - (time.time() - started)))
             continue
         job_uuid = job.get("jobid", "")
         job_type = job.get("type", "")

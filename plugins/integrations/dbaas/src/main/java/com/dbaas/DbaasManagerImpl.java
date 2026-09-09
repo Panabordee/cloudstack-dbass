@@ -1183,21 +1183,26 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             // will provision with must already be recoverable when they do.
             // Only the token's hash is kept; the raw value already left with
             // the user data and cannot be recovered from this row.
+            // Both rows carry the same report token: the guest reports once
+            // per provisioning, and a readonly row without the token could
+            // never leave 'pending' -- nothing else ever reports for it
+            // (observed 2026-09-08: owner confirmed, readonly pending forever).
+            String reportTokenHash = null;
+            java.sql.Timestamp reportExpiresAt = null;
             if (reportToken != null) {
-                java.sql.Timestamp expiresAt = new java.sql.Timestamp(
+                reportTokenHash = sha256Hex(reportToken);
+                reportExpiresAt = new java.sql.Timestamp(
                         System.currentTimeMillis() + DbaasReportTokenTtl.value() * 1000L);
-                storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
-                        sha256Hex(reportToken), expiresAt, ROLE_OWNER);
             } else {
                 logger.warn("dbaas.report.api.url is not set -- instance {} cannot report its provisioning result,"
                         + " and its credential will stay 'pending'", vm.getUuid());
-                storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
-                        null, null, ROLE_OWNER);
             }
+            storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
+                    reportTokenHash, reportExpiresAt, ROLE_OWNER);
             // The console's read-only credential, stored as its own row so
             // Show Password per role and the agent's roles.json both resolve.
             storeCredential(vm.getUuid(), dbUserRo, dbPasswordRo, engineName, STATUS_PENDING,
-                    null, null, ROLE_READONLY);
+                    reportTokenHash, reportExpiresAt, ROLE_READONLY);
             if (agentToken != null) {
                 recordAgentToken(vm.getId(), sha256Hex(agentToken));
             }
@@ -1611,7 +1616,9 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     /**
      * Redeems a report token: matches it against the stored hash for the
      * given instance, checks it has not expired, and if both hold, records the
-     * outcome and clears the token so it cannot be redeemed again. Every
+     * outcome. A confirmed report clears the token so it cannot be redeemed
+     * again; a failed one keeps it so the guest's next-boot retry is
+     * confirmable. Every
      * failure path -- unknown instance, no pending report, wrong token,
      * expired token -- returns the same generic outcome, so a caller cannot
      * use the response to tell a wrong token from a nonexistent instance.
@@ -1635,39 +1642,51 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             // expiry in Java: the timestamp was written from this JVM's clock
             // (storeCredential), and comparing it against NOW() of the DB
             // would silently shift the real TTL with any clock skew between
-            // the two machines.
-            String find = "SELECT id, report_token_expires_at FROM dbaas_credentials"
+            // the two machines. Owner and readonly share one token and one
+            // expiry; the newest row is just the witness for both.
+            String find = "SELECT report_token_expires_at FROM dbaas_credentials"
                     + " WHERE vm_id = ? AND report_token_hash = ?"
                     + " ORDER BY created_at DESC, id DESC";
-            long rowId = -1;
             java.sql.Timestamp expiresAt = null;
             try (PreparedStatement pstmt = txn.prepareStatement(find)) {
                 pstmt.setString(1, vmUuid);
                 pstmt.setString(2, tokenHash);
                 try (ResultSet rs = pstmt.executeQuery()) {
                     if (rs.next()) {
-                        rowId = rs.getLong(1);
-                        expiresAt = rs.getTimestamp(2);
+                        expiresAt = rs.getTimestamp(1);
                     }
                 }
             }
-            if (rowId < 0 || expiresAt == null || expiresAt.getTime() <= System.currentTimeMillis()) {
+            if (expiresAt == null || expiresAt.getTime() <= System.currentTimeMillis()) {
                 logger.warn("provisioning report rejected for VM {}: no matching pending token", vmUuid);
                 return false;
             }
-            // Clearing the hash in the same statement makes a concurrent
-            // replay of the same token update zero rows instead of two.
-            String sql = "UPDATE dbaas_credentials SET status = ?, status_message = ?,"
-                    + " report_token_hash = NULL, report_token_expires_at = NULL"
-                    + " WHERE id = ? AND report_token_hash = ?";
+            // A confirmed report redeems the token in the same statement, so a
+            // concurrent replay of the same token updates zero rows instead of
+            // two. A failed report must NOT redeem it: the guest retries on its
+            // next boot and reports again with the same token, and the retry is
+            // then confirmable -- redeeming on failure left the credential
+            // 'failed' forever no matter how many boots later provisioned
+            // successfully (observed 2026-09-08, MASTER-PLAN item 1 case 5).
+            // Every row carrying the token updates together: owner and readonly
+            // are confirmed by the one report the guest sends.
+            String sql;
+            if (STATUS_CONFIRMED.equals(status)) {
+                sql = "UPDATE dbaas_credentials SET status = ?, status_message = ?,"
+                        + " report_token_hash = NULL, report_token_expires_at = NULL"
+                        + " WHERE vm_id = ? AND report_token_hash = ?";
+            } else {
+                sql = "UPDATE dbaas_credentials SET status = ?, status_message = ?"
+                        + " WHERE vm_id = ? AND report_token_hash = ?";
+            }
             try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
                 pstmt.setString(1, status);
                 pstmt.setString(2, message);
-                pstmt.setLong(3, rowId);
+                pstmt.setString(3, vmUuid);
                 pstmt.setString(4, tokenHash);
                 int updated = pstmt.executeUpdate();
                 if (updated > 0) {
-                    logger.info("provisioning report accepted for VM {}: {}", vmUuid, status);
+                    logger.info("provisioning report accepted for VM {}: {} ({} row(s))", vmUuid, status, updated);
                     return true;
                 }
                 logger.warn("provisioning report rejected for VM {}: no matching pending token", vmUuid);

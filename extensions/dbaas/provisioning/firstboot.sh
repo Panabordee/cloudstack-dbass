@@ -206,10 +206,19 @@ fi
 CURRENT_HASH=$(sha256sum "$REQUEST_FILE" | awk '{print $1}')
 if [[ -f "$PROCESSED_HASH_FILE" && "$(cat "$PROCESSED_HASH_FILE")" == "$CURRENT_HASH" ]]; then
     log "this exact request was already provisioned, nothing to do"
-    # The extracted copy holds the database password in cleartext and has
-    # served no purpose since it matched what was already done -- do not
-    # leave it sitting on disk for the length of an uneventful reboot.
-    rm -f "$REQUEST_FILE"
+    # Deliberately NOT deleting the extracted request here, even though it
+    # holds the cleartext password: it is also the only copy of the report
+    # token, and request.json still existing at this point means the report
+    # has NOT landed yet (every successful reporter deletes it). Deleting it
+    # here strands a confirmed database with a 'pending' credential forever
+    # (observed 2026-09-08). The retry service removes it once the report is
+    # accepted; on an uneventful boot it is already gone.
+    # The timer is not enabled in wants/ by design (scripts start it on
+    # demand), so this boot must start it: this request was provisioned but
+    # its report never landed -- the exact state this VM can be in after a
+    # stop between "provisioned" and "reported". If the report already
+    # landed, the timer's first tick finds nothing pending and stops itself.
+    systemctl start dbaas-report-retry.timer >/dev/null 2>&1 || true
     exit 0
 fi
 
