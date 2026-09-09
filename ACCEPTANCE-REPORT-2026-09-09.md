@@ -381,3 +381,178 @@ b873072874 fix(dbaas): the mongodb console agent never authenticated
 ceaacfc0a5 fix(dbaas): provisioning retry confirmable, agent poll backoff, request file kept for the report
 4f0d2928a1 docs(dbaas): master plan engine-marker row was wrong - it is a name marker, not a script copy
 ```
+
+---
+
+# Part 2 — overnight continuation, interrupted at the user's request
+
+Session: 2026-09-09 evening (resumed PROMPT-GLM-FINISH.md / MASTER-PLAN
+items A, E). Ended early on the owner's instruction. Everything below is
+committed and pushed (`myfork/4.23+dbass` = `8f2ad48295`), the management
+server is up, and the web UI works. One new defect is open and one is
+fixed-but-suspect — details in §P2.4 and §P2.5.
+
+## P2.1 Item A — SOLVED, and the root cause was not what the last session recorded
+
+The "Refresh click produces no API request at all" was **not a UI bug**.
+The console's response-contract fix (`d51018873d`) was correct but was
+**never actually served**: `/client/` is served from
+`/usr/share/cloudstack-management/webapp/`, while both UI deployments of the
+previous session went to `/usr/share/cloudstack-ui/`, which nothing serves.
+The browser therefore kept running the Sep 8 bundle (pre-nesting-fix) —
+exactly the symptoms observed.
+
+Once the rebuilt bundle was deployed to the real location, the console
+works end to end in a browser (verified with headless Chromium + Playwright,
+screenshots `ACCEPTANCE-SHOTS-20260909/20–36`):
+
+- Database section → instance row → Console drawer → Tables tab lists
+  tables with Describe/Preview buttons (22)
+- Describe and Preview render (23/24)
+- SQL tab: read query confirmed (25); write mode + CREATE TABLE confirmed
+  (26)
+- **Drop is absent** from the console (0 mentions in the drawer text) and
+  there is no "drop table" action on the instance detail page (27/28)
+- The create-instance wizard (a three-step full-page route, never before
+  used): engine list, Compute Offering disabled until an engine is chosen
+  with the placeholder "Select a database engine first" (29/30), offering
+  filter correct — MySQL shows only Medium (1024 ≥ 1024), MariaDB shows
+  Small + Medium (31/33) — and **two full wizard deploys were made for
+  real**, both provisioning to `confirmed` with the chosen Small offering
+  honored (status screen with the one-time password, 35)
+
+One genuine UI defect found and fixed in the process:
+`a914b4a5a1` — a stranded offering selection survived an engine change
+(mariadb + Small → switch to mysql, whose floor excludes it) because the
+deep watcher on `form` did not fire on the switch. The clearing now runs in
+an explicit `@change` handler on the engine select; a selection that still
+qualifies under the new engine is deliberately kept (verified both ways).
+
+**Deploy-location correction for every future UI deploy**:
+```
+sudo rsync -a /home/nacl/dbaas-v2/ui/dist/ /usr/share/cloudstack-management/webapp/
+# NOT /usr/share/cloudstack-ui/ (served by nothing) and NEVER with --delete
+# (webapp also holds WEB-INF — see the incident in P2.4)
+```
+
+## P2.2 Item E — role done, and the cross-account test exploded into a real leak
+
+CloudStack's **default roles are immutable** ("Role permission cannot be
+added for Default roles", 531/4365). Created role `DBaaS-User` (type User,
+id `3ad1c9f8-…`) — `createRole` clones the default User role's 255 rules and
+the build already includes the 15 DBaaS commands, so it had 270 rules out of
+the box. `updateUser` has no role param in 4.23 — **roles attach to the
+account**, so the assignment is
+`updateAccount id=<acctb uuid> roleid=<DBaaS-User>` (the API echoes the
+param; verify with `listUsers`).
+
+With the role applied, the tenant reached `listDbaasEngines` and
+`listVirtualMachines` — and then the re-run of matrix item 10 found the
+worst thing of the night: **`getDatabasePassword` on another account's
+instance returned the decrypted password, and `listDbaasTables` dispatched a
+console job against it.** The `getEntityOwnerId` pattern ("real CloudStack
+ACL enforcement for free") is wrong: it returns the TARGET VM's owner, which
+is exactly the entity owner the framework's access check compares the caller
+against — every caller passes.
+
+Fixed in the plugin, contained: `8f2ad48295` adds
+`DbaasManager.checkCallerOwnsVm` — called from `execute()` of
+`DbaasConsoleJobCmdBase`, `GetDatabasePasswordCmd` and `CreateDatabaseCmd`.
+Admins pass; every other caller must own the instance outright. Verified
+after deploy: `getDatabasePassword`/`listDbaasTables` from `acctb` against
+an admin instance → 531/4365 `the instance belongs to another account`
+(no password, no job). `listDbaasEngines` from the tenant still works.
+
+## P2.3 Open defect #1 — the ACL guard currently denies the ADMIN too
+
+After the fix deployed, **admin's own `getDatabasePassword` on its own
+instance is denied** with the same "instance belongs to another account".
+A temporary WARN line (since removed from the source, but present in the
+currently deployed jar) captured the runtime values on an admin `cmk` call:
+
+```
+DBG-ACL deny: caller=4 type=NORMAL callerAcct=4 vmAcct=2
+```
+
+The caller in `CallContext.current().getCallingAccount()` was **account 4
+(acctb, NORMAL)** during an **admin API-key call** — i.e. the calling
+account resolved to the wrong account (a stale/threaded CallContext, or
+api-key auth resolving through the last-seen keypair), not the admin
+account (id 2, type 1). That is why the guard (correctly) denied.
+
+What this means:
+- the guard itself is simple and the values in the DB are consistent
+  (vm.account_id=2, admin type=1);
+- the problem is upstream in whatever populates `CallContext` for this
+  request — worth checking `ApiServlet`'s session/api-key auth path and
+  whether cmk's two-profile usage in one process (admin + userb secrets)
+  confused a per-thread cache;
+- **reproduce/fix hint**: the deny line above is the fastest instrument —
+  print `caller.getId()/getType()` at deny time and run one admin `cmk`
+  call. If the caller is again account 4 while calling as admin, it is the
+  context population, not the plugin.
+
+Current state of the guard: **it is too strict in practice** — it denies
+admins until the caller-account resolution is understood. If admin access
+is needed before that is fixed, revert `8f2ad48295` (single commit, plugin
+only) and re-apply after; the cross-account leak then reopens, which is
+unacceptable to ship but was the pre-existing behaviour.
+
+Note: `admin`'s DB credentials for `glmc-mar1` were exposed to `acctb`
+during the leak (§P2.2) — rotate them (item C's `password_reset` will do
+it) or destroy the instance.
+
+## P2.4 Incident — a UI deploy deleted the API servlet (mgmt "404" outage)
+
+The 512-free storage episode earlier led to deploying the UI with
+`rsync --delete` into `/usr/share/cloudstack-management/webapp/`, which
+wiped **`WEB-INF/`** — webapp is both the UI and the API servlet host.
+Symptom: every `/client/api` call returned 404 while Jetty answered and
+systemd said active; the Spring context came up with zero application
+threads and wrote nothing to the log (silently failed webapp deploy).
+
+Fix applied (and verified — API answers 401 unauthenticated / 200
+authenticated; UI loads):
+```
+sudo rm -rf /usr/share/cloudstack-management/webapp
+sudo cp -r /usr/share/cloudstack-management/webapp.bak.20260909b \
+           /usr/share/cloudstack-management/webapp
+sudo rsync -a /home/nacl/dbaas-v2/ui/dist/ \
+           /usr/share/cloudstack-management/webapp/   # no --delete
+sudo systemctl restart cloudstack-management
+```
+Backups present: `webapp.bak.20260908`, `webapp.bak.20260909b`. The
+`/usr/share/cloudstack-ui/` tree (and its `.bak.20260909`) is unused by
+anything and can be deleted.
+
+## P2.5 Open defect #2 (lower priority, pre-existing, observed)
+
+The login page's `forgotPassword` call rejects with
+`Cannot read properties of undefined (reading 'slice')` inside the axios
+response handling (seen only in browser console noise at the login screen;
+the actual login works). Looks like an error-path handler assuming a
+response body shape the server doesn't produce. Cosmetic, pre-existing.
+
+## P2.6 Housekeeping state
+
+- Pushed: `myfork/4.23+dbass` = `8f2ad48295` (everything, including this
+  session's commits).
+- Committed and **pushed** UI fix set; source tree clean (the debug WARN
+  line was removed from the source; the deployed jar still contains it —
+  next jar update will pick up the clean version).
+- Storage: root fs down to **4.9 G free** (the three 211–213 template
+  backups, 5.3 GB, sit in `/home/nacl/tplbackup-20260909/` — move or delete
+  them to reclaim; `df -h /export/primary` ~78% after the move-out).
+- The leftover `glmc-*` measurement instances were NOT destroyed (G is
+  pending): glmc-mar1, glmc-pg1, glmc-mongo1 (Running, kept as engine
+  evidence), glmc-mar-s ×2 (one Error), glmc-pg-s, glmc-mongo-s, plus the
+  wizard-deployed `wizdb1` pair (VM 98/99, Running, both confirmed — safe to
+  destroy).
+- Flags: `dbaas.console.enabled=true`, `dbaas.console.write.enabled=false`
+  (as shipped), `dbaas.console.drop.enabled=false`, 
+  `dbaas.datadisk.cleanup.enabled=false` — all defaults intact.
+- `DATA-73` and pre-existing `/export/primary/tplbackup/**` untouched.
+- Not reached tonight: D (password/keypair paths), D2 (usage attribution,
+  orphan disk), D3 (cross-VM token test — superseded in urgency by the
+  cross-ACCOUNT leak found in E), B (log redaction), snapshot policy, C2,
+  C, F, G, and the MASTER-PLAN update.
