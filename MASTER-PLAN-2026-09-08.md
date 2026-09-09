@@ -52,6 +52,12 @@ The product is three things a tenant does with their database: **run a
 query, create and drop a table, browse tables** — plus connecting a normal DB
 client, which already works.
 
+It is an **add-on to a credit-billed departmental cloud**, not a standalone
+managed service. A DBaaS instance is an ordinary VM the user owns and pays
+for; DBaaS only pre-installs and configures the engine. Everything a user can
+do with an instance they created themselves — SSH in, reset the password,
+attach a keypair — must also work here (items D, D2, D3).
+
 `NEON-ROADMAP.md` proposed seven further phases (project/branch model,
 same-instance branching, PITR, volume-clone branching, scale-to-zero, an HTTP
 SQL endpoint). **None of them is being built.** They were proposed because
@@ -151,27 +157,90 @@ Then, and only then, `dbaas.console.drop.enabled` may be set to `true`.
 
 **Guest-side; rides the same image pass as C and E2.**
 
-### D. VM login password — cut, pending one confirmation
+### D. VM access parity — required, not optional
 
-Diagnosed in `VM-PASSWORD-DEFECT-2026-09-05.md`, never implemented.
-`createDatabase` deploys with `startvm=false` and starts the instance through
-the internal two-argument path, so `Param.VmPassword` is never populated.
-The fix is known: `resetPasswordForVirtualMachine` (or set
-`Param.VmPassword` on the plugin's own start call) before the config-drive
-attach, while Stopped.
+**Context that changes this item (2026-09-09):** this plugin is an add-on
+feature on a departmental cloud where **usage is billed per user as credit**.
+A DBaaS instance is not a managed black box — it is *the user's own VM*,
+consuming *their own* credit, and it must behave like any instance they
+create through the normal wizard. That includes getting into it.
 
-**Proposed cut.** A managed database service is one a tenant never SSHes
-into: they manage the database through the console and connect with a normal
-client, both of which work. An OS login password is only needed if tenants
-are meant to have shell access to the instance — a product decision, not a
-defect. Build it only if that answer is yes.
+So D is **required**, and it is wider than the original defect. Three things
+have to be true, and only the first is currently understood:
 
-### E. Tenant self-service — decided 2026-09-09, now real work
+1. **Password path — known broken.** `createDatabase` deploys with
+   `startvm=false` and the plugin then starts the instance through the
+   internal two-argument path, so `Param.VmPassword` is never populated. All
+   four templates already report `passwordenabled=true`, so the template side
+   is fine; the fix is on the plugin's start call
+   (`resetPasswordForVirtualMachine`, or set `Param.VmPassword` there),
+   while the instance is Stopped.
+2. **SSH keypair path — untested, probably works, must be proven.** The
+   wizard already sends `keypairs` to `deployVirtualMachine`
+   (`CreateDatabaseInstance.vue:491`), and cloud-init injects keys from the
+   config drive's `meta_data.json`. But all four templates report
+   `sshkeyenabled=false`, which is CloudStack's flag for the *legacy*
+   key-injection script — so whether a key actually lands in
+   `~/.ssh/authorized_keys` on these images has never been checked. Deploy
+   with a keypair and `ssh` in. If it fails, that is a template fix, not a
+   plugin fix.
+3. **Parity, stated plainly.** Whatever a user can do to an instance they
+   created normally — reset password, attach a keypair, use the console
+   proxy — must work the same on a DBaaS instance. Anything that does not
+   work is a defect, not a design choice.
 
-**Decision: tenants use DBaaS themselves.** The plugin's commands are not in
-the default User role's list, so a tenant account is refused at the
-API-permission layer even on its own instances. Matrix item 10 passed
-*because of that*, which is a pass for the wrong reason.
+### D2. Usage and credit correctness
+
+Because credit is the unit that matters here, "it works" is not enough — the
+right account has to be charged the right amount.
+
+1. **Attribution.** The wizard calls `deployVirtualMachine` from the tenant's
+   own session, so the instance should be owned by, and billed to, that
+   tenant. Verify it in `cloud_usage` rather than assuming: deploy as a
+   tenant, then confirm usage records for the VM *and* its data disk carry
+   that account, not the admin's.
+2. **Orphan data disks are a billing bug, not just clutter.**
+   `dbaas.datadisk.cleanup.enabled` ships `false`, so when a user destroys a
+   DBaaS instance the data disk is *reported* by the sweep but not deleted —
+   and on a credit-billed cloud an undeleted volume **keeps charging the
+   user for storage they can no longer use or see**. The existing sweep
+   already identifies exactly these disks (unattached, `dbaas.instance`
+   marker, instance expunged, older than 24 h).
+
+   This needs an owner decision, and the safe default is no longer obviously
+   `false`: either turn the sweep on, or make the wizard's destroy flow warn
+   the user that the volume survives and must be deleted manually. Silently
+   billing for an invisible disk is the one outcome that is clearly wrong.
+
+### D3. The tenant has root in their own VM — threat model addendum
+
+Follows directly from D: if users SSH in, they are root on a machine that
+holds DBaaS material. Most of it is fine, because everything in that VM is
+scoped to that VM's own tenant:
+
+- the DB credentials are their own
+- `request.json` is deleted after provisioning, though the **config drive
+  ISO still holds the original request**, including the database password —
+  again, their own
+- they can break or remove the agent, which breaks their own console. E2's
+  `last_seen_at` alert is what turns that into something support can see
+
+**The one thing that must be tested rather than assumed:** that an agent
+token taken out of one instance cannot be used to poll for, or answer, jobs
+belonging to a *different* instance. The lookup is keyed on `vm_id`
+(`DbaasManagerImpl.java:781`), so it should hold — but this is now a tenant
+with root and a shell, not a hypothetical attacker, so prove it. Add it to
+the matrix alongside item 11.
+
+### E. Tenant self-service — mandatory, not a preference
+
+**Decision: tenants use DBaaS themselves**, and on a credit-billed cloud
+this is structural rather than a preference: the instance must be created by,
+owned by, and charged to the tenant, which only happens if the tenant makes
+the call. The plugin's commands are not in the default User role's list, so a
+tenant account is refused at the API-permission layer even on its own
+instances. Matrix item 10 passed *because of that*, which is a pass for the
+wrong reason.
 
 Work: add the DBaaS commands to the User role, then **re-run item 10
 properly** — a tenant must reach its own instances and be refused on
@@ -261,6 +330,7 @@ zone-side and needs **no image pass at all**.
 A (browser UI)          ← blocker; nothing else makes the product usable
    │
 B (log redaction)       ← server-only, small, security
+D (VM password) + D2 (usage/credit) + D3 (token scoping test)
 E (tenant role + first real ACL run)  ← server-only; the ACL run is the risk
 E2 monitoring alert     ← server-only, small
 snapshot policy         ← server-only, ~1h, CloudStack's own feature
@@ -270,16 +340,15 @@ one image pass: C2 + E2 atomic write (+ C if wanted)
 enable dbaas.console.drop.enabled   ← the third feature goes live here
    │
 G (housekeeping)   ·   F (VR-down proof, optional)
-
-D is cut unless tenants need shell access to the instance.
 ```
 
 ## What "finished" means — v1
 
 A tenant, logged in as **their own account**, opens the UI and on any of the
 four engines: browses their tables, runs a query, creates a table, drops a
-table (with the pre-drop dump behind it), and connects a normal DB client
-from another machine. No tenant sees another tenant's anything. No SQL text
+table (with the pre-drop dump behind it), connects a normal DB client from
+another machine, and **SSHes into the instance they are paying for**, with
+the usage landing on their own credit. No tenant sees another tenant's anything. No SQL text
 or row value reaches `management-server.log`. A daily volume snapshot exists.
 
 That is the product. When it is true, this project is done — not paused
@@ -291,13 +360,15 @@ before a larger phase.
 | --- | --- |
 | A browser console bug + full click-through | 2–4 |
 | B log redaction | ~1 |
+| D VM password + keypair proof | 2–3 |
+| D2 usage attribution + the orphan-disk decision | 1–2 |
+| D3 cross-VM token test | ~1 |
 | E tenant role + the first real ACL run | 1–2 |
 | E2 monitoring alert | ~1 |
 | snapshot policy | ~1 |
 | C2 dump before drop | 3–4 |
 | one image pass (C2 + E2, plus C at +2–3) | 2–3 |
 | G housekeeping | ~1 |
-| **Total** | **12–17** |
+| **Total** | **16–23** |
 
-Optional on top: C reset-password (+2–3), D VM login (+1–2), F VR-down proof
-(+1–2).
+Optional on top: C reset-password (+2–3), F VR-down proof (+1–2).
