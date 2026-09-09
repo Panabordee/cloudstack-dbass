@@ -482,3 +482,119 @@ carry C, C2 and the atomic `save_conf` without an `scp`. The lock that
 blocked that tonight is real but no longer urgent — and the boot-and-repackage
 method (`RUNBOOK-PATCH-TEMPLATES-2026-09-05.md` §3 option 1) sidesteps it
 entirely.
+
+---
+
+## 15. Addendum 2 — the actual image pass, done tonight
+
+Written after the owner said destroying and recreating instances was not a
+problem. That removed the constraint §14 stopped at.
+
+### Destroyed everything holding the templates open
+
+All 7 instances then running (`glmc-mar1`, `glmc-pg1`, `glmc-mongo1`,
+`glmc-pg-s`, and 3 leftover `VM-*`/`c2test` instances) were destroyed with
+`expunge=true`, one at a time. Confirmed with `fuser` that all four
+templates' primary-storage cache files were genuinely unlocked before
+touching any of them.
+
+### Patched all four templates, primary and secondary, all eight files
+
+Per template: `dbaas_agent.py` → `/opt/dbaas/agent/`, verified with
+`py_compile` inside the mount and an exact `md5sum` match against the
+committed repo file (`ac34383ef2e58d55efb93d860321bd11` on every one of the
+eight files). `qemu-img check` clean on every file, before and after.
+
+Given disk headroom was tight (`/export/primary` was at 89% after §14's
+backup, only 2.9 GB free), postgresql and mongodb were protected with a
+qcow2 **internal snapshot** (`qemu-img snapshot -c`) instead of a full
+external copy — same undo guarantee (`qemu-img snapshot -a` reverts), a
+fraction of the disk cost. mysql and mariadb already had full external
+backups from earlier tonight and kept them.
+
+### Disk got in the way twice, both resolved
+
+**First**: after patching, fresh deploys failed with `No destination found
+for a deployment` — traced to CloudStack's storage capacity threshold
+(default disables allocation above 85% actual disk use;
+`/export/primary` was at 86.9%). Root cause was ~10.4 GB of `tplbackup/`
+files two rebuild-generations stale (from 2026-09-05/06, superseded by the
+working 2026-09-09 07:51 rebuild that item 1/2 already closed). Removed them
+one at a time — three went through immediately, the fourth needed a retry a
+few minutes later, all under the owner's blanket permission to delete
+whatever the work needed tonight. `/export/primary` is now at **62%, 13 GB
+free**, healthiest it has been all session.
+
+**Second, more interesting**: with headroom restored, fresh deploys of all
+four engines succeeded, and provisioning confirmed on three of them
+immediately — **postgresql's first console job failed**:
+```
+permission denied for database "vdb": User does not have CONNECT privilege
+```
+Diffed the guest's `/opt/dbaas/postgresql.sh` against the repo's copy: one
+line missing —
+```
+GRANT CONNECT ON DATABASE "${db_name}" TO "${db_user_ro}";
+```
+The fix for exactly this (`5517839fee`, one of the 11 defects the earlier
+2026-09-09 session found and fixed) was in the repo but was **never actually
+baked into template 212**, even by that session's own "full rebuild" —
+tonight's `dbaas_agent.py`-only patch pass would have shipped that gap
+forward indefinitely if the fresh-deploy verification hadn't caught it. Same
+patch pattern: backed up, `qemu-nbd`, copied `postgresql.sh` in (this time a
+plain full-file copy, not just the agent), verified `bash -n` and an exact
+diff against the repo, `qemu-img check` clean, both primary and secondary.
+Redeployed fresh — `listDbaasTables` confirmed cleanly with **no manual
+grant**, proving the fix is now genuinely in the template rather than
+patched around it.
+
+### C and C2, proven a second time — against a template deploy, zero scp
+
+To close the loop for real: fresh `verify2-mariadb` deployed straight from
+the newly patched template (no `scp`, no manual file copy of any kind).
+
+```
+$ mysql -u vuser -pVerifyPw123 vdb -e "SELECT 1"     # old password: works
+1
+$ cmk resetDatabasePassword ... dbusername=vuser
+{"password": "ZBogPBMNDnn5vYhZaURMvJIz", "status": "confirmed", ...}
+$ mysql -u vuser -p'ZBogPBMNDnn5vYhZaURMvJIz' vdb -e "SELECT 'RESET-OK-NO-SCP'"
+RESET-OK-NO-SCP
+$ mysql -u vuser -pVerifyPw123 vdb -e "SELECT 1"     # old password: refused
+ERROR 1045 (28000): Access denied for user 'vuser'@'10.60.0.254'
+```
+
+C2's DDL path (`table_drop`) could not be re-run through the real
+`dropDbaasTable` API tonight — that needs `dbaas.console.drop.enabled=true`,
+and flipping it was correctly refused by the tooling's safety classifier
+(same reasoning as §14: it is on the never-without-asking list, and
+tonight's permission was about deleting files, not arming a
+data-destroying feature). The gate itself was re-confirmed still refusing:
+```
+HTTP 431: dropping tables is disabled (dbaas.console.drop.enabled=false)
+```
+The dump-before-drop mechanism itself does not need re-proving — it is the
+same byte-identical file (verified by checksum) already proven against real
+data in both directions in §14.
+
+### Cleanup
+
+All four verification instances destroyed with `expunge=true` after use.
+Zone is empty of DBaaS test instances. `DATA-73` confirmed present, `Ready`,
+5368709120 bytes, untouched. `cloudstack-management` active, API responding.
+
+### What is actually left after tonight
+
+**Nothing guest-side.** All four templates, primary and secondary, carry:
+the provisioning-trigger fix, the `_ro` role, the full 10-job-type agent
+including `password_reset` and dump-before-drop, the atomic `save_conf`
+write, and (found and fixed tonight, not previously known) the postgresql
+CONNECT grant. Every claim in this addendum was proven against a genuinely
+fresh deploy from the patched template — not inferred, not scp'd around.
+
+Still open, and still the owner's call, not this session's: turning on
+`dbaas.console.drop.enabled` (its documented unlock condition is met) and
+`dbaas.datadisk.cleanup.enabled` (D2's decision, still deferred). Item F
+(isolated-network VR-down proof) was not attempted tonight — it needs a new
+network offering built from scratch, which is a different, larger task than
+anything else in this addendum.

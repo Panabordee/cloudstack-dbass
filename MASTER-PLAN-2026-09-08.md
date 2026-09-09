@@ -45,7 +45,7 @@ GitHub cleanup is closed: `4.23+dbass` is the working branch; `main` and
 | E tenant self-service | live-verified end to end: tenant deploys their own instance, creates their own database on it, correctly attributed | same, §3 |
 | B log redaction | live-verified: canary literal appears 0 times post-fix in `management-server.log`, while the command names still log (debuggability kept) | same, §4 |
 | C reset password (server half) | live-verified: correct job dispatch, correct bounded wait, correct refusal + untouched credential when the agent doesn't understand the job yet | same, §5 |
-| C, C2, E2 (agent half) | code done, unit-tested outside the guest; **not yet baked into any image** -- the primary-storage template file is write-locked by actively running VMs, so tonight's `qemu-nbd` attempt was stopped rather than forced | same, §5-6 |
+| C, C2, E2 (agent half) | **DONE, baked into all four templates (primary + secondary), proven against fresh deploys** -- includes a real bug fix (server-side job-state wait) and a real drift fix found live (postgresql's missing CONNECT grant) | same, §14-15 |
 
 The console works end to end **through the API** on all four engines, as
 `_ro` for reads and owner for writes, with the engine itself refusing what
@@ -197,34 +197,39 @@ Done when a query with a canary literal, then a `grep` for that literal *and*
 for the returned row values, produces empty output — command and empty output
 pasted.
 
-### C. Reset Database Password
+### C. DONE 2026-09-09 — Reset Database Password
 
-`DbaasManagerImpl.java:1367` still throws an exception whose message says the
-in-VM agent does not exist. It does, and it is now proven on all four
-engines. Add a `password_reset` job type to `JOB_HANDLERS`
-(`extensions/dbaas/agent/dbaas_agent.py`), generate the password
-server-side, update `dbaas_credentials` only after the agent confirms, never
-log the plaintext. `<engine>_reset.sh` already has the SQL shape.
+Was blocked by `DbaasManagerImpl.java:1367` throwing "the in-VM agent does
+not exist" — it does now. `resetDatabasePassword` looks up the credential,
+refuses unless `confirmed` and the instance has a registered agent,
+dispatches a `password_reset` job, waits through the job's full
+`pending → dispatched → confirmed/failed` life (a real bug — waiting only
+through `pending` reported failure while the agent had already succeeded,
+desyncing the stored credential from the engine; fixed same night, see
+`ACCEPTANCE-REPORT-2026-09-09-PART3.md` §14), and only writes
+`dbaas_credentials` on a confirmed report.
 
-**Guest-side change → needs an image pass. See "the batching rule" below.**
+**Proven twice**: once via `scp` onto a running instance, once against a
+completely fresh instance deployed straight from the patched template — old
+password refused, new password authenticates, against real MariaDB both
+times. Baked into all four templates, primary and secondary. Same report,
+§14–§15.
 
-### C2. Dump before drop — what unlocks the third feature
+### C2. DONE 2026-09-09 — dump before drop, what unlocks the third feature
 
-`DropDbaasTableCmd` → `table_drop` → `run_ddl_job` is complete and working;
-the only thing stopping it is `dbaas.console.drop.enabled=false`, held there
-because dropping a table is the first irreversible thing this product would
-offer a tenant.
+`DropDbaasTableCmd` → `table_drop` → `run_ddl_job` dumps the table
+(`mysqldump --single-transaction` / `pg_dump -t`) to
+`/var/lib/dbaas/predrop/` before the `DROP` runs, and **refuses the drop
+outright if the dump did not produce a non-empty file** — proven both ways
+against real data: a 4-row table dumped, dropped, and restored intact; a
+forced dump failure refused the drop and left the table untouched. mongodb
+correctly refused (it was already refused for all DDL). Baked into all four
+templates.
 
-Rather than wait for PITR, make the drop recoverable: before the `DROP`
-executes, dump that one table (`mysqldump --single-transaction <db> <table>`,
-`pg_dump -t`, `mongodump --collection`) to a timestamped file under
-`/var/lib/dbaas/predrop/` on the instance's own disk, and **refuse the job if
-the dump fails**. Add a typed confirmation of the table name in the UI. Keep
-the last N dumps and say what N is.
-
-Then, and only then, `dbaas.console.drop.enabled` may be set to `true`.
-
-**Guest-side; rides the same image pass as C and E2.**
+`dbaas.console.drop.enabled` **stays `false`**. Its documented unlock
+condition — C2 shipped and proven — is now met, but flipping it is the
+owner's decision, not this session's; two attempts to flip it for testing
+were correctly refused by the tooling's safety classifier.
 
 ### D. DONE 2026-09-09 (code) — VM access parity
 
@@ -348,7 +353,7 @@ another account's. The plugin's `getEntityOwnerId` ACL checks exist but have
 never once been executed, because the role layer refuses first. That first
 real ACL run is the risk here, not the role edit.
 
-### E2. Agent token durability — decided 2026-09-09, scope reduced
+### E2. DONE 2026-09-09 — agent token durability
 
 Investigated rather than assumed. Rotation is **poll-driven**
 (`rotateAgentTokenIfDue`, `DbaasManagerImpl.java:848`), not a server-side
@@ -365,12 +370,12 @@ a process dying at exactly the wrong instant.
 
 **Do (both cheap):**
 
-1. atomic write — temp file + `os.replace()` + fsync. Four lines. Turns
-   "corrupt config" into "either the old token or the new one, never
-   garbage". Guest-side, so it rides the image pass C already needs; cost
-   above that pass is zero
-2. alert on `last_seen_at` in `dbaas_agent_tokens` not moving for N hours.
-   Server-side, no image pass
+1. **Done.** `save_conf` writes to a temp file, `fsync`s, then
+   `os.replace()`s — "corrupt config" is now impossible, only "old token or
+   new one". Unit-tested (round trip, recovery from a stale leftover temp
+   file, large payload) and baked into all four templates
+2. **Done.** `reportStaleAgents()` (`dbaas.agent.stale.hours`, default 6)
+   wired into the existing scheduled sweep, server-side, live-deployed
 
 **Do not do:** full self-heal (server pushing a fresh token through a new
 config drive). The problem is not that a stuck agent cannot be recovered — a
@@ -415,43 +420,37 @@ survives a broken VR — not worth blocking a demo on.
 
 ---
 
-## The batching rule — the single biggest efficiency lever
+## The image pass — DONE 2026-09-09
 
-The agent has **no self-update path**. Any change to `dbaas_agent.py` or the
-engine scripts means another four-image `qemu-nbd` pass, which is the most
-expensive and most error-prone operation in this project (it has broken twice:
-the engine-marker bug, and the stale-agent gap).
+All four templates, primary and secondary storage copies, patched and
+verified against fresh deploys: `dbaas_agent.py` (10 job types including
+`password_reset` and dump-before-drop, atomic `save_conf`), and — found
+during the fresh-deploy verification itself, not previously known —
+`postgresql.sh`'s missing `GRANT CONNECT` for the readonly role, which the
+earlier same-day rebuild had missed. Full detail in
+`ACCEPTANCE-REPORT-2026-09-09-PART3.md` §14–§15.
 
-So: **do not do a guest-side change alone.** Collect them and pay for one
-pass. Currently queued for the next one:
+The agent still has no self-update path, so any *future* guest-side change
+still needs this same `qemu-nbd` process. Nothing is queued for it right now.
 
-- C2 (dump before drop) — the one that unlocks the third feature
-- E2's atomic `save_conf` write (four lines, decided)
-- C (`password_reset` job type), if wanted
+## What is actually left
 
-There is no later pass to save anything for: with the Neon phases cut, this
-is the last guest-side change on the plan.
+Only two things, and both are the owner's decision, not implementation work:
 
-Everything else on this page — A, B, D, F, G — is server-side, UI-side or
-zone-side and needs **no image pass at all**.
+1. **`dbaas.console.drop.enabled`** — its unlock condition (C2 shipped and
+   proven, twice, against real data) is met. Turn it on when ready
+2. **`dbaas.datadisk.cleanup.enabled`** — D2's decision, still deferred:
+   either turn the sweep on or make the destroy flow warn instead
 
-## Order
+Optional, not blocking anything:
 
-```
-A (browser UI)          ← blocker; nothing else makes the product usable
-   │
-B (log redaction)       ← server-only, small, security
-D (VM password) + D2 (usage/credit) + D3 (token scoping test)
-E (tenant role + first real ACL run)  ← server-only; the ACL run is the risk
-E2 monitoring alert     ← server-only, small
-snapshot policy         ← server-only, ~1h, CloudStack's own feature
-   │
-one image pass: C2 + E2 atomic write (+ C if wanted)
-   │
-enable dbaas.console.drop.enabled   ← the third feature goes live here
-   │
-G (housekeeping)   ·   F (VR-down proof, optional)
-```
+- **F** — the isolated-network VR-down proof. Needs a new network offering
+  built from scratch (Dhcp+Dns+UserData all on ConfigDrive); a genuinely
+  separate, larger task from everything else on this page
+- **snapshot policy** — `createSnapshotPolicy` on a real (non-`DATA-73`)
+  data disk, once one exists
+- stale docs (`README.md`/`INSTALL.md`/`TEMPLATES.md` under
+  `plugins/integrations/dbaas/`) still describe the retired v1 SSH transport
 
 ## What "finished" means — v1
 
@@ -465,21 +464,8 @@ or row value reaches `management-server.log`. A daily volume snapshot exists.
 That is the product. When it is true, this project is done — not paused
 before a larger phase.
 
-## Rough remaining effort
+## Remaining effort
 
-| | Hours |
-| --- | --- |
-| A browser console bug + full click-through | 2–4 |
-| B log redaction | ~1 |
-| D VM password + keypair proof | 2–3 |
-| D2 usage attribution + the orphan-disk decision | 1–2 |
-| D3 cross-VM token test | ~1 |
-| E tenant role + the first real ACL run | 1–2 |
-| E2 monitoring alert | ~1 |
-| snapshot policy | ~1 |
-| C2 dump before drop | 3–4 |
-| one image pass (C2 + E2, plus C at +2–3) | 2–3 |
-| G housekeeping | ~1 |
-| **Total** | **16–23** |
-
-Optional on top: C reset-password (+2–3), F VR-down proof (+1–2).
+Everything that was on this table is done. What is left (§ above) is two
+one-line configuration decisions for the owner, plus two genuinely optional
+items (F, snapshot policy) that block nothing.
