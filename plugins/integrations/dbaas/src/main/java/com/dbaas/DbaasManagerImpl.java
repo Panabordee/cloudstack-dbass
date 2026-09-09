@@ -35,6 +35,7 @@ import org.apache.cloudstack.framework.config.ConfigKey;
 import org.apache.cloudstack.framework.config.Configurable;
 
 import com.cloud.exception.InvalidParameterValueException;
+import com.cloud.exception.PermissionDeniedException;
 import com.cloud.storage.VolumeApiService;
 import com.cloud.storage.VolumeVO;
 import com.cloud.storage.dao.VMTemplateDetailsDao;
@@ -52,6 +53,7 @@ import com.cloud.vm.UserVmManager;
 import com.cloud.vm.UserVmService;
 import com.cloud.vm.VirtualMachine;
 import com.cloud.user.Account;
+import org.apache.cloudstack.context.CallContext;
 import com.cloud.user.dao.AccountDao;
 import com.cloud.vm.dao.NicDao;
 
@@ -774,6 +776,29 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         } catch (Exception e) {
             logger.warn("agent token rotation failed for VM {}", vmUuid, e);
             return null;
+        }
+    }
+
+    // The commands that take a virtualmachineid must verify the CALLER owns
+    // that instance. getEntityOwnerId deliberately returns the *target* VM's
+    // owner (that is what the entity-based audit and job rows need), which
+    // also makes the framework's entity access check pass for any caller --
+    // it checks the caller against the entity's owner, and we hand it the
+    // target's owner. Observed 2026-09-09: another account read a database
+    // password and ran console jobs against an admin-owned instance. Admins
+    // pass; everyone else must own the instance outright.
+    @Override
+    public void checkCallerOwnsVm(Long vmId) {
+        Account caller = CallContext.current().getCallingAccount();
+        if (caller == null || caller.getType() == Account.Type.ADMIN) {
+            return;
+        }
+        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
+        if (vm == null) {
+            throw new InvalidParameterValueException("Unable to find a VM with id " + vmId);
+        }
+        if (vm.getAccountId() != caller.getAccountId()) {
+            throw new PermissionDeniedException("the instance belongs to another account");
         }
     }
 

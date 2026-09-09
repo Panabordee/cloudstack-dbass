@@ -134,6 +134,7 @@ public abstract class DbaasConsoleJobCmdBase extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
+        _dbaasManager.checkCallerOwnsVm(getVirtualMachineId());
         if (!_dbaasManager.isConsoleEnabled()) {
             throw new InvalidParameterValueException("the DBaaS console is disabled"
                     + " (dbaas.console.enabled=false)");

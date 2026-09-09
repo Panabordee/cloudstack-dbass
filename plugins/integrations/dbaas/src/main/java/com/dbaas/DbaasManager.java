@@ -19,6 +19,12 @@ public interface DbaasManager {
 
     boolean isAgentTokenValid(String vmUuid, String token);
 
+    // Commands that take a virtualmachineid must verify the CALLER owns the
+    // instance: getEntityOwnerId returns the target VM's owner (needed for the
+    // job rows and audit), which also makes the framework's entity access
+    // check pass for any caller. Throws PermissionDeniedException otherwise.
+    void checkCallerOwnsVm(Long vmId);
+
     String agentPollJob(String vmUuid, int longPollSeconds);
 
     boolean agentReportResult(String vmUuid, String token, String jobUuid, String status,

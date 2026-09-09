@@ -95,6 +95,7 @@ public class CreateDatabaseCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
+        _dbaasManager.checkCallerOwnsVm(getVirtualMachineId());
         DbaasResponse response = _dbaasManager.createDatabase(this);
         response.setResponseName(getCommandName());
         setResponseObject(response);

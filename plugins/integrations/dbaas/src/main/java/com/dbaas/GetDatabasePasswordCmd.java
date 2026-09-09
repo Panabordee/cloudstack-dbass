@@ -77,6 +77,7 @@ public class GetDatabasePasswordCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
+        _dbaasManager.checkCallerOwnsVm(getVirtualMachineId());
         DbaasResponse response = _dbaasManager.getDatabasePassword(this);
         response.setResponseName(getCommandName());
         setResponseObject(response);
