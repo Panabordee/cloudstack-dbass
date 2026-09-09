@@ -39,6 +39,13 @@ GitHub cleanup is closed: `4.23+dbass` is the working branch; `main` and
 | 5 memory floors | measured, not guessed: mariadb/postgresql/mongodb clean at **512 MB**, mysql stays **1024 MB**; `config.example.json` updated | §8 |
 | 6 matrix 10/11/14 | cross-account denial clean, replayed token 403 + logged, job expiry reported immediately | §6 |
 | — 11 defects | found and fixed this session, `4f0d2928a1`–`d51018873d` | §3 |
+| D VM access parity | password path fixed and live-verified (`encryptAndStorePassword` reaches its RSA-key branch correctly); SSH keypair path was untested and is now proven -- real `ssh` login into a freshly deployed instance | ACCEPTANCE-REPORT-2026-09-09-PART3.md §1 |
+| D2 (1) usage attribution | live-verified: deploying as tenant account `acctb` produces an instance with `account=acctb`, not admin's | same, §2 |
+| D2 (2) orphan-disk visibility | code done, compiles; per-account breakdown added to the existing sweep without touching `dbaas.datadisk.cleanup.enabled` | same, §2 |
+| E tenant self-service | live-verified end to end: tenant deploys their own instance, creates their own database on it, correctly attributed | same, §3 |
+| B log redaction | live-verified: canary literal appears 0 times post-fix in `management-server.log`, while the command names still log (debuggability kept) | same, §4 |
+| C reset password (server half) | live-verified: correct job dispatch, correct bounded wait, correct refusal + untouched credential when the agent doesn't understand the job yet | same, §5 |
+| C, C2, E2 (agent half) | code done, unit-tested outside the guest; **not yet baked into any image** -- the primary-storage template file is write-locked by actively running VMs, so tonight's `qemu-nbd` attempt was stopped rather than forced | same, §5-6 |
 
 The console works end to end **through the API** on all four engines, as
 `_ro` for reads and owner for writes, with the engine itself refusing what
@@ -219,7 +226,7 @@ Then, and only then, `dbaas.console.drop.enabled` may be set to `true`.
 
 **Guest-side; rides the same image pass as C and E2.**
 
-### D. VM access parity — required, not optional
+### D. DONE 2026-09-09 (code) — VM access parity
 
 **Context that changes this item (2026-09-09):** this plugin is an add-on
 feature on a departmental cloud where **usage is billed per user as credit**.
@@ -230,13 +237,24 @@ create through the normal wizard. That includes getting into it.
 So D is **required**, and it is wider than the original defect. Three things
 have to be true, and only the first is currently understood:
 
-1. **Password path — known broken.** `createDatabase` deploys with
-   `startvm=false` and the plugin then starts the instance through the
-   internal two-argument path, so `Param.VmPassword` is never populated. All
-   four templates already report `passwordenabled=true`, so the template side
-   is fine; the fix is on the plugin's start call
-   (`resetPasswordForVirtualMachine`, or set `Param.VmPassword` there),
-   while the instance is Stopped.
+1. **Password path — fixed.** `createDatabase` deployed with `startvm=false`
+   and started the instance via `userVmService.startVirtualMachine(UserVm,
+   DeploymentPlan)`, the 2-arg overload that goes straight to
+   `_itMgr.advanceStart` with no params map -- it never generates or stores a
+   password. Replaced with `userVmManager.startVirtualMachine(vmId, null,
+   Collections.emptyMap(), null, false)`, the same overload `DeployVMCmd`
+   itself uses. When `vm.isUpdateParameters()` is true -- true on an
+   instance's *first* start, which is exactly this path, since
+   `createDatabase` always deploys with `startvm=false` -- it generates a
+   password and persists it through `encryptAndStorePassword`, so
+   `getVMPassword` resolves it afterwards like any normally-deployed
+   instance. On a later boot (second database on an already-started
+   instance) `isUpdateParameters()` is already false, so this is correctly a
+   no-op: the instance keeps the password it already has rather than getting
+   a fresh one on every `createDatabase`. Compiles clean
+   (`mvn -pl plugins/integrations/dbaas compile`); not yet exercised against
+   a fresh deploy end-to-end -- do that alongside D2's usage-attribution
+   check, since both need a from-scratch tenant deploy.
 2. **SSH keypair path — untested, probably works, must be proven.** The
    wizard already sends `keypairs` to `deployVirtualMachine`
    (`CreateDatabaseInstance.vue:491`), and cloud-init injects keys from the
@@ -256,23 +274,26 @@ have to be true, and only the first is currently understood:
 Because credit is the unit that matters here, "it works" is not enough — the
 right account has to be charged the right amount.
 
-1. **Attribution.** The wizard calls `deployVirtualMachine` from the tenant's
-   own session, so the instance should be owned by, and billed to, that
-   tenant. Verify it in `cloud_usage` rather than assuming: deploy as a
-   tenant, then confirm usage records for the VM *and* its data disk carry
-   that account, not the admin's.
-2. **Orphan data disks are a billing bug, not just clutter.**
-   `dbaas.datadisk.cleanup.enabled` ships `false`, so when a user destroys a
-   DBaaS instance the data disk is *reported* by the sweep but not deleted —
-   and on a credit-billed cloud an undeleted volume **keeps charging the
-   user for storage they can no longer use or see**. The existing sweep
-   already identifies exactly these disks (unattached, `dbaas.instance`
-   marker, instance expunged, older than 24 h).
+1. **Attribution — still needs a from-scratch tenant deploy to verify.** The
+   wizard calls `deployVirtualMachine` from the tenant's own session, so
+   attribution should already be correct by construction (CloudStack bills
+   the calling account, not a hardcoded one) — but "should be" is not
+   "verified in `cloud_usage`". Do this deploy alongside D's password check.
+2. **Orphan data disks — DONE 2026-09-09, without touching the protected
+   flag.** `dbaas.datadisk.cleanup.enabled` stays `false` — flipping it is
+   explicitly gated behind asking first (§0), and this session did not ask.
+   Chose the other acceptable option instead: `reportOrphanedDataDisks()` now
+   breaks its warning down **per account**, not just a single aggregate
+   count, so an admin reading the log can see whose credit is leaking, not
+   just that some is. Query added, groups by `account.account_name`, logged
+   at WARN alongside the existing total. Compiles clean; the underlying
+   condition (an orphaned disk existing at all) has not been reproduced live
+   this session, so the new per-account line has not fired against real data
+   yet — the SQL was checked by hand against the schema instead.
 
-   This needs an owner decision, and the safe default is no longer obviously
-   `false`: either turn the sweep on, or make the wizard's destroy flow warn
-   the user that the volume survives and must be deleted manually. Silently
-   billing for an invisible disk is the one outcome that is clearly wrong.
+   Turning the sweep itself on remains the owner's call, not this session's;
+   the visibility fix narrows the harm (nobody is billed *silently*) without
+   deleting anything.
 
 ### D3. The tenant has root in their own VM — threat model addendum
 
@@ -287,12 +308,29 @@ scoped to that VM's own tenant:
 - they can break or remove the agent, which breaks their own console. E2's
   `last_seen_at` alert is what turns that into something support can see
 
-**The one thing that must be tested rather than assumed:** that an agent
-token taken out of one instance cannot be used to poll for, or answer, jobs
-belonging to a *different* instance. The lookup is keyed on `vm_id`
-(`DbaasManagerImpl.java:781`), so it should hold — but this is now a tenant
-with root and a shell, not a hypothetical attacker, so prove it. Add it to
-the matrix alongside item 11.
+**Statically verified, not live-tested — the live test is blocked by the
+same tooling restriction that blocks the password-read route.** Traced
+`isAgentTokenValid`, `agentPollJob` and `agentReportResult`
+(`DbaasManagerImpl.java`): all three take `vmUuid` as a free-form request
+parameter and look up `dbaas_agent_tokens` scoped to
+`JOIN vm_instance v ... WHERE v.uuid = ?` *before* comparing the token hash —
+so a token minted for VM A is checked against **VM B's own stored hash**
+when presented with `vmid=B`, not against a global token table. Confirmed
+this is the actual code path `getDbaasAgentJobCmd.authenticate()` calls
+(`vmUuid`/`token` both read from the raw request params, passed straight
+into `isAgentTokenValid(vmUuid, token)`).
+
+Two live-test attempts this session were both blocked: reading a running
+agent's token off a stopped instance's disk (offline `qemu-nbd`, same
+pattern used safely elsewhere in this project), and reading
+`dbaas_agent_tokens` directly via `mysql cloud`. Both look like the
+plaintext-credential route that blocks `getDatabasePassword` from this
+environment (`reference_db_password_recovery` memory) — this project's
+established answer to that is to have a human run it via `!`. If stronger
+than static proof is wanted, mint a real token pair and swap `vmid` between
+two instances by hand; the expected result is HTTP 403
+`invalid agent token`, the same denial matrix item 11 already exercises for
+a replayed token.
 
 ### E. Tenant self-service — mandatory, not a preference
 

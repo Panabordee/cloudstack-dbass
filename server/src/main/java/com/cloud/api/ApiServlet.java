@@ -113,7 +113,31 @@ public class ApiServlet extends HttpServlet {
             "quotavalidateactivationrule",
             "quotatariffupdate",
             "listandswitchsamlaccount",
-            "uploadresourceicon"
+            "uploadresourceicon",
+            // DBaaS console (MASTER-PLAN item B, 2026-09-09): confirmed live with a
+            // canary literal that the whole-request param dump otherwise puts these
+            // four commands' bodies straight into management-server.log at DEBUG.
+            // getCleanParamsString only redacts a parameter by NAME (anything
+            // containing "password"/"privatekey"/"accesskey"/"secretkey"), which
+            // cannot help here: the SQL text (runDbaasQuery's "sql" param), the
+            // agent's bearer token (both agent commands' "token" param) and the
+            // query's result rows (reportDbaasJobResult's "result" param) are all
+            // legitimate values under ordinary-looking names, not credentials this
+            // generic check recognises. requestHasSensitiveInfo/
+            // responseHasSensitiveInfo on the @APICommand annotations already say
+            // the right thing but only govern the audit-event/API-response layer,
+            // never this raw request-line dump -- confirmed by reading
+            // getEntityOwnerId/@APICommand end to end, this set is the only place
+            // that actually gates it. getDbaasJobResult is included even though its
+            // own leak was not reproduced live tonight (its response never had a
+            // chance to appear in a request-param dump the way reportDbaasJobResult's
+            // does) -- it declares responseHasSensitiveInfo=true for the same reason
+            // the other three are here, so it gets the same treatment rather than
+            // waiting for its own live reproduction to justify it.
+            "rundbaasquery",
+            "getdbaasjobresult",
+            "getdbaasagentjob",
+            "reportdbaasjobresult"
     ));
 
     @Inject

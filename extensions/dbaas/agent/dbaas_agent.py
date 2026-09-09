@@ -11,6 +11,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -19,6 +20,11 @@ import urllib.request
 
 STATE_DIR = "/var/lib/dbaas"
 AGENT_CONF = os.path.join(STATE_DIR, "agent.json")
+# MASTER-PLAN item C2 (2026-09-09): where table_drop's pre-drop dump lands,
+# and how many to keep. This is the cheap alternative to full backup/PITR --
+# it covers a console mis-click, not a rewind to an arbitrary point in time.
+PREDROP_DIR = os.path.join(STATE_DIR, "predrop")
+PREDROP_KEEP = 20
 ROLES_FILE = os.path.join(STATE_DIR, "roles.json")
 ENGINE_FILE = "/opt/dbaas/engine"
 POLL_HOLD_DEFAULT = 25
@@ -41,9 +47,21 @@ def load_conf():
 
 
 def save_conf(conf):
-    fd = os.open(AGENT_CONF, os.O_WRONLY | os.O_TRUNC, 0o600)
+    # MASTER-PLAN item E2 (2026-09-09): the previous O_TRUNC-in-place write
+    # left a truncated or empty agent.json if the guest lost power or was
+    # force-stopped mid-write -- not just the last rotated token, the whole
+    # config, and force-stopping a VM is a routine operator action, not a
+    # rare fault. Write to a temp file in the same directory (so the final
+    # rename is on the same filesystem and therefore atomic), fsync it, then
+    # os.replace() over the real path -- a reader always sees either the old
+    # complete file or the new complete file, never a partial one.
+    tmp_path = AGENT_CONF + ".tmp"
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as handle:
         json.dump(conf, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp_path, AGENT_CONF)
 
 
 def api_post(api_url, fields, hold=None):
@@ -242,12 +260,75 @@ def run_sql_job(conf, job, role):
             conn.close()
 
 
+def dump_table_before_drop(engine, role, database, table):
+    # Best-effort has no place here: a failed dump must refuse the drop, so
+    # every failure path below removes whatever partial file it left and
+    # returns None -- the caller treats None as "do not drop".
+    os.makedirs(PREDROP_DIR, exist_ok=True)
+    os.chmod(PREDROP_DIR, 0o700)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    dump_path = os.path.join(PREDROP_DIR, "%s.%s.sql" % (table, stamp))
+    env = dict(os.environ)
+    try:
+        if engine in ("mysql", "mariadb"):
+            env["MYSQL_PWD"] = role["password"]
+            cmd = ["mysqldump", "--single-transaction", "--no-tablespaces",
+                   "-h", "127.0.0.1", "-u", role["user"], database, table]
+        elif engine == "postgresql":
+            env["PGPASSWORD"] = role["password"]
+            cmd = ["pg_dump", "-h", "127.0.0.1", "-U", role["user"],
+                   "-d", database, "-t", table]
+        else:
+            # mongodb never reaches here -- run_ddl_job refuses it earlier --
+            # this branch exists only so a future engine addition fails loud
+            # instead of silently skipping the dump.
+            return None, "no pre-drop dump support for engine %s" % engine
+        with open(dump_path, "wb") as handle:
+            proc = subprocess.run(cmd, stdout=handle, stderr=subprocess.PIPE, env=env, timeout=120)
+        if proc.returncode != 0:
+            _remove_quietly(dump_path)
+            return None, "dump command failed (rc=%d): %s" % (
+                proc.returncode, proc.stderr.decode("utf-8", "replace")[:500])
+        if os.path.getsize(dump_path) == 0:
+            _remove_quietly(dump_path)
+            return None, "dump command produced an empty file"
+        os.chmod(dump_path, 0o600)
+        _prune_old_dumps()
+        return dump_path, ""
+    except Exception as error:
+        _remove_quietly(dump_path)
+        return None, str(error)[:500]
+
+
+def _remove_quietly(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _prune_old_dumps():
+    # Best-effort and non-fatal: a pruning failure must never block a drop
+    # that already dumped successfully.
+    try:
+        files = sorted(
+            (os.path.join(PREDROP_DIR, f) for f in os.listdir(PREDROP_DIR)),
+            key=os.path.getmtime,
+        )
+        for stale in files[:-PREDROP_KEEP]:
+            _remove_quietly(stale)
+    except Exception:
+        pass
+
+
 def run_ddl_job(conf, job, role):
     # table_create / table_drop / column_add / column_drop / index_create /
     # index_drop all arrive the same way: the management server already built
     # the full statement server-side (DbaasConsoleJobCmdBase subclasses), so
     # the agent's only job is to run it as the owner role and report whether
-    # it succeeded -- there is no result set to shape.
+    # it succeeded -- there is no result set to shape. table_drop is the one
+    # exception: it dumps the table first (MASTER-PLAN item C2) and refuses
+    # the DROP outright if that dump did not succeed.
     engine = engine_name()
     payload = json.loads(job.get("payload", "{}"))
     statement = payload.get("statement", "")
@@ -255,6 +336,16 @@ def run_ddl_job(conf, job, role):
         return "failed", 0, False, "", "empty statement"
     if engine == "mongodb":
         return "failed", 0, False, "", "schema DDL is not offered on mongodb"
+
+    dump_path = None
+    if job.get("type") == "table_drop":
+        table = payload.get("table", "")
+        if not table:
+            return "failed", 0, False, "", "drop refused: no table name in the job payload to dump first"
+        dump_path, dump_error = dump_table_before_drop(engine, role, conf["database"], table)
+        if dump_path is None:
+            return "failed", 0, False, "", "drop refused: pre-drop dump failed (%s)" % dump_error
+
     conn = None
     try:
         if engine in ("mysql", "mariadb"):
@@ -266,7 +357,10 @@ def run_ddl_job(conf, job, role):
         cursor = conn.cursor()
         cursor.execute(statement)
         conn.commit()
-        return "confirmed", 0, False, json.dumps({"columns": [], "rows": []}), ""
+        result = {"columns": [], "rows": []}
+        if dump_path:
+            result["predrop_dump"] = dump_path
+        return "confirmed", 0, False, json.dumps(result), ""
     except Exception as error:
         try:
             conn.rollback()
@@ -429,6 +523,41 @@ def run_table_preview_job(conf, job, role):
 # Job type -> handler. table_create/table_drop/column_add/column_drop/
 # index_create/index_drop all carry a pre-built `statement` and share
 # run_ddl_job; the three read types build their own catalogue queries.
+# MASTER-PLAN item C (2026-09-09): where the provisioning scripts live on
+# the guest, and the resulting <engine>_reset.sh path -- same directory
+# firstboot.sh uses (RUNBOOK-PATCH-TEMPLATES-2026-09-05.md's file table).
+RESET_SCRIPT_DIR = "/opt/dbaas"
+
+
+def run_password_reset_job(conf, job, role):
+    # Unlike the SQL/DDL jobs, this does not go through the Python DB driver
+    # with a role's own credentials -- <engine>_reset.sh runs as root (the
+    # agent's own privilege level) and authenticates to the engine as its
+    # administrative user, the same as firstboot.sh's first-boot path, because
+    # only an admin connection can ALTER another user's password. `role` is
+    # accepted for JOB_HANDLERS' uniform (conf, job, role) signature but is
+    # not used here.
+    payload = json.loads(job.get("payload", "{}"))
+    db_user = payload.get("db_user", "")
+    db_password = payload.get("db_password", "")
+    if not db_user or not db_password:
+        return "failed", 0, False, "", "password_reset job missing db_user or db_password"
+    engine = engine_name()
+    script = os.path.join(RESET_SCRIPT_DIR, "%s_reset.sh" % engine)
+    if not os.path.isfile(script):
+        return "failed", 0, False, "", "no reset script installed for engine %s" % engine
+    stdin_payload = json.dumps({"db_user": db_user, "db_password": db_password}).encode("utf-8")
+    try:
+        proc = subprocess.run(["bash", script], input=stdin_payload,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+    except Exception as error:
+        return "failed", 0, False, "", "reset script did not run: %s" % str(error)[:500]
+    if proc.returncode != 0:
+        return "failed", 0, False, "", "reset script failed (rc=%d): %s" % (
+            proc.returncode, proc.stderr.decode("utf-8", "replace")[:500])
+    return "confirmed", 0, False, json.dumps({"columns": [], "rows": []}), ""
+
+
 JOB_HANDLERS = {
     "sql": run_sql_job,
     "table_list": run_table_list_job,
@@ -440,6 +569,7 @@ JOB_HANDLERS = {
     "column_drop": run_ddl_job,
     "index_create": run_ddl_job,
     "index_drop": run_ddl_job,
+    "password_reset": run_password_reset_job,
 }
 
 

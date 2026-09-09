@@ -77,6 +77,22 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             "Interval in seconds between sweeps that delete stored credentials"
                     + " of expunged instances and report orphaned data disks.", true);
 
+    // MASTER-PLAN item E2 (2026-09-09): a stuck agent -- one that missed its
+    // token rotation, or whose config was corrupted by a force-stop before
+    // the atomic-write fix -- is already recoverable (re-provisioning fixes
+    // it), so this is not a repair mechanism. It exists because the actual
+    // problem is silence: nobody finds out an instance's console has stopped
+    // working until a tenant complains. 6h chosen as a default because the
+    // agent's own poll cadence is much shorter than that (dbaas_agent.py's
+    // long-poll loop), so anything past a few hours of total silence is
+    // already abnormal, not just an idle instance between console uses.
+    public static final ConfigKey<Integer> DbaasAgentStaleHours = new ConfigKey<>(
+            "Advanced", Integer.class, "dbaas.agent.stale.hours", "6",
+            "An agent whose last_seen_at is older than this, on an instance that is"
+                    + " Running, is logged at WARN by the credentials cleanup sweep so an"
+                    + " admin notices a stuck console before a tenant reports it. 0 disables"
+                    + " the check.", true);
+
     @Inject
     private EntityManager _entityMgr;
 
@@ -425,6 +441,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 cleanupOrphanedCredentials();
                 cleanupOrphanedDataDisks();
                 sweepConsole();
+                reportStaleAgents();
             } catch (Throwable t) {
                 // The sweeper must never bring its thread down: a failed sweep
                 // simply retries on the next interval.
@@ -432,6 +449,41 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             }
         }, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
         logger.info("credentials cleanup sweep scheduled every {} s", intervalSeconds);
+    }
+
+    // MASTER-PLAN item E2 (2026-09-09): logs Running instances whose agent has
+    // gone quiet for longer than dbaas.agent.stale.hours. Log-only, same as
+    // the orphaned-data-disk report -- this is visibility, not repair; the
+    // fix for a stuck agent is a new provisioning request, which is a
+    // tenant/admin decision, not something a background sweep should do on
+    // its own. Scoped to Running instances so a tenant's own Stopped instance
+    // (agent correctly silent) never appears as a false alarm.
+    private void reportStaleAgents() {
+        final int staleHours = DbaasAgentStaleHours.value();
+        if (staleHours <= 0) {
+            return;
+        }
+        final String sql = "SELECT v.uuid, v.name, a.account_name, t.last_seen_at"
+                + " FROM dbaas_agent_tokens t"
+                + " JOIN vm_instance v ON v.id = t.vm_id"
+                + " LEFT JOIN account a ON a.id = v.account_id"
+                + " WHERE v.removed IS NULL AND v.state = 'Running'"
+                + " AND (t.last_seen_at IS NULL OR t.last_seen_at < DATE_SUB(NOW(), INTERVAL ? HOUR))";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                pstmt.setInt(1, staleHours);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        logger.warn("dbaas agent on instance {} ({}, account {}) has not been seen for"
+                                        + " over {}h (last_seen_at={}) -- its console is likely stuck;"
+                                        + " re-provisioning is the recovery path",
+                                rs.getString(2), rs.getString(1), rs.getString(3), staleHours, rs.getTimestamp(4));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("stale-agent report failed", e);
+        }
     }
 
     // Deletes stored credentials whose instance has been expunged: the row is
@@ -457,23 +509,47 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
     // Log-only on purpose: orphaned DATADISK volumes hold tenant data that
     // cannot be recovered once deleted, and no human confirmed the removal --
-    // the sweeper only reports the count and total size so an admin can act.
+    // the sweeper only reports counts and sizes so an admin can act.
+    //
+    // Per-account breakdown (MASTER-PLAN item D2, 2026-09-09): on a
+    // credit-billed cloud an orphaned data disk is not just clutter, it is a
+    // charge the owning account keeps paying for a volume they can no longer
+    // see or use, and the previous single aggregate count did not say whose
+    // credit was leaking. dbaas.datadisk.cleanup.enabled stays false -- that
+    // flag is not this session's to flip -- so this is the other half of the
+    // decision: nobody is billed *silently*, because every account with an
+    // orphan now shows up, by name, in a log an admin actually reads.
     private void reportOrphanedDataDisks() {
         // Same orphan criterion as the credential sweep, restricted to data
         // disks that are still attached to something that was expunged.
-        final String sql = "SELECT COUNT(*), COALESCE(SUM(v.size), 0) FROM volumes v "
+        final String totalSql = "SELECT COUNT(*), COALESCE(SUM(v.size), 0) FROM volumes v "
                 + "LEFT JOIN vm_instance i ON i.id = v.instance_id "
                 + "WHERE v.volume_type = 'DATADISK' AND v.removed IS NULL "
                 + "AND v.instance_id IS NOT NULL AND v.instance_id > 0 "
                 + "AND (i.id IS NULL OR i.removed IS NOT NULL)";
+        final String perAccountSql = "SELECT a.account_name, COUNT(*), COALESCE(SUM(v.size), 0) FROM volumes v "
+                + "LEFT JOIN vm_instance i ON i.id = v.instance_id "
+                + "LEFT JOIN account a ON a.id = v.account_id "
+                + "WHERE v.volume_type = 'DATADISK' AND v.removed IS NULL "
+                + "AND v.instance_id IS NOT NULL AND v.instance_id > 0 "
+                + "AND (i.id IS NULL OR i.removed IS NOT NULL) "
+                + "GROUP BY a.account_name ORDER BY SUM(v.size) DESC";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-            try (PreparedStatement pstmt = txn.prepareStatement(sql); ResultSet rs = pstmt.executeQuery()) {
+            try (PreparedStatement pstmt = txn.prepareStatement(totalSql); ResultSet rs = pstmt.executeQuery()) {
                 if (rs.next()) {
                     final long count = rs.getLong(1);
                     final long totalSize = rs.getLong(2);
                     if (count > 0) {
                         logger.warn("found {} orphaned DATADISK volume(s) ({} bytes total) belonging to "
                                 + "expunged instances -- admin decision required before deleting them", count, totalSize);
+                        try (PreparedStatement acctStmt = txn.prepareStatement(perAccountSql);
+                                ResultSet acctRs = acctStmt.executeQuery()) {
+                            while (acctRs.next()) {
+                                logger.warn("  account {} carries {} orphaned data disk(s), {} bytes -- still"
+                                        + " counted against that account's usage while it stays unattached",
+                                        acctRs.getString(1), acctRs.getLong(2), acctRs.getLong(3));
+                            }
+                        }
                     }
                 }
             }
@@ -1283,7 +1359,21 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 throw new CloudRuntimeException("instance " + vm.getUuid()
                         + " carries the provisioning request but is not a user instance, so it cannot be started here");
             }
-            userVmService.startVirtualMachine(userVm, null);
+            // The 2-arg startVirtualMachine(UserVm, DeploymentPlan) goes straight to
+            // _itMgr.advanceStart with no params map, which never generates or stores
+            // a VM login password -- fine for a managed black box, wrong here: this
+            // instance is the tenant's own, billed to their own credit, and they must
+            // be able to log into it exactly like any instance deployed normally
+            // (VM-PASSWORD-DEFECT-2026-09-05.md, MASTER-PLAN item D). The richer
+            // overload below does the same start but, when vm.isUpdateParameters() is
+            // still true -- true on this instance's very first start, which is exactly
+            // this path, since createDatabase always deploys with startvm=false --
+            // generates a password and persists it via encryptAndStorePassword, the
+            // same code DeployVMCmd's own start uses. On a *later* boot (second
+            // database on an already-started instance) isUpdateParameters() is already
+            // false and this is a no-op password-wise, which is correct: the instance
+            // already has one and must not get a fresh one on every createDatabase.
+            userVmManager.startVirtualMachine(vm.getId(), null, java.util.Collections.emptyMap(), null, false);
         } catch (Exception e) {
             // The instance was stopped for this request: leaving it stopped
             // without a database would turn a failed create into an outage.
@@ -1432,16 +1522,127 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
-    // Resetting a database password needs a channel into a VM that is already
-    // running its engine -- config-drive user data only ever runs at first
-    // boot, so it cannot deliver this. That channel is the in-VM agent
-    // (PLAN.md Phase D); until it exists there is no way to reset a database
-    // password without SSH, which this plugin no longer has.
+    // MASTER-PLAN item C (2026-09-09): the channel PLAN.md Phase D was
+    // waiting on now exists and is proven end to end (2026-09-09 acceptance
+    // session, all four engines). Dispatches a password_reset console job
+    // over that same transport and blocks for a bounded time so this stays
+    // the synchronous request/response shape the existing UI
+    // (ResetDatabasePassword.vue) already expects -- no UI change needed.
+    // dbaas_credentials is only written to *after* the agent confirms: on a
+    // failure or timeout the row is untouched, so a tenant is never told a
+    // password changed when the engine still has the old one.
     @Override
     public DbaasResponse resetDatabasePassword(ResetDatabasePasswordCmd cmd) {
-        throw new CloudRuntimeException("resetting a database password requires the in-VM agent (PLAN.md Phase D),"
-                + " which does not exist yet -- config-drive provisioning only runs once, at first boot, and"
-                + " cannot deliver a reset to an instance that is already running its engine");
+        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, cmd.getVirtualMachineId());
+        if (vm == null) {
+            throw new InvalidParameterValueException("VM not found: " + cmd.getVirtualMachineId());
+        }
+        String vmUuid = vm.getUuid();
+        String dbUsername = cmd.getDbUsername();
+        validateIdentifier(dbUsername, "dbusername");
+
+        String engine;
+        String dbRole;
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(
+                    "SELECT engine, db_role, status FROM dbaas_credentials"
+                    + " WHERE vm_id = ? AND db_username = ? ORDER BY created_at DESC, id DESC LIMIT 1")) {
+                pstmt.setString(1, vmUuid);
+                pstmt.setString(2, dbUsername);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (!rs.next()) {
+                        throw new InvalidParameterValueException("no database user '" + dbUsername
+                                + "' is known for instance " + vmUuid);
+                    }
+                    engine = rs.getString(1);
+                    dbRole = rs.getString(2);
+                    String status = rs.getString(3);
+                    if (!STATUS_CONFIRMED.equals(status)) {
+                        throw new InvalidParameterValueException("database user '" + dbUsername
+                                + "' is not confirmed yet (status=" + status + ") -- nothing to reset");
+                    }
+                }
+            }
+        } catch (InvalidParameterValueException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new CloudRuntimeException("failed to look up credential for " + dbUsername
+                    + " on instance " + vmUuid + ": " + e.getMessage(), e);
+        }
+
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(
+                    "SELECT 1 FROM dbaas_agent_tokens t JOIN vm_instance v ON v.id = t.vm_id WHERE v.uuid = ?")) {
+                pstmt.setString(1, vmUuid);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (!rs.next()) {
+                        throw new CloudRuntimeException("instance " + vmUuid + " has no registered agent -- it"
+                                + " may predate the console feature, or the agent has never checked in");
+                    }
+                }
+            }
+        } catch (CloudRuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new CloudRuntimeException("failed to check the agent registration for " + vmUuid
+                    + ": " + e.getMessage(), e);
+        }
+
+        String newPassword = generatePassword();
+        JsonObject payload = new JsonObject();
+        payload.addProperty("db_user", dbUsername);
+        payload.addProperty("db_password", newPassword);
+        String jobUuid = createConsoleJob(vm.getId(), vm.getAccountId(), "password_reset",
+                payload.toString(), dbRole);
+
+        // Bounded synchronous wait: the agent's own long-poll cadence
+        // (DbaasAgentLongPollSeconds) is how quickly it can pick the job up
+        // at all, so the wait has to be at least that plus real headroom for
+        // the reset script itself to run and verify the new login.
+        long deadline = System.nanoTime()
+                + (DbaasAgentLongPollSeconds.value() + 15L) * 1_000_000_000L;
+        String state = STATUS_PENDING;
+        String error = null;
+        while (System.nanoTime() < deadline) {
+            String resultJson = getUserJobResult(jobUuid, vm.getAccountId());
+            if (resultJson != null) {
+                JsonObject resultObj = com.google.gson.JsonParser.parseString(resultJson).getAsJsonObject();
+                state = resultObj.has("state") ? resultObj.get("state").getAsString() : STATUS_PENDING;
+                if (resultObj.has("error")) {
+                    error = resultObj.get("error").getAsString();
+                }
+                if (!STATUS_PENDING.equals(state)) {
+                    break;
+                }
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        if (!STATUS_CONFIRMED.equals(state)) {
+            throw new CloudRuntimeException("password reset for '" + dbUsername + "' on instance " + vmUuid
+                    + " did not confirm (state=" + state + (error != null ? ", error=" + error : "")
+                    + ") -- the database password was not changed");
+        }
+
+        // Only reached on a confirmed agent report: the engine already has
+        // the new password, so this is the first moment it is safe to store
+        // it. New row, same convention as createDatabase/every other write
+        // to this table -- history stays intact, newest wins on read.
+        storeCredential(vmUuid, dbUsername, newPassword, engine, STATUS_CONFIRMED, null, null, dbRole);
+
+        DbaasResponse response = new DbaasResponse();
+        response.setObjectName("dbaas");
+        response.setEngine(engine);
+        response.setUsername(dbUsername);
+        response.setPassword(newPassword);
+        response.setStatus(STATUS_CONFIRMED);
+        response.setStatusMessage("password reset");
+        return response;
     }
 
     @Override
@@ -1779,6 +1980,6 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 DbaasConsoleEnabled, DbaasConsoleRowLimit, DbaasConsoleBytesLimit,
                 DbaasConsoleStatementTimeout, DbaasConsoleWriteEnabled, DbaasConsoleDropEnabled,
                 DbaasAgentLongPollSeconds, DbaasAgentTokenRotateDays, DbaasJobTtl, DbaasJobResultTtl,
-                DbaasAgentLongPollMaxWaiters, DbaasMinOfferingMemoryMb};
+                DbaasAgentLongPollMaxWaiters, DbaasMinOfferingMemoryMb, DbaasAgentStaleHours};
     }
 }

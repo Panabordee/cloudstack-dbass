@@ -60,6 +60,16 @@ public class DropDbaasTableCmd extends DbaasConsoleJobCmdBase {
         String engineType = requireEngineType();
         JsonObject payload = new JsonObject();
         payload.addProperty("statement", "DROP TABLE " + quoteIdentifier(engineType, table));
+        // MASTER-PLAN item C2 (2026-09-09): the agent dumps this table to the
+        // instance's own disk before running the DROP, and refuses the job if
+        // the dump fails -- that is what finally allows
+        // dbaas.console.drop.enabled to be turned on (PLAN-DBAAS-CONSOLE.md
+        // section 8's requirement was full backup/PITR; this is the cheap
+        // version that covers the actual risk, a console mis-click, without
+        // months of engineering). The identifier is already validated above
+        // (validateIdentifier), so it is safe to pass through unquoted for
+        // the agent's own dump-command construction.
+        payload.addProperty("table", table);
         return payload.toString();
     }
 

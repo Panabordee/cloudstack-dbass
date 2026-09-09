@@ -65,6 +65,13 @@ public class ResetDatabasePasswordCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
+        // Same hole 8f2ad48295 closed elsewhere tonight: getEntityOwnerId
+        // returns the TARGET VM's owner, which makes the framework's entity
+        // access check pass for any caller. This command was implemented
+        // after that fix and was missed -- caught while implementing item C
+        // (MASTER-PLAN, 2026-09-09), not by re-running the matrix, so treat
+        // this as newly-discovered rather than re-verified.
+        _dbaasManager.checkCallerOwnsVm(getVirtualMachineId());
         DbaasResponse response = _dbaasManager.resetDatabasePassword(this);
         response.setResponseName(getCommandName());
         setResponseObject(response);
