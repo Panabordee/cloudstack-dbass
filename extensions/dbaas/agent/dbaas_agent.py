@@ -132,7 +132,17 @@ def connect_postgresql(role, database):
 
 def connect_mongodb(role):
     import pymongo
-    client = pymongo.MongoClient("mongodb://127.0.0.1:27017/", serverSelectionTimeoutMS=5000)
+    # mongod runs with auth enabled; the tenant users live in the tenant
+    # database (mongodb.sh creates them with getSiblingDB(db_name)), so the
+    # database is also the authSource. Connecting unauthenticated fails every
+    # job with "Command ... requires authentication" -- observed on template
+    # 213 right after provisioning reached confirmed (2026-09-09).
+    client = pymongo.MongoClient(
+        "mongodb://127.0.0.1:27017/",
+        username=role.get("user") or None,
+        password=role.get("password") or None,
+        authSource=role.get("database") or None,
+        serverSelectionTimeoutMS=5000)
     database = client[role["database"]]
     return client, database
 
