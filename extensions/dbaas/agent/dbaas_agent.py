@@ -79,15 +79,23 @@ def long_poll(conf):
         payload = json.loads(body)
     except ValueError:
         return None, conf
+    # Token rotation now also arrives with no job attached (an idle agent
+    # still rotates on schedule -- the server returns {"new_token": ...} for
+    # an otherwise empty hold), so read it before deciding there is no job.
+    new_token = payload.get("new_token")
     # The server wraps the response in the command's name, like every other
     # CloudStack API call -- but a 2026-09-06 bug shipped it unwrapped for a
     # while and silently dropped every dispatched job. Fixed server-side; this
     # fallback only guards against talking to an unpatched management server.
     job = payload.get("getdbaasagentjobresponse") or (payload if "jobid" in payload else {})
     if not job:
+        if new_token:
+            conf["token"] = new_token
+            save_conf(conf)
+            log("agent token rotated")
         return None, conf
     # Token rotation: a fresh token replaces the old one on the next call.
-    new_token = job.get("new_token")
+    new_token = job.get("new_token") or new_token
     if new_token:
         conf["token"] = new_token
         save_conf(conf)

@@ -745,6 +745,38 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // pending job, marks it dispatched exactly once, and returns the job as
     // JSON (payload decrypted, limits included, plus a rotated token when due).
     // Returns an empty string when the hold expired with nothing to do.
+    // Mints and stores a fresh agent token when the current one is past
+    // dbaas.agent.token.rotate.days, returning it for delivery to the agent,
+    // or null when no rotation is due. The rotated_at read before the poll
+    // acts as the optimistic witness: two concurrent waiters for the same
+    // instance both pass the due check, but only one UPDATE matches
+    // `rotated_at <=> ?` -- the loser updates zero rows and delivers nothing,
+    // so the agent is never left holding a token the row no longer carries.
+    private String rotateAgentTokenIfDue(String vmUuid, long vmId, java.sql.Timestamp rotatedAt) {
+        if (rotatedAt != null && rotatedAt.getTime() >= System.currentTimeMillis()
+                - DbaasAgentTokenRotateDays.value() * 86_400_000L) {
+            return null;
+        }
+        String fresh = generateReportToken();
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(
+                    "UPDATE dbaas_agent_tokens SET token_hash = ?, rotated_at = NOW()"
+                    + " WHERE vm_id = ? AND rotated_at <=> ?")) {
+                pstmt.setString(1, sha256Hex(fresh));
+                pstmt.setLong(2, vmId);
+                pstmt.setTimestamp(3, rotatedAt);
+                if (pstmt.executeUpdate() == 1) {
+                    return fresh;
+                }
+                logger.debug("agent token rotation skipped for VM {}: another waiter rotated first", vmUuid);
+                return null;
+            }
+        } catch (Exception e) {
+            logger.warn("agent token rotation failed for VM {}", vmUuid, e);
+            return null;
+        }
+    }
+
     public String agentPollJob(String vmUuid, int longPollSeconds) {
         String vmIdSql = "SELECT t.vm_id, t.token_hash, t.rotated_at FROM dbaas_agent_tokens t"
                 + " JOIN vm_instance v ON v.id = t.vm_id WHERE v.uuid = ? AND v.removed IS NULL";
@@ -807,6 +839,18 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             }
         }
         if (jobId[0] < 0) {
+            // No job. This is still an authenticated, successful poll, so
+            // rotation due-ness is checked here too: rotation used to live
+            // only in the job-response path, and an agent whose instance
+            // sees no console traffic never aged its token at all --
+            // rotated_at could sit months past dbaas.agent.token.rotate.days
+            // (observed 2026-09-09, MASTER-PLAN item 6 / matrix item 11).
+            String fresh = rotateAgentTokenIfDue(vmUuid, vmId, rotatedAt);
+            if (fresh != null) {
+                JsonObject rotateOnly = new JsonObject();
+                rotateOnly.addProperty("new_token", fresh);
+                return rotateOnly.toString();
+            }
             return "";
         }
         // Mark dispatched exactly once: the state predicate makes a concurrent
@@ -834,19 +878,8 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         response.addProperty("timeout_seconds", DbaasConsoleStatementTimeout.value());
         // Token rotation: a successful poll past the rotation age hands the
         // agent a fresh token, which replaces the old one on its next call.
-        if (rotatedAt == null || rotatedAt.getTime() < System.currentTimeMillis()
-                - DbaasAgentTokenRotateDays.value() * 86_400_000L) {
-            String fresh = generateReportToken();
-            try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
-                try (PreparedStatement pstmt = txn.prepareStatement(
-                        "UPDATE dbaas_agent_tokens SET token_hash = ?, rotated_at = NOW() WHERE vm_id = ?")) {
-                    pstmt.setString(1, sha256Hex(fresh));
-                    pstmt.setLong(2, vmId);
-                    pstmt.executeUpdate();
-                }
-            } catch (Exception e) {
-                logger.warn("agent token rotation failed for VM {}", vmUuid, e);
-            }
+        String fresh = rotateAgentTokenIfDue(vmUuid, vmId, rotatedAt);
+        if (fresh != null) {
             response.addProperty("new_token", fresh);
         }
         // ApiServlet writes whatever authenticate() returns verbatim -- it does
