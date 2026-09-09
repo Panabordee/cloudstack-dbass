@@ -98,17 +98,48 @@ the internal two-argument path, so `Param.VmPassword` is never populated.
 Fix: `resetPasswordForVirtualMachine` (or set `Param.VmPassword` on the
 plugin's own start call) before the config-drive attach, while Stopped.
 
-### E. Two decisions only the owner can make
+### E. Tenant self-service — decided 2026-09-09, now real work
 
-1. **Should tenant accounts be allowed the DBaaS APIs at all?** They are
-   currently denied at the role layer even on their own instances. Matrix
-   item 10 passed *because* of this, which is a pass for the wrong reason if
-   tenants are supposed to have access.
-2. **Agent token self-heal.** An agent that misses its rotation, or whose
-   process dies between receiving and saving a new token, has no recovery
-   path except a new provisioning request. Worth an agent-side "re-read the
-   token from the config drive on 403" only if a future request would carry
-   a fresh token.
+**Decision: tenants use DBaaS themselves.** The plugin's commands are not in
+the default User role's list, so a tenant account is refused at the
+API-permission layer even on its own instances. Matrix item 10 passed
+*because of that*, which is a pass for the wrong reason.
+
+Work: add the DBaaS commands to the User role, then **re-run item 10
+properly** — a tenant must reach its own instances and be refused on
+another account's. The plugin's `getEntityOwnerId` ACL checks exist but have
+never once been executed, because the role layer refuses first. That first
+real ACL run is the risk here, not the role edit.
+
+### E2. Agent token durability — decided 2026-09-09, scope reduced
+
+Investigated rather than assumed. Rotation is **poll-driven**
+(`rotateAgentTokenIfDue`, `DbaasManagerImpl.java:848`), not a server-side
+timer, so the feared case — an instance stopped for weeks coming back to a
+rotated-away token — **cannot happen**: no poll, no rotation. The real
+window is only between the server committing the new hash and the agent
+persisting it: sub-second, once per `dbaas.agent.token.rotate.days` (7).
+
+But `save_conf` (`extensions/dbaas/agent/dbaas_agent.py:44`) opens with
+`O_TRUNC` and writes in place. A power loss or a force-stop mid-write leaves
+a truncated or empty config, so the agent loses its whole configuration, not
+just a token — and force-stopping a VM is a routine operator action, unlike
+a process dying at exactly the wrong instant.
+
+**Do (both cheap):**
+
+1. atomic write — temp file + `os.replace()` + fsync. Four lines. Turns
+   "corrupt config" into "either the old token or the new one, never
+   garbage". Guest-side, so it rides the image pass C already needs; cost
+   above that pass is zero
+2. alert on `last_seen_at` in `dbaas_agent_tokens` not moving for N hours.
+   Server-side, no image pass
+
+**Do not do:** full self-heal (server pushing a fresh token through a new
+config drive). The problem is not that a stuck agent cannot be recovered — a
+new provisioning request recovers it — it is that **nobody finds out it is
+stuck**. Monitoring addresses that directly; self-heal is the expensive way
+round. Revisit only if this is observed in the wild.
 
 ### F. The isolated-network / VR-down claim
 
@@ -147,7 +178,7 @@ So: **do not do a guest-side change alone.** Collect them and pay for one
 pass. Currently queued for the next one:
 
 - C (`password_reset` job type)
-- E2 (agent token self-heal), if the owner says yes
+- E2's atomic `save_conf` write (four lines, decided)
 - anything Neon Stage 3/4 needs in the guest (PgBouncer, pgBackRest) — see
   `PLAN-NEON-STEPS.md`
 
@@ -161,9 +192,10 @@ A (browser UI)          ← blocker; nothing else makes the product usable
    │
 B (log redaction)       ← server-only, small, security
 D (VM login password)   ← server-only, small
-E (two decisions)       ← zero work once answered
+E (tenant role + first real ACL run)  ← server-only; the ACL run is the risk
+E2 monitoring alert     ← server-only, small
    │
-one image pass: C (+E2 if yes)
+one image pass: C + E2 atomic write
    │
 F (VR-down proof)  ·  G (housekeeping)  ← both optional for a working product
 ```
