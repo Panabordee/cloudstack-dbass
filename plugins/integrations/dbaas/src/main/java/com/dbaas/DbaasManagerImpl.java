@@ -147,6 +147,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     static final String STATUS_FAILED = "failed";
     static final String ROLE_OWNER = "owner";
     static final String ROLE_READONLY = "readonly";
+    // The intermediate job state between pending and confirmed/failed: the
+    // agent has claimed the job and is running it. Anything waiting on a job
+    // must keep waiting through this, not treat it as an outcome.
+    static final String JOB_STATE_DISPATCHED = "dispatched";
 
     // The instance has no CloudStack credential of its own, so
     // reportDbaasProvisioningResult is registered as an unauthenticated
@@ -1611,7 +1615,16 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                 if (resultObj.has("error")) {
                     error = resultObj.get("error").getAsString();
                 }
-                if (!STATUS_PENDING.equals(state)) {
+                // A job's life is pending -> dispatched -> confirmed/failed,
+                // so 'dispatched' means the agent has only just claimed it and
+                // is still working. Treating anything that is not 'pending' as
+                // terminal made this give up the moment the agent picked the
+                // job up: observed 2026-09-09 end to end -- the agent ran the
+                // reset, MariaDB accepted the new password, the agent reported
+                // 'confirmed' a second later, and this loop had already thrown,
+                // leaving the engine holding a password dbaas_credentials did
+                // not know. Only genuinely terminal states end the wait.
+                if (!STATUS_PENDING.equals(state) && !JOB_STATE_DISPATCHED.equals(state)) {
                     break;
                 }
             }
