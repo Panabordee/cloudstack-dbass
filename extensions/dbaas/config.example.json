@@ -17,19 +17,19 @@
       "script": "mariadb.sh",
       "reset_script": "mariadb_reset.sh",
       "port": 3306,
-      "minmemorymb": 1024
+      "minmemorymb": 512
     },
     "dbaas-postgresql-v2": {
       "script": "postgresql.sh",
       "reset_script": "postgresql_reset.sh",
       "port": 5432,
-      "minmemorymb": 1024
+      "minmemorymb": 512
     },
     "dbaas-mongodb-v2": {
       "script": "mongodb.sh",
       "reset_script": "mongodb_reset.sh",
       "port": 27017,
-      "minmemorymb": 1024
+      "minmemorymb": 512
     },
     "dbaas-mariadb": {
       "script": "mariadb.sh",
@@ -50,7 +50,7 @@
       "minmemorymb": 1024
     }
   },
-  "_comment_minmemory": "Only dbaas-mysql-v2 at 1024 MB is actually measured (OOM-killed at 512 MB, clean at 1024 MB under console load, 2026-09-08 -- see ACCEPTANCE-REPORT-2026-09-08.md section 7). The other engines carry the same number as a starting point, not a verified floor -- postgresql and especially mongodb are plausibly heavier and should be re-measured the same way (deploy, run the console matrix, watch `journalctl -u <engine>` for oom-kill) before this number is trusted for them. Do not raise or lower any of these without measuring; a guess here just moves the OOM problem from 'obvious and reproducible' to 'occasional and confusing'.",
+  "_comment_minmemory": "All four are measured, not guessed. dbaas-mysql-v2: OOM-killed at 512 MB, clean at 1024 MB (reproduced twice, 2026-09-08, ACCEPTANCE-REPORT-2026-09-08 section 7). dbaas-mariadb-v2, dbaas-postgresql-v2 and dbaas-mongodb-v2: provisioned, written to and read from on a 512 MB offering with no oom-kill in the guest kernel journal (2026-09-09, ACCEPTANCE-REPORT-2026-09-09) -- all three are clean at 512 MB. Note for mongodb: at 512 MB mongod can take minutes to start listening, and the readiness probe now runs under `timeout` so provisioning waits it out instead of hanging. Do not raise or lower any of these without measuring; a guess here just moves the OOM problem from 'obvious and reproducible' to 'occasional and confusing'.",
   "_comment_types": "Per-engine column-type allowlist for the DBaaS console's createDbaasTable/addDbaasColumn (PLAN-DBAAS-CONSOLE.md section 4.2). Keyed by engine type -- the script name in 'engines' above with '.sh' stripped (mysql.sh -> mysql), not the template name. DbaasConsoleJobCmdBase.validateColumnType matches entries case-insensitively, exact or as a '(n)' parameterised prefix (VARCHAR(n) matches VARCHAR(255)). No entry for an engine means every column type is refused for it -- mongodb has none on purpose, since run_ddl_job in the agent refuses schema DDL there regardless (PLAN section 9). Missing entirely (as opposed to an engine simply not listed) makes every createDbaasTable/addDbaasColumn call fail with 'not in the allowlist: allowed are []' -- this key must exist on the deployed config.json, not just here.",
   "types": {
     "mysql": ["INT", "BIGINT", "SMALLINT", "TINYINT", "VARCHAR(n)", "CHAR(n)", "TEXT",
