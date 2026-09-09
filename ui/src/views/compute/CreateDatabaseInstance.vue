@@ -42,6 +42,7 @@
         <a-form-item name="engine" ref="engine" :label="$t('label.engine')">
           <a-select
             v-model:value="form.engine"
+            @change="onEngineChange"
             :loading="optionsLoading"
             :placeholder="$t('label.engine')"
             v-focus="true">
@@ -282,6 +283,16 @@ export default {
       const offering = this.offerings.find(o => o.id === this.form.serviceofferingid)
       return !!offering && !!offering.iscustomized
     },
+    onEngineChange () {
+      // Switching to an engine with a higher floor can strand a previously
+      // valid selection below the new minimum -- clear it rather than submit
+      // a choice the dropdown itself would no longer offer. A selection that
+      // still qualifies under the new engine is deliberately kept.
+      if (this.form.serviceofferingid &&
+          !this.availableOfferings.some(o => o.id === this.form.serviceofferingid)) {
+        this.form.serviceofferingid = undefined
+      }
+    },
     selectedEngineMinMemory () {
       return this.engineMinMemoryByTemplate[this.form.engine] || 0
     },
@@ -302,17 +313,12 @@ export default {
     }
   },
   watch: {
-    // Switching to an engine with a higher floor can strand a previously
-    // valid selection below the new minimum -- clear it rather than submit
-    // a choice the dropdown itself would no longer offer.
-    form: {
-      deep: true,
-      handler (form) {
-        if (form.serviceofferingid && !this.availableOfferings.some(o => o.id === form.serviceofferingid)) {
-          this.form.serviceofferingid = undefined
-        }
-      }
-    }
+    // The clearing itself lives in onEngineChange (bound on the engine
+    // select): a deep watch on `form` did not fire reliably on the engine
+    // switch in the browser (observed 2026-09-09 -- a Small selection
+    // survived a switch to mysql, whose floor excludes it), and an explicit
+    // handler on the change event is the same logic without depending on
+    // watcher ordering against the computed availableOfferings.
   },
   beforeCreate () {
     this.apiParams = this.$getApiParams('createDatabase')
