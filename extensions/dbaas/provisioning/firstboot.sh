@@ -248,18 +248,23 @@ ENGINE_WAIT="${DBAAS_ENGINE_WAIT:-120}"
 engine_ready() {
     # The marker holds the script name (mysql.sh), the probe keys off the
     # engine (mysql) -- strip exactly the .sh suffix, nothing else.
+    # Every probe is bounded by `timeout`: on a starved instance the client
+    # can hang instead of failing fast, and an unbounded probe means the
+    # ENGINE_WAIT cap below is never reached -- firstboot hangs forever with
+    # no result, no report, and the credential stuck 'pending' (observed
+    # 2026-09-09, mongodb at 512 MB: mongod too slow to listen, mongosh hung).
     local marker
     marker="$(tr -d '[:space:]' < "$ENGINE_FILE")"
     case "${marker%.sh}" in
         mysql|mariadb)
-            mysqladmin --protocol=socket -uroot ping >/dev/null 2>&1
+            timeout 15 mysqladmin --protocol=socket -uroot ping >/dev/null 2>&1
             ;;
         postgresql)
-            pg_isready -q >/dev/null 2>&1
+            timeout 15 pg_isready -q >/dev/null 2>&1
             ;;
         mongodb)
-            mongosh --quiet --eval "db.adminCommand({ ping: 1 })" >/dev/null 2>&1 \
-                || mongo --quiet --eval "db.adminCommand({ ping: 1 })" >/dev/null 2>&1
+            timeout 15 mongosh --quiet --eval "db.adminCommand({ ping: 1 })" >/dev/null 2>&1 \
+                || timeout 15 mongo --quiet --eval "db.adminCommand({ ping: 1 })" >/dev/null 2>&1
             ;;
         *)
             # Unknown engine marker: no probe known -- proceed and let the
