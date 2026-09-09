@@ -43,6 +43,7 @@ if [[ -n "$db_user_ro" && -n "$db_password_ro" ]]; then
   sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
 CREATE ROLE "${db_user_ro}" LOGIN PASSWORD '${db_password_ro}';
 GRANT pg_read_all_data TO "${db_user_ro}";
+GRANT CONNECT ON DATABASE "${db_name}" TO "${db_user_ro}";
 SQL
 fi
 
