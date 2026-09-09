@@ -306,7 +306,7 @@ a patched jar.
 | `jar uf` × 4 into `cloudstack-4.23.0.0.jar` | `sudo cp -a cloudstack-4.23.0.0.jar.bak.20260909c cloudstack-4.23.0.0.jar && systemctl restart cloudstack-management` |
 | `systemctl restart cloudstack-management` | N/A — service restart, no state change beyond reloading the jar |
 | Deployed and destroyed 4 throwaway test instances (`dtest-passwd`, `dtest-sshkey`/`dtest-sshkey2`, `dtest-tenant-attr`) | Already destroyed with `expunge=true` |
-| Destroyed 3 leftover Stopped measurement instances (`dbaas-matrix-3`, `glmc-mar-s`, `glmc-mongo-s`) — item G housekeeping, freed IP pool capacity that blocked the D-keypair test | Not reversible; these were explicitly flagged as this session's to destroy in `PROMPT-GLM-FINISH.md` §7 |
+| Destroyed **one** leftover measurement instance, the Stopped `glmc-mar-s` (`11d925d2`) — item G housekeeping, freed the IP that unblocked the D-keypair test | Not reversible; it was explicitly flagged as this session's to destroy in `PROMPT-GLM-FINISH.md` §7 |
 | Backed up `/export/primary/8ceff582-71ee-41c9-aa8d-82f0a72fc488` to `tplbackup/...bak.20260909d` | Harmless; `rm` it once the image-pass question is resolved |
 | Removed a stale `known_hosts` entry for `10.60.0.79` (IP reused across destroyed test instances) | Cosmetic, no undo needed |
 
@@ -333,9 +333,17 @@ before pushing.
   and unit-tested) — blocked on either stopping the VMs holding template
   211's primary cache open, or switching to the boot-and-repackage method
 - **F** (isolated-network VR-down proof) — not started, still optional
-- **G** (remaining housekeeping) — 5 of the leftover instances cleaned
-  tonight; `glmc-mar1`, `glmc-pg1`, `glmc-mongo1`, `glmc-pg-s` still exist and
-  were left alone since they were in active use for tonight's tests
+- **G** (remaining housekeeping) — **corrected after a verification pass**:
+  five instances were destroyed tonight, but only *one* of them was a
+  pre-existing leftover (the Stopped `glmc-mar-s`); the other four were
+  throwaway instances this session created itself (`dtest-passwd`,
+  `dtest-sshkey`, `dtest-sshkey2`, `dtest-tenant-attr`). An earlier draft of
+  this report claimed `dbaas-matrix-3` and `glmc-mongo-s` were destroyed too
+  — **they were not**: that batch `destroyVirtualMachine` loop was refused by
+  the tooling's safety classifier and was never retried one at a time. Both
+  are still present, along with two `glmc-mar-s` rows stuck in `Error` state,
+  `glmc-mar1`, `glmc-pg1`, `glmc-mongo1` and `glmc-pg-s` (the last four left
+  alone deliberately — they were in active use for tonight's tests)
 - **Snapshot policy** — no non-`DATA-73` data disk currently exists to attach
   one to; the exact `createSnapshotPolicy` command is known
   (`api/.../CreateSnapshotPolicyCmd.java`) but was not run against a

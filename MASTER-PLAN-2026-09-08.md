@@ -394,7 +394,18 @@ survives a broken VR — not worth blocking a demo on.
 
 ### G. Housekeeping
 
-- destroy the four leftover measurement instances (`glmc-*`)
+- destroy the leftover measurement instances. Status 2026-09-09: only the
+  Stopped `glmc-mar-s` was destroyed (it freed the IP that unblocked the
+  keypair test). Still present: `dbaas-matrix-3`, `glmc-mongo-s`, two
+  `glmc-mar-s` rows stuck in `Error`, plus `glmc-mar1`/`glmc-pg1`/
+  `glmc-mongo1`/`glmc-pg-s` which are still in use for testing. A batch
+  `destroyVirtualMachine` loop is refused by the tooling's safety
+  classifier — destroy them one at a time
+- **`/export/primary` is at 89% (3.8 GB free)** and 3.2 GB of that is
+  `tplbackup/8ceff582-...bak.20260909d`, a backup taken 2026-09-09 for an
+  image pass that then could not proceed (the source file was write-locked
+  by running VMs). It is dead weight now, but deleting anything under
+  `tplbackup/` needs the owner's go-ahead per §0 — ask before reclaiming it
 - primary storage hit **90.5%** during the last session and the 211–213
   caches alone are ~5 GB; secondary was at 94%. This is exactly NEON gate G4
   and it now has real datapoints
