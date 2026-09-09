@@ -97,7 +97,55 @@ Together, roughly five hours, for most of what PITR would have given.
 
 ## Remaining work
 
-### A. The console UI does not work in a browser — the only real blocker
+### A. DONE 2026-09-09 — the console works in a browser
+
+Root cause was not the component at all: the UI was being deployed to
+`/usr/share/cloudstack-ui/`, which nothing serves. It has to go into
+`/usr/share/cloudstack-management/webapp/`. Once deployed there, list,
+describe, preview, query and create-table all work in the browser, Drop is
+absent, and the create wizard runs end to end with the offering filter
+behaving (stranded-selection fix in `a914b4a5a1`).
+
+### A2. The ACL guard is correct — the "it denies admin too" report is a test-harness error
+
+`8f2ad48295` closed a real, confirmed hole: `getEntityOwnerId` returns the
+*target* VM's owner, so the framework's entity-access check compared the
+caller against an owner the plugin itself supplied, and every caller passed.
+`acctb` read an admin instance's database password. `checkCallerOwnsVm` fixes
+it.
+
+The follow-up report that the guard also denies admins, with
+`DBG-ACL deny: caller=4 type=NORMAL callerAcct=4 vmAcct=2` captured during
+what was believed to be an admin call, is **not a CloudStack defect**.
+Verified 2026-09-09: `cmk list users` on this host returns
+`username=userb, account=acctb, accounttype=0`. `~/.cmk/config` still reads
+`username = admin`, but that field is cosmetic — the API-key signature
+decides identity (`ApiServlet.java:623`, `ApiServer.java:1158`, both register
+the authenticated account, neither consults `getEntityOwnerId`). The admin
+key in that profile was overwritten with userb's when the tenant keys were
+registered, so **every "admin" call in that test was an acctb call**, and
+the guard denied it correctly.
+
+**Do not `git revert 8f2ad48295`.** That would reopen a confirmed
+cross-account password disclosure in order to fix a bug that does not exist.
+
+Remaining, and it is test-harness work rather than code: restore an admin API
+key into `~/.cmk/config` (from the UI as admin, or regenerate), then re-run
+the admin path to confirm the positive case. Only the negative case (a
+non-owner is denied) has been proven so far; that admin passes is currently
+inference from the code, not observation.
+
+### A3. Deploy the UI with an overlay, never `rsync --delete`
+
+An overlay deploy that deleted `webapp/WEB-INF/` took `/client/api` down on
+2026-09-09. Recovered from `webapp.bak.20260909b`; the zone is healthy
+(`/client/api` 401, `/client/` 200, `WEB-INF` present). The UI bundle and the
+servlet share that directory, so a mirroring copy removes the application.
+Copy over the top; do not mirror. Three backup trees exist and can be removed
+once this is settled: `webapp.bak.20260908`, `webapp.bak.20260909b`,
+`cloudstack-ui.bak.20260909`.
+
+### A-old. Original description, kept for context
 
 Everything above was proven through `cmk`. In the browser, after the
 nesting-depth fix (`d51018873d`) was deployed, the console's Refresh click
