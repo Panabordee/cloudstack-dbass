@@ -106,7 +106,7 @@ describe, preview, query and create-table all work in the browser, Drop is
 absent, and the create wizard runs end to end with the offering filter
 behaving (stranded-selection fix in `a914b4a5a1`).
 
-### A2. The ACL guard is correct — the "it denies admin too" report is a test-harness error
+### A2. DONE — the ACL guard is correct in both directions; the "denies admin too" report was a test-harness error
 
 `8f2ad48295` closed a real, confirmed hole: `getEntityOwnerId` returns the
 *target* VM's owner, so the framework's entity-access check compared the
@@ -129,11 +129,25 @@ the guard denied it correctly.
 **Do not `git revert 8f2ad48295`.** That would reopen a confirmed
 cross-account password disclosure in order to fix a bug that does not exist.
 
-Remaining, and it is test-harness work rather than code: restore an admin API
-key into `~/.cmk/config` (from the UI as admin, or regenerate), then re-run
-the admin path to confirm the positive case. Only the negative case (a
-non-owner is denied) has been proven so far; that admin passes is currently
-inference from the code, not observation.
+**Both directions are now proven by observation** (2026-09-09, after an admin
+API key was restored into a fresh `[adminreal]` cmk profile — the old
+`[localadmin]` profile still holds userb's key, which is what caused the
+confusion):
+
+| Caller | Target | Result |
+| --- | --- | --- |
+| `admin` (accounttype=1) | admin-owned `glmc-mar1` | `listDbaasTables` → job created, `state=confirmed`, `{"tables": ["ui_walk"]}` |
+| `userb` / `acctb` (accounttype=0) | admin-owned `glmc-mar1` | HTTP 531, error 4365, `the instance belongs to another account` |
+
+Item E's ACL work is therefore complete: the hole is closed, admins are not
+locked out, and the console round trip still works end to end for the owner.
+
+Note for the next session: `getDatabasePassword` cannot be exercised from
+this environment (the tooling blocks the plaintext-password route). Test the
+guard through `listDbaasTables` instead — it runs the same
+`checkCallerOwnsVm` in `DbaasConsoleJobCmdBase.execute()` without touching a
+password. A new cmk profile also needs `cmk -p <profile> sync` before the
+plugin's commands resolve.
 
 ### A3. Deploy the UI with an overlay, never `rsync --delete`
 
