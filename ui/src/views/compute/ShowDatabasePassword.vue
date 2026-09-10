@@ -54,15 +54,21 @@
         showIcon
         :message="$t('message.dbaas.no.stored.credential')"
         class="state-alert" />
+      <!-- Only when the fetch itself failed. This used to be a bare
+           `v-else-if="loaded"`, which meant the *success* case -- credential
+           found, status confirmed, password rendered right above -- fell
+           through to it and the dialog showed a red "could not load"
+           alongside the credential it had just loaded (observed 2026-09-10
+           on the Database page). -->
       <a-alert
-        v-else-if="loaded"
+        v-else-if="loaded && errorMsg"
         type="error"
         showIcon
         :message="$t('message.dbaas.credential.load.failed')"
         :description="errorMsg"
         class="state-alert" />
       <a-alert
-        v-else
+        v-else-if="!loaded"
         type="info"
         showIcon
         :message="$t('message.desc.show.database.password')"
@@ -200,6 +206,11 @@ export default {
 <style scoped lang="less">
   .form-layout {
     width: 80vw;
+    // Never wider than whatever is hosting this dialog: the Database page
+    // opens these in a fixed-width modal, and a fixed 560px content inside a
+    // narrower modal spills over its background instead of being clipped or
+    // wrapped (observed 2026-09-10, Show Password, 134px past the panel).
+    max-width: 100%;
 
     @media (min-width: 600px) {
       width: 560px;

@@ -447,11 +447,25 @@ export default {
           },
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabase.vue')))
         },
-        // resetDatabasePassword has no working transport yet: config-drive
-        // provisioning only ever runs once, at first boot, and cannot deliver
-        // a reset to an instance already running its engine. Hidden until the
-        // in-VM agent (PLAN.md Phase D) exists -- the API command itself
-        // stays registered and returns a clear error if called directly.
+        // The in-VM agent this was waiting on exists and is proven on all
+        // four engines (2026-09-09), so the reset is offered again: it
+        // dispatches a password_reset job over the agent transport and only
+        // updates the stored credential once the agent confirms the engine
+        // accepted the new password.
+        {
+          api: 'resetDatabasePassword',
+          icon: 'key-outlined',
+          label: 'label.reset.database.password',
+          message: 'message.desc.reset.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              record.state === 'Running' &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
+        },
         {
           api: 'getDatabasePassword',
           icon: 'eye-outlined',

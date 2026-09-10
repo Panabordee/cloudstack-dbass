@@ -172,6 +172,11 @@ export default {
 <style scoped lang="less">
   .form-layout {
     width: 80vw;
+    // Never wider than whatever is hosting this dialog: the Database page
+    // opens these in a fixed-width modal, and fixed-width content inside a
+    // narrower modal spills over its background instead of wrapping
+    // (observed 2026-09-10 on Show Password, 134px past the panel).
+    max-width: 100%;
 
     @media (min-width: 600px) {
       width: 450px;

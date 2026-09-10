@@ -283,16 +283,6 @@ export default {
       const offering = this.offerings.find(o => o.id === this.form.serviceofferingid)
       return !!offering && !!offering.iscustomized
     },
-    onEngineChange () {
-      // Switching to an engine with a higher floor can strand a previously
-      // valid selection below the new minimum -- clear it rather than submit
-      // a choice the dropdown itself would no longer offer. A selection that
-      // still qualifies under the new engine is deliberately kept.
-      if (this.form.serviceofferingid &&
-          !this.availableOfferings.some(o => o.id === this.form.serviceofferingid)) {
-        this.form.serviceofferingid = undefined
-      }
-    },
     selectedEngineMinMemory () {
       return this.engineMinMemoryByTemplate[this.form.engine] || 0
     },
@@ -335,6 +325,21 @@ export default {
     this.closed = true
   },
   methods: {
+    // Lives here, not in computed: it mutates form state and returns
+    // nothing, and a computed is cached -- bound to @change it would run at
+    // most once and then never fire again on later engine switches, which is
+    // precisely the stranding it exists to prevent (and it also failed the
+    // build's own vue/no-side-effects-in-computed-properties rule).
+    onEngineChange () {
+      // Switching to an engine with a higher floor can strand a previously
+      // valid selection below the new minimum -- clear it rather than submit
+      // a choice the dropdown itself would no longer offer. A selection that
+      // still qualifies under the new engine is deliberately kept.
+      if (this.form.serviceofferingid &&
+          !this.availableOfferings.some(o => o.id === this.form.serviceofferingid)) {
+        this.form.serviceofferingid = undefined
+      }
+    },
     initForm () {
       this.formRef = ref()
       this.form = reactive({})
@@ -679,6 +684,11 @@ export default {
 <style scoped lang="less">
   .form-layout {
     width: 80vw;
+    // Never wider than whatever is hosting this dialog: the Database page
+    // opens these in a fixed-width modal, and fixed-width content inside a
+    // narrower modal spills over its background instead of wrapping
+    // (observed 2026-09-10 on Show Password, 134px past the panel).
+    max-width: 100%;
 
     @media (min-width: 600px) {
       width: 500px;

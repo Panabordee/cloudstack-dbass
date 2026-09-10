@@ -92,12 +92,8 @@
       <a-modal
         :visible="activeRowAction !== ''"
         :footer="null"
-        :title="$t(activeRowAction === 'createDatabase'
-          ? 'label.create.database'
-          : activeRowAction === 'console'
-            ? 'label.dbaas.console'
-            : 'label.show.database.password')"
-        :width="activeRowAction === 'createDatabase' ? '500px' : '450px'"
+        :title="$t(modalTitleFor(activeRowAction))"
+        :width="modalWidthFor(activeRowAction)"
         :closable="true"
         @cancel="closeModal">
         <create-database
@@ -113,6 +109,11 @@
           :resource="activeRecord"
           @close-action="closeModal"
           @refresh-data="fetchData" />
+        <reset-database-password
+          v-else-if="activeRowAction === 'resetDatabasePassword'"
+          :resource="activeRecord"
+          @close-action="closeModal"
+          @refresh-data="fetchData" />
       </a-modal>
     </a-col>
   </a-row>
@@ -125,12 +126,13 @@ import { getAPI, postAPI } from '@/api'
 import Status from '@/components/widgets/Status.vue'
 import CreateDatabase from '@/views/compute/CreateDatabase.vue'
 import DbaasConsole from '@/views/compute/DbaasConsole.vue'
+import ResetDatabasePassword from '@/views/compute/ResetDatabasePassword.vue'
 import ShowDatabasePassword from '@/views/compute/ShowDatabasePassword.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 export default {
   name: 'DatabaseInstances',
-  components: { Status, CreateDatabase, DbaasConsole, ShowDatabasePassword },
+  components: { Status, CreateDatabase, DbaasConsole, ShowDatabasePassword, ResetDatabasePassword },
   data () {
     return {
       loading: false,
@@ -171,6 +173,31 @@ export default {
     this.fetchData()
   },
   methods: {
+    // The dialogs this modal hosts set their own content width
+    // (.form-layout is 560px above the 600px breakpoint, matching the core
+    // CloudStack dialogs), so a modal narrower than that pushes the content
+    // straight through the modal's background -- observed 2026-09-10 on the
+    // Database page: Show Password rendered its table, its alert and its
+    // buttons 134px past the white panel, over the page behind it. The
+    // /vm/<id> route never showed this because AutogenView opens
+    // component-backed actions with width="auto", which sizes to content.
+    // Each width below is the content's own width plus the modal's padding,
+    // and the console gets far more because it renders data tables rather
+    // than a form.
+    modalTitleFor (action) {
+      switch (action) {
+        case 'createDatabase': return 'label.create.database'
+        case 'console': return 'label.dbaas.console'
+        case 'resetDatabasePassword': return 'label.reset.database.password'
+        default: return 'label.show.database.password'
+      }
+    },
+    modalWidthFor (action) {
+      if (action === 'console') {
+        return '900px'
+      }
+      return '620px'
+    },
     rowActions (record) {
       // Same conditions and permission gates the /vm/<id> dataView actions
       // use (compute.js) -- the Database page just carries them here, since
@@ -185,10 +212,14 @@ export default {
       if ((isRunning || isStopped) && 'createDatabase' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'createDatabase', label: 'label.create.database' })
       }
-      // resetDatabasePassword is not offered here: it has no working
-      // transport until the in-VM agent exists (PLAN.md Phase D).
       if ((isRunning || isStopped) && 'getDatabasePassword' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'getDatabasePassword', label: 'label.show.database.password' })
+      }
+      // Running only: the reset goes through the in-VM agent, which is not
+      // polling while the instance is stopped. Offered again as of
+      // 2026-09-09, when that transport was proven on all four engines.
+      if (isRunning && 'resetDatabasePassword' in apis && this.isEngineMember(record)) {
+        actions.push({ key: 'resetDatabasePassword', label: 'label.reset.database.password' })
       }
       if (isRunning && 'listDbaasTables' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'console', label: 'label.dbaas.console' })
