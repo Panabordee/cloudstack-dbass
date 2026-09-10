@@ -273,7 +273,7 @@ export default {
       email: '',
       secretcode: '',
       oauthexclude: '',
-      naclFooter: 'Built with 💙 by <a href="https://www.ce-nacl.com" target="_blank" rel="noopener">Network and Cloud Laboratory (NaCl)</a><br>On top of Apache CloudStack',
+      naclFooter: 'Made with 💙 by <a href="https://www.ce-nacl.com" target="_blank" rel="noopener">Network and Cloud Laboratory (NaCl)</a><br>On top of Apache CloudStack',
       googleprovider: false,
       githubprovider: false,
       keycloakprovider: false,
