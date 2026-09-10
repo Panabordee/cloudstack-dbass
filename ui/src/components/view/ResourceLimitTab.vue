@@ -34,6 +34,8 @@
           :ref="item.key">
           <a-input-number
             :disabled="!('updateResourceLimit' in $store.getters.apis)"
+            :min="-1"
+            :precision="0"
             style="width: 100%;"
             v-model:value="form[item.key]"
             v-focus="index === 0"
@@ -52,6 +54,8 @@
                 :ref="subItem.key">
                 <a-input-number
                   :disabled="!('updateResourceLimit' in $store.getters.apis)"
+                  :min="-1"
+                  :precision="0"
                   style="width: 100%;"
                   v-model:value="form[subItem.key]"
                 />
@@ -138,12 +142,13 @@ export default {
         this.dataResource.forEach(item => {
           this.resourceTypeIdNames[item.resourcetype] = item.resourcetypename
           item.key = item.tag ? (item.resourcetype + '-' + item.tag) : item.resourcetype
-          this.origValues[item.key] = form[item.key] = item.max || -1
+          const limit = item.max == null ? -1 : item.max
+          this.origValues[item.key] = form[item.key] = limit
           item.taggedresource.forEach(subItem => {
             subItem.key = subItem.tag ? (subItem.resourcetype + '-' + subItem.tag) : subItem.resourcetype
-            form[subItem.key] = subItem.max || -1
+            const subLimit = subItem.max == null ? -1 : subItem.max
+            this.origValues[subItem.key] = form[subItem.key] = subLimit
           })
-          form[item.resourcetype] = item.max == null ? -1 : item.max
         })
         this.form = form
         this.formRef.value.resetFields()
