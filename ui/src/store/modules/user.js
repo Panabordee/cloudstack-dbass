@@ -400,12 +400,6 @@ const user = {
           // Ensuring we get the user info so that store.getters.user is never empty when the page is freshly loaded
           getAPI('listUsers', { id: Cookies.get('userid'), listall: true }).then(response => {
             const result = response.listusersresponse.user[0]
-            if (!result) {
-              // A stale/mismatched session returns no user here; fail the
-              // login flow so permission.js logs out instead of hanging
-              reject(new Error('No user info returned for the current session'))
-              return
-            }
             commit('SET_INFO', result)
             commit('SET_NAME', result.firstname + ' ' + result.lastname)
             loadFeatures(cachedApis).then(() => {
@@ -420,9 +414,7 @@ const user = {
             const zones = json.listzonesresponse.zone || []
             commit('SET_ZONES', zones)
           }).catch(error => {
-            // Zone list is auxiliary, do not block the login flow on it
-            console.warn('GetInfo: failed to load zones, continuing without them', error)
-            commit('SET_ZONES', [])
+            reject(error)
           })
           getAPI('listApis').then(response => {
             const apis = {}
@@ -445,19 +437,11 @@ const user = {
                 store.getters.addRouters.map(route => {
                   router.addRoute(route)
                 })
-              }).catch(error => {
-                // resolve() was already called; permission.js runs its own
-                // GenerateRoutes for the navigation, just log this one
-                console.warn('GenerateRoutes failed after login', error)
               })
               hide()
               message.success(i18n.global.t('message.sussess.discovering.feature'))
             })
           }).catch(error => {
-            // The API discovery is essential for the UI, fail the login flow
-            // (permission.js will log out and show an error) instead of leaving
-            // the user stuck on an endless loading screen
-            hide()
             reject(error)
           })
 
@@ -492,14 +476,6 @@ const user = {
 
         getAPI('listUsers', { id: Cookies.get('userid'), showicon: true }).then(response => {
           const result = response.listusersresponse.user[0]
-          if (!result) {
-            // A stale/mismatched session (e.g. leftover cookie from another
-            // user) returns no user here; fail the login flow so that
-            // permission.js logs out and redirects to the login page instead
-            // of hanging on the loading screen
-            reject(new Error('No user info returned for the current session'))
-            return
-          }
           applyCustomGuiTheme(result.accountid, result.domainid)
           commit('SET_INFO', result)
           commit('SET_NAME', result.firstname + ' ' + result.lastname)
@@ -519,8 +495,6 @@ const user = {
             })
           })
         }).catch(error => {
-          // The user profile is needed by the UI, fail the login flow so that
-          // permission.js can log out and show an error instead of hanging
           reject(error)
         })
 
@@ -537,9 +511,7 @@ const user = {
           const ldapEnable = (response.ldapconfigurationresponse.count > 0)
           commit('SET_LDAP', ldapEnable)
         }).catch(error => {
-          // LDAP configuration is auxiliary, do not block the login flow on it
-          console.warn('GetInfo: failed to load LDAP configuration, continuing without it', error)
-          commit('SET_LDAP', false)
+          reject(error)
         })
 
         getAPI('cloudianIsEnabled').then(response => {
@@ -547,6 +519,8 @@ const user = {
           commit('SET_CLOUDIAN', cloudian)
         }).catch(ignored => {
         })
+      }).catch(error => {
+        console.error(error)
       })
     },
 

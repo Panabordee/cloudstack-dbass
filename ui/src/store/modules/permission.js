@@ -70,11 +70,7 @@ const permission = {
   },
   actions: {
     GenerateRoutes ({ commit }, data) {
-      return new Promise((resolve, reject) => {
-        if (!data || !data.apis) {
-          reject(new Error('No API definition provided to GenerateRoutes'))
-          return
-        }
+      return new Promise(resolve => {
         const apis = Object.keys(data.apis)
         const accessedRouters = filterAsyncRouter(asyncRouterMap(), apis)
         commit('SET_ROUTERS', accessedRouters)

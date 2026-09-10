@@ -129,14 +129,7 @@ router.beforeEach((to, from, next) => {
               return
             }
 
-            if (!apis || Object.keys(apis).length === 0) {
-              // GetInfo must resolve with the discovered APIs; anything else is
-              // a failed login flow. Fail loudly instead of registering no
-              // routes and leaving the navigation (and loading screen) hanging.
-              throw new Error('Failed to discover the available APIs')
-            }
-
-            return store.dispatch('GenerateRoutes', { apis }).then(() => {
+            store.dispatch('GenerateRoutes', { apis }).then(() => {
               store.getters.addRouters.map(route => {
                 router.addRoute(route)
               })
