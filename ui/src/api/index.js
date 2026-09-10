@@ -89,25 +89,23 @@ export function login (arg) {
     sourceToken.init()
   }
 
+  // Logout before login is called to purge any duplicate sessionkey cookies
+  postAPI('logout')
+
   const params = new URLSearchParams()
   params.append('command', 'login')
   params.append('username', arg.username || arg.email)
   params.append('password', arg.password)
   params.append('domain', arg.domain)
   params.append('response', 'json')
-
-  // Logout before login to purge any duplicate sessionkey cookies. This must be
-  // awaited: the logout response clears cookies by echoing them back with
-  // Max-Age=0, so if it lands after the (slower) login response it would wipe
-  // the fresh session cookies and every subsequent API call would fail with 401.
-  return postAPI('logout').catch(() => {}).then(() => axios({
+  return axios({
     url: '/',
     method: 'POST',
     data: params,
     headers: {
       'content-type': 'application/x-www-form-urlencoded'
     }
-  }))
+  })
 }
 
 export async function logout () {
@@ -124,6 +122,9 @@ export function oauthlogin (arg) {
     sourceToken.init()
   }
 
+  // Logout before login is called to purge any duplicate sessionkey cookies
+  postAPI('logout')
+
   const params = new URLSearchParams()
   params.append('command', 'oauthlogin')
   params.append('email', arg.email)
@@ -131,17 +132,14 @@ export function oauthlogin (arg) {
   params.append('provider', arg.provider)
   params.append('domain', arg.domain)
   params.append('response', 'json')
-
-  // Same as login(): await the purge logout so its cookie clearing cannot
-  // arrive after the login response and wipe the fresh session cookies.
-  return postAPI('logout').catch(() => {}).then(() => axios({
+  return axios({
     url: '/',
     method: 'post',
     data: params,
     headers: {
       'content-type': 'application/x-www-form-urlencoded'
     }
-  }))
+  })
 }
 
 export function getBaseUrl () {
