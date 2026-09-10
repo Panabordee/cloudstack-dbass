@@ -74,8 +74,6 @@ public class VirtualMachineTO {
     private DiskTO[] disks;
     private NicTO[] nics;
     private GPUDeviceTO gpuDevice;
-    /** PCI BDFs requested by the user for KVM passthrough. */
-    private List<String> pciBusAddresses;
     private Integer vcpuMaxLimit;
     private List<String[]> vmData = null;
 
@@ -330,14 +328,6 @@ public class VirtualMachineTO {
 
     public void setGpuDevice(GPUDeviceTO gpuDevice) {
         this.gpuDevice = gpuDevice;
-    }
-
-    public List<String> getPciBusAddresses() {
-        return pciBusAddresses;
-    }
-
-    public void setPciBusAddresses(List<String> pciBusAddresses) {
-        this.pciBusAddresses = pciBusAddresses;
     }
 
     public String getPlatformEmulator() {
