@@ -59,6 +59,19 @@
               {{ engineLabel(record.templatename) }}
             </template>
             <template v-else-if="column.key === 'actions'">
+              <!-- The console is the one action a tenant uses all day; it was
+                   only reachable through the actions menu (2026-09-10
+                   feedback) -- give it its own always-visible button. -->
+              <a-button
+                v-if="canConsole(record)"
+                type="primary"
+                size="small"
+                style="margin-right: 6px"
+                :title="$t('label.dbaas.console')"
+                @click="runRowAction('console', record)">
+                <template #icon><console-sql-outlined /></template>
+                {{ $t('label.dbaas.console') }}
+              </a-button>
               <a-button
                 v-if="canDestroy"
                 type="text"
@@ -214,6 +227,14 @@ export default {
         return this.consoleMaximized ? '96vw' : '1000px'
       }
       return '620px'
+    },
+    canConsole (record) {
+      // Same gate rowActions applies to the console entry: running only
+      // (the agent is not polling while stopped) and the engine console
+      // command must exist for the caller's role.
+      return record.state === 'Running' &&
+        'listDbaasTables' in this.$store.getters.apis &&
+        this.isEngineMember(record)
     },
     rowActions (record) {
       // Same conditions and permission gates the /vm/<id> dataView actions
