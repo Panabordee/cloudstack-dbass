@@ -1236,6 +1236,16 @@
                     <version>${cs.surefire-plugin.version}</version>
                     <configuration>
                         <useSystemClassLoader>false</useSystemClassLoader>
+                        <!-- The project-wide argLine property (JDK module
+                             opens, java.security.egd, and above all
+                             jdk.attach.allowAttachSelf) was declared but
+                             never referenced, so surefire's forked JVM ran
+                             without it. Mockito 5's inline mock maker needs
+                             self-attach, and every test suite that touches
+                             a mock failed with "Could not initialize inline
+                             Byte Buddy mock maker" (NetUtilsTest 101 of 101
+                             and friends). -->
+                        <argLine>${argLine}</argLine>
                     </configuration>
                 </plugin>
                 <plugin>
