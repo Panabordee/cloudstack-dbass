@@ -9,7 +9,7 @@
   ],
   "docBase": "http://docs.cloudstack.apache.org/en/latest",
   "appTitle": "NaCl Cloud",
-  "footer": "Made with 💙 by <a href=\"https://ce-nacl.com\" target=\"_blank\">NaCl</a>",
+  "footer": "Made with 💙 by <a href=\"https://www.ce-nacl.com\" target=\"_blank\">Network and Cloud Laboratory (NaCl)</a>",
   "loginTitle": "NaCl Cloud | Login",
   "loginFavicon": "assets/logo.svg",
   "loginFooter": "",
