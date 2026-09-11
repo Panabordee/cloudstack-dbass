@@ -122,16 +122,28 @@
         </a-form-item>
         <!-- The VM's own login password, not the database user's.
              deployVirtualMachine has taken `password` since 4.19 and
-             generates a random one when it is omitted -- but a generated one
-             is only retrievable afterwards if an RSA keypair was attached,
-             so a tenant deploying without one had no way to ever log in.
-             Letting them set it here is the only path that always works. -->
-        <a-form-item name="vmpassword" ref="vmpassword" :label="$t('label.dbaas.vm.password')">
+             generates a random one when it is omitted, which is the right
+             default for almost everyone -- so the field stays out of the way
+             behind a checkbox rather than asking every tenant to make a
+             decision they usually do not need to make. It matters when they
+             deploy without an RSA keypair: a generated password cannot be
+             retrieved afterwards in that case, so setting one here is then
+             the only way they will ever log in. -->
+        <a-form-item name="setvmpassword" ref="setvmpassword">
+          <a-checkbox v-model:checked="form.setvmpassword" @change="onSetVmPasswordChange">
+            {{ $t('label.dbaas.vm.password.set') }}
+          </a-checkbox>
+          <span class="hint">{{ $t('message.dbaas.vm.password.hint') }}</span>
+        </a-form-item>
+        <a-form-item
+          v-if="form.setvmpassword"
+          name="vmpassword"
+          ref="vmpassword"
+          :label="$t('label.dbaas.vm.password')">
           <a-input-password
             v-model:value="form.vmpassword"
             autocomplete="new-password"
-            :placeholder="$t('label.dbaas.vm.password.placeholder')" />
-          <span class="hint">{{ $t('message.dbaas.vm.password.hint') }}</span>
+            :placeholder="$t('label.dbaas.vm.password')" />
         </a-form-item>
         <a-form-item name="name" ref="name" :label="$t('label.name')">
           <a-input v-model:value="form.name" :placeholder="$t('label.name')" />
@@ -343,6 +355,13 @@ export default {
     // most once and then never fire again on later engine switches, which is
     // precisely the stranding it exists to prevent (and it also failed the
     // build's own vue/no-side-effects-in-computed-properties rule).
+    onSetVmPasswordChange () {
+      // Unticking hides the field; drop whatever was typed with it so a
+      // password the tenant can no longer see is never submitted.
+      if (!this.form.setvmpassword) {
+        this.form.vmpassword = undefined
+      }
+    },
     onEngineChange () {
       // Switching to an engine with a higher floor can strand a previously
       // valid selection below the new minimum -- clear it rather than submit
@@ -515,9 +534,9 @@ export default {
         if (values.keypair) {
           params.keypairs = values.keypair
         }
-        // Optional: omitted means CloudStack generates one, which is the
-        // pre-existing behaviour.
-        if (values.vmpassword) {
+        // Only when the tenant asked to set one; otherwise CloudStack
+        // generates it, which is the pre-existing behaviour.
+        if (values.setvmpassword && values.vmpassword) {
           params.password = values.vmpassword
         }
         // Basic zones reject networkids outright, so it is only sent when the

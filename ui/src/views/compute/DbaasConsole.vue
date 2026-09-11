@@ -47,18 +47,27 @@
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'actions'">
               <a-button
-size="small"
-style="margin-right: 6px"
+                size="small"
+                style="margin-right: 6px"
                 @click="describeTable(record.name)">
                 {{ $t('label.dbaas.console.describe') }}
               </a-button>
-              <a-button size="small" style="margin-right: 6px" @click="previewTable(record.name)">
+              <a-button
+                size="small"
+                style="margin-right: 6px"
+                @click="previewTable(record.name)">
                 {{ $t('label.dbaas.console.preview') }}
               </a-button>
               <a-button
-size="small"
-danger
-:disabled="!dropEnabled"
+                size="small"
+                style="margin-right: 6px"
+                @click="queryTable(record.name)">
+                {{ $t('label.dbaas.console.query') }}
+              </a-button>
+              <a-button
+                size="small"
+                danger
+                :disabled="!dropEnabled"
                 :title="dropEnabled ? '' : $t('message.dbaas.console.drop.disabled')"
                 @click="askDrop(record.name)">
                 {{ $t('label.dbaas.console.drop') }}
@@ -68,34 +77,34 @@ danger
         </a-table>
         <a-empty v-else-if="!submitting && tablesFetched" :description="$t('label.dbaas.console.no.tables')" />
         <a-card
-v-if="describedTable"
-size="small"
-class="console-card"
+          v-if="describedTable"
+          size="small"
+          class="console-card"
           :title="$t('label.dbaas.console.describe') + ': ' + describedTable.name">
           <a-table
-:columns="describeColumns"
-:data-source="describedTable.columns"
+            :columns="describeColumns"
+            :data-source="describedTable.columns"
             :row-key="record => record.name"
-size="small"
-:pagination="false"
+            size="small"
+            :pagination="false"
             :scroll="{ x: 'max-content' }" />
           <a-table
-v-if="describedTable.indexes && describedTable.indexes.length > 0"
+            v-if="describedTable.indexes && describedTable.indexes.length > 0"
             :columns="describeColumns"
-:data-source="describedTable.indexes"
+            :data-source="describedTable.indexes"
             :row-key="record => record.name"
-size="small"
-:pagination="false"
-class="console-card" />
+            size="small"
+            :pagination="false"
+            class="console-card" />
         </a-card>
       </a-tab-pane>
       <a-tab-pane key="sql" :tab="$t('label.dbaas.console.sql.tab')">
         <a-form layout="vertical">
           <a-form-item :label="$t('label.dbaas.console.sql.editor')">
             <a-textarea
-v-model:value="sqlText"
-:rows="sqlRows"
-class="sql-editor"
+              v-model:value="sqlText"
+              :rows="sqlRows"
+              class="sql-editor"
               :placeholder="$t('label.dbaas.console.sql.editor')" />
           </a-form-item>
           <a-form-item>
@@ -109,26 +118,26 @@ class="sql-editor"
         </a-form>
         <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
         <a-alert
-v-if="truncated"
-type="warning"
+          v-if="truncated"
+          type="warning"
 show-icon
           :message="$t('label.dbaas.console.truncated')"
-class="console-note" />
+          class="console-note" />
         <a-table
-v-if="resultRows.length > 0"
+          v-if="resultRows.length > 0"
           :columns="resultColumns"
-:data-source="resultRows"
+          :data-source="resultRows"
           :row-key="(record, index) => String(index)"
-size="small"
+          size="small"
           :pagination="{ pageSize: 50 }"
-:scroll="{ x: 'max-content' }"
-class="console-card" />
+          :scroll="{ x: 'max-content' }"
+          class="console-card" />
         <a-alert
-v-else-if="resultShown"
-type="success"
+          v-else-if="resultShown"
+          type="success"
 show-icon
           :message="$t('label.dbaas.console.sql.no.rows')"
-class="console-note" />
+          class="console-note" />
       </a-tab-pane>
     </a-tabs>
 
@@ -207,9 +216,9 @@ class="console-note" />
       @ok="confirmDrop"
       @cancel="cancelDrop">
       <a-alert
-type="warning"
-show-icon
-class="console-note"
+        type="warning"
+        show-icon
+        class="console-note"
         :message="$t('message.dbaas.console.drop.warning')" />
       <a-form layout="vertical">
         <a-form-item :label="$t('label.dbaas.console.drop.confirm')">
@@ -471,6 +480,21 @@ export default {
         // Not an admin (or the API is not permitted): leave it enabled and
         // let dropDbaasTable answer for itself.
       })
+    },
+    // Writing even a trivial SELECT by hand is the step people get stuck on,
+    // so the table's own row offers it: fill the editor with a statement that
+    // runs as-is and switch to the SQL tab, ready to edit or replace.
+    queryTable (name) {
+      this.sqlText = 'SELECT * FROM ' + this.quoteIdent(name) + ' LIMIT 100'
+      this.activeTab = 'sql'
+    },
+    // Matches what the server does when it builds DDL: backticks on
+    // mysql/mariadb, double quotes elsewhere. Names reaching here already
+    // passed the server's identifier rules when the table was created.
+    quoteIdent (name) {
+      return /mysql|mariadb/i.test(this.resource.templatename || '')
+        ? '`' + name + '`'
+        : '"' + name + '"'
     },
     askDrop (name) {
       this.dropTarget = name
