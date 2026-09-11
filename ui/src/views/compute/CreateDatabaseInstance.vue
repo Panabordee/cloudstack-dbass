@@ -120,6 +120,19 @@
             <a-select-option v-for="k in keyPairs" :key="k" :label="k">{{ k }}</a-select-option>
           </a-select>
         </a-form-item>
+        <!-- The VM's own login password, not the database user's.
+             deployVirtualMachine has taken `password` since 4.19 and
+             generates a random one when it is omitted -- but a generated one
+             is only retrievable afterwards if an RSA keypair was attached,
+             so a tenant deploying without one had no way to ever log in.
+             Letting them set it here is the only path that always works. -->
+        <a-form-item name="vmpassword" ref="vmpassword" :label="$t('label.dbaas.vm.password')">
+          <a-input-password
+            v-model:value="form.vmpassword"
+            autocomplete="new-password"
+            :placeholder="$t('label.dbaas.vm.password.placeholder')" />
+          <span class="hint">{{ $t('message.dbaas.vm.password.hint') }}</span>
+        </a-form-item>
         <a-form-item name="name" ref="name" :label="$t('label.name')">
           <a-input v-model:value="form.name" :placeholder="$t('label.name')" />
         </a-form-item>
@@ -502,6 +515,11 @@ export default {
         if (values.keypair) {
           params.keypairs = values.keypair
         }
+        // Optional: omitted means CloudStack generates one, which is the
+        // pre-existing behaviour.
+        if (values.vmpassword) {
+          params.password = values.vmpassword
+        }
         // Basic zones reject networkids outright, so it is only sent when the
         // selected zone actually needs one.
         if (this.needsNetwork && values.networkid) {
@@ -731,6 +749,14 @@ export default {
   .connect-command {
     font-family: monospace;
     word-break: break-all;
+  }
+
+  .hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.45);
+    line-height: 1.4;
   }
 
   .connect-hint {

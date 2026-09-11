@@ -16,6 +16,8 @@
 // under the License.
 package com.dbaas;
 
+import java.util.List;
+
 import com.google.gson.annotations.SerializedName;
 
 import org.apache.cloudstack.api.BaseResponse;
@@ -38,7 +40,15 @@ public class DbaasEngineResponse extends BaseResponse {
             + " createDatabase enforces the same number server-side")
     private Integer minMemoryMb;
 
+    @SerializedName("types")
+    @Param(description = "the column types this engine's schema commands accept, from the config's types"
+            + " allowlist -- the Create Table form offers exactly these, so a new engine or a changed"
+            + " allowlist needs no UI change. Empty for an engine that does not offer schema DDL at all"
+            + " (mongodb)")
+    private List<String> types;
+
     public void setTemplate(String template) { this.template = template; }
+    public void setTypes(List<String> types) { this.types = types; }
     public void setPort(Integer port) { this.port = port; }
     public void setMinMemoryMb(Integer minMemoryMb) { this.minMemoryMb = minMemoryMb; }
 }

@@ -453,6 +453,22 @@ export default {
         // updates the stored credential once the agent confirms the engine
         // accepted the new password.
         {
+          api: 'listDbaasTables',
+          icon: 'console-sql-outlined',
+          label: 'label.dbaas.console',
+          message: 'message.desc.dbaas.console',
+          dataView: true,
+          popup: true,
+          // Running only: every console command is a job the in-VM agent has
+          // to pick up, and it is not polling while the instance is stopped.
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              record.state === 'Running' &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DbaasConsole.vue')))
+        },
+        {
           api: 'resetDatabasePassword',
           icon: 'key-outlined',
           label: 'label.reset.database.password',

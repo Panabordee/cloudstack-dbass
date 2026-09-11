@@ -92,10 +92,26 @@
       <a-modal
         :visible="activeRowAction !== ''"
         :footer="null"
-        :title="$t(modalTitleFor(activeRowAction))"
+        :title="null"
         :width="modalWidthFor(activeRowAction)"
         :closable="true"
         @cancel="closeModal">
+        <template #title>
+          <span>{{ $t(modalTitleFor(activeRowAction)) }}</span>
+          <!-- The console renders tenant tables of unknown width; a fixed
+               modal is the wrong shape for that often enough that it needs
+               to be the user's call, not ours. -->
+          <a-button
+            v-if="activeRowAction === 'console'"
+            type="link"
+            size="small"
+            style="float: right; margin-right: 32px"
+            @click="consoleMaximized = !consoleMaximized">
+            {{ consoleMaximized
+              ? $t('label.dbaas.console.restore')
+              : $t('label.dbaas.console.maximize') }}
+          </a-button>
+        </template>
         <create-database
           v-if="activeRowAction === 'createDatabase'"
           :resource="activeRecord"
@@ -143,6 +159,7 @@ export default {
       engineLabels: {},
       engineNames: new Set(),
       activeRowAction: '',
+      consoleMaximized: false,
       activeRecord: null,
       columns: [
         { key: 'name', title: this.$t('label.name'), dataIndex: 'name' },
@@ -194,7 +211,7 @@ export default {
     },
     modalWidthFor (action) {
       if (action === 'console') {
-        return '900px'
+        return this.consoleMaximized ? '96vw' : '1000px'
       }
       return '620px'
     },
@@ -224,6 +241,14 @@ export default {
       if (isRunning && 'listDbaasTables' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'console', label: 'label.dbaas.console' })
       }
+      // The instance's own login password, not the database user's. DBaaS
+      // instances are hidden from the Instances list, so without this a
+      // tenant has nowhere to reach CloudStack's own action -- which is also
+      // why it was reported missing. Stopped only: that is CloudStack's own
+      // constraint on resetPasswordForVirtualMachine, not ours.
+      if (isStopped && 'resetPasswordForVirtualMachine' in apis && record.passwordenabled) {
+        actions.push({ key: 'resetPasswordForVirtualMachine', label: 'label.action.reset.password' })
+      }
       if (isStopped && 'startVirtualMachine' in apis) {
         actions.push({ key: 'startVirtualMachine', label: 'label.action.start.instance' })
       }
@@ -249,9 +274,46 @@ export default {
         this.activeRowAction = key
         return
       }
-      if (key === 'createDatabase' || key === 'getDatabasePassword') {
+      if (key === 'createDatabase' || key === 'getDatabasePassword' ||
+          key === 'resetDatabasePassword') {
         this.activeRecord = record
         this.activeRowAction = key
+        return
+      }
+      // The instance's own login password. Async like start/stop, but the
+      // result carries the new password exactly once -- polling and then
+      // refetching the list (the generic path below) would throw it away,
+      // which is the whole point of the action.
+      if (key === 'resetPasswordForVirtualMachine') {
+        postAPI(key, { id: record.id }).then(json => {
+          const jobId = json.resetpasswordforvirtualmachineresponse?.jobid
+          if (!jobId) {
+            this.fetchData()
+            return
+          }
+          this.$pollJob({
+            jobId,
+            title: this.$t('label.action.reset.password'),
+            description: record.displayname || record.name,
+            successMethod: result => {
+              const pw = result?.jobresult?.virtualmachine?.password
+              this.$notification.success({
+                message: this.$t('label.action.reset.password'),
+                description: pw
+                  ? `${record.displayname || record.name}: ${pw}`
+                  : (record.displayname || record.name),
+                duration: 0
+              })
+              this.fetchData()
+            },
+            errorMethod: () => this.fetchData(),
+            loadingMessage: `${this.$t('label.in.progress')} ${record.displayname || record.name}`,
+            catchMessage: this.$t('error.fetching.async.job.result'),
+            action: { isFetchData: false }
+          })
+        }).catch(error => {
+          this.$notifyError(error)
+        })
         return
       }
       // start / stop / reboot: async jobs, same flow the destroy action uses.
@@ -278,6 +340,7 @@ export default {
       })
     },
     closeModal () {
+      this.consoleMaximized = false
       this.activeRowAction = ''
       this.activeRecord = null
       this.fetchData()

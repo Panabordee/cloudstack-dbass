@@ -1815,6 +1815,17 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     engine.setTemplate(entry.getKey());
                     engine.setPort(cfg.get("port").getAsInt());
                     engine.setMinMemoryMb(engineMinMemoryMb(cfg));
+                    // The Create Table form offers exactly these, so adding an
+                    // engine or widening its allowlist stays a config edit --
+                    // the UI never carries its own copy of the type list.
+                    // Derived from the script name the same way
+                    // consoleEngineTypeForVm does (mysql.sh -> mysql).
+                    String engineType = cfg.has("script")
+                            ? cfg.get("script").getAsString().replaceAll("\\.sh$", "")
+                            : null;
+                    engine.setTypes(engineType == null
+                            ? new ArrayList<>()
+                            : consoleTypeAllowlist(engineType));
                     engine.setObjectName("dbaasengine");
                     result.add(engine);
                 } catch (Exception e) {
