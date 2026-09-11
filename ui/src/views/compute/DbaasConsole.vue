@@ -5,6 +5,22 @@
      fetch -- this component owns the single fetch. -->
 <template>
   <a-spin :spinning="loading || submitting">
+    <!-- An instance can hold several databases (createDatabase may be called
+         on it repeatedly). Every console command below runs against whichever
+         one is selected here; with one database this is just a label. -->
+    <div v-if="databases.length > 0" class="database-picker">
+      <span class="database-picker-label">{{ $t('label.dbaas.console.database') }}</span>
+      <a-select
+        v-model:value="selectedDatabase"
+        size="small"
+        style="min-width: 220px"
+        :disabled="databases.length < 2"
+        @change="onDatabaseChange">
+        <a-select-option v-for="d in databases" :key="d.database" :value="d.database">
+          {{ d.database }}<span v-if="d.status !== 'confirmed'"> ({{ d.status }})</span>
+        </a-select-option>
+      </a-select>
+    </div>
     <a-tabs v-model:activeKey="activeTab" destroyInactiveTabPane>
       <a-tab-pane key="tables" :tab="$t('label.dbaas.console.tables.tab')">
         <div class="console-toolbar">
@@ -231,6 +247,8 @@ export default {
       // Fetched from listDbaasEngines for this instance's template, never
       // hardcoded: an engine with no allowlist (mongodb) offers no schema
       // DDL at all, and the Create Table button stays disabled for it.
+      databases: [],
+      selectedDatabase: undefined,
       columnTypes: [],
       writeEnabled: true,
       createTableOpen: false,
@@ -274,7 +292,8 @@ export default {
     }
   },
   created () {
-    this.listTables()
+    // Databases first: the table list has to be scoped to one of them.
+    this.fetchDatabases().then(() => this.listTables())
     this.checkDropEnabled()
     this.fetchEngineTypes()
   },
@@ -285,7 +304,13 @@ export default {
       this.submitting = true
       this.jobError = ''
       this.truncated = false
-      return postAPI(command, { virtualmachineid: this.resource.id, ...params }).then(json => {
+      // Sent on every command, so a job can never quietly land on a
+      // different database than the one on screen. Omitted when nothing is
+      // selected, which the server reads as the instance's default.
+      const scoped = this.selectedDatabase
+        ? { database: this.selectedDatabase, ...params }
+        : { ...params }
+      return postAPI(command, { virtualmachineid: this.resource.id, ...scoped }).then(json => {
         const body = (json[command.toLowerCase() + 'response'] || {}).dbaasjob || {}
         const jobId = body.jobid
         if (!jobId) {
@@ -346,6 +371,31 @@ export default {
       this.resultColumns = columns
       this.resultRows = rows
       this.resultShown = true
+    },
+    fetchDatabases () {
+      return getAPI('listDbaasDatabases', { virtualmachineid: this.resource.id }).then(json => {
+        const list = (json.listdbaasdatabasesresponse || {}).dbaasdatabase || []
+        // A row provisioned before the db_name column existed reports no
+        // name; it is the instance's default and needs no entry here.
+        this.databases = list.filter(d => !!d.database)
+        if (!this.selectedDatabase && this.databases.length > 0) {
+          const confirmed = this.databases.find(d => d.status === 'confirmed')
+          this.selectedDatabase = (confirmed || this.databases[0]).database
+        }
+      }).catch(() => {
+        // An older management server has no such command: leave the picker
+        // hidden and let every job use the instance's default database.
+        this.databases = []
+      })
+    },
+    onDatabaseChange () {
+      // Everything on screen belongs to the previous database.
+      this.describedTable = null
+      this.resultRows = []
+      this.resultColumns = []
+      this.resultShown = false
+      this.jobError = ''
+      this.listTables()
     },
     fetchEngineTypes () {
       getAPI('listDbaasEngines').then(json => {
@@ -491,6 +541,15 @@ export default {
 </script>
 
 <style scoped>
+.database-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.database-picker-label {
+  color: rgba(0, 0, 0, 0.45);
+}
 .console-note {
   margin: 8px 0;
 }

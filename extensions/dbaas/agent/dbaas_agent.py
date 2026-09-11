@@ -581,6 +581,52 @@ def execute(conf, job, role):
     return handler(conf, job, role)
 
 
+def resolve_role(roles, conf, job):
+    """Credentials for the role and database this job asks for.
+
+    An instance can hold several databases, so roles.json may carry a
+    per-database map:
+
+        {"databases": {"db1": {"owner": {...}, "readonly": {...}}, ...},
+         "owner": {...}, "readonly": {...}, "database": "db1"}
+
+    The flat "owner"/"readonly" pair at the top level is the older shape,
+    written when an instance only ever had one database. It is still honoured
+    so an agent updated ahead of its roles.json keeps working, and so does an
+    instance provisioned before the map existed.
+
+    Returns (role, database, error). `error` is non-empty when there is no
+    credential to run with, which the caller reports as a failed job rather
+    than connecting as somebody else.
+    """
+    payload = {}
+    try:
+        payload = json.loads(job.get("payload", "{}"))
+    except ValueError:
+        pass
+    requested = payload.get("database") or conf.get("database", "")
+    wanted_role = "readonly" if job.get("db_role") == "readonly" else "owner"
+
+    per_database = roles.get("databases") or {}
+    if requested and requested in per_database:
+        entry = per_database[requested]
+        role = entry.get(wanted_role) or entry.get("owner") or {}
+    elif requested and per_database:
+        # Asking for a database this instance has no credential for must fail
+        # loudly: falling back to another database's credentials would run the
+        # statement somewhere the caller did not ask for.
+        return {}, requested, ("no credential on this instance for database '%s' -- known: %s"
+                               % (requested, ", ".join(sorted(per_database)) or "none"))
+    else:
+        role = roles.get(wanted_role) or roles.get("owner") or {}
+
+    if not role.get("user"):
+        return {}, requested, "no credential for role " + wanted_role
+    role = dict(role)
+    role["database"] = requested
+    return role, requested, ""
+
+
 def main():
     conf = load_conf()
     with open(ROLES_FILE) as handle:
@@ -606,14 +652,12 @@ def main():
         job_uuid = job.get("jobid", "")
         job_type = job.get("type", "")
         log("job %s (%s) dispatched as %s" % (job_uuid, job_type, job.get("db_role")))
-        role = roles.get("owner", {})
-        if job.get("db_role") == "readonly":
-            role = roles.get("readonly", role)
-        role = dict(role)
-        role["database"] = conf.get("database", "")
-        if not role.get("user"):
-            report(conf, job_uuid, "failed", 0, False, "", "no credential for role " + job.get("db_role", ""))
+        role, target_db, role_error = resolve_role(roles, conf, job)
+        if role_error:
+            report(conf, job_uuid, "failed", 0, False, "", role_error)
             continue
+        if target_db != conf.get("database", ""):
+            log("job %s targets database %s" % (job_uuid, target_db))
         status, row_count, truncated, result, error = execute(conf, job, role)
         delivered = report(conf, job_uuid, status, row_count, truncated, result, error)
         log("job %s %s (report %s)" % (job_uuid, status, "delivered" if delivered else "PENDING-RETRY"))

@@ -383,19 +383,46 @@ new provisioning request recovers it — it is that **nobody finds out it is
 stuck**. Monitoring addresses that directly; self-heal is the expensive way
 round. Revisit only if this is observed in the wild.
 
-### F. The isolated-network / VR-down claim
+### F. DONE 2026-09-11 — the VR-down claim, tested and **disproved for isolated networks**
 
-`DbaasIsolatedConfigDrive` still has Dhcp and Dns on `VirtualRouter`, so
-CloudStack auto-heals the VR on any VM start and "VR down" never actually
-happens. `ConfigDriveNetworkElement` advertises Dhcp and Dns capabilities, so
-a correct offering is constructible; services cannot be edited after
-creation, so make a new offering with Dhcp + Dns + UserData on ConfigDrive
-(SourceNat/Firewall/PortForwarding stay on VirtualRouter), build a network,
-deploy onto it, stop the VR, repeat the matrix.
+Built the offering the earlier plan called for and ran the test. The result
+is not the one the architecture's headline claim implied, so it is written
+here plainly.
 
-**This is proof, not function.** DBaaS deploys to a Shared network today and
-that path is already verified. Worth doing before claiming the architecture
-survives a broken VR — not worth blocking a demo on.
+**Setup.** `DbaasIsolatedConfigDriveV2`: Dhcp, Dns *and* UserData all on
+`ConfigDrive`; SourceNat, Firewall and PortForwarding stay on
+`VirtualRouter` (they have no ConfigDrive provider). Network
+`dbaas-isolated-v2` (10.1.1.0/24) built from it, one mariadb instance
+deployed onto it, two databases provisioned, both `confirmed`.
+
+**Result**, same `listDbaasTables` job each time:
+
+| Virtual router | Console job |
+| --- | --- |
+| Running (before) | `confirmed` |
+| **Stopped** | **`expired`** |
+| Running (after restart) | `confirmed` |
+
+**Why.** Putting Dhcp and Dns on ConfigDrive removes the *boot-time*
+dependency on the VR -- the guest gets its addressing from the config drive
+and needs no DHCP lease. It does not remove the *runtime* one: on an
+isolated network the VR is the L3 gateway and holds SourceNat, so it is the
+only route off the guest subnet. With it stopped the agent cannot reach the
+management server to poll, the job is never picked up, and it expires. No
+provider choice fixes this, because ConfigDrive cannot provide SourceNat.
+
+**What this means for the claim.** "Keeps working with the virtual router
+down" is true on the **Shared** network DBaaS actually deploys to, where the
+VR is not the guest's gateway -- that was already verified. On an **isolated**
+network it is false, and cannot be made true by configuration. Anything that
+says otherwise about isolated networks should be corrected rather than
+re-tested.
+
+One caution for whoever repeats this: ping and ssh from the management host
+prove nothing here, because 10.1.1.0/24 has no route from it in either
+direction, VR up or down. The console job's own state is the only usable
+signal, which is what the table above records.
+
 
 ### G. Housekeeping
 

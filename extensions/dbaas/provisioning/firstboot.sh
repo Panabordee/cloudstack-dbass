@@ -308,13 +308,52 @@ if [[ $ENGINE_RC -eq 0 ]]; then
     # console falls back to the owner credential.
     python3 - "$REQUEST_FILE" /var/lib/dbaas/roles.json <<'PY'
 import json, os, sys
+
 req = json.load(open(sys.argv[1]))
-out = {"owner": {"user": req.get("db_user", ""), "password": req.get("db_password", "")}}
+target = sys.argv[2]
+
+db_name = req.get("db_name", "")
+owner = {"user": req.get("db_user", ""), "password": req.get("db_password", "")}
+entry = {"owner": owner}
 ro_user = req.get("db_user_ro", "")
 ro_password = req.get("db_password_ro", "")
 if ro_user and ro_password:
-    out["readonly"] = {"user": ro_user, "password": ro_password}
-fd = os.open(sys.argv[2], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    entry["readonly"] = {"user": ro_user, "password": ro_password}
+
+# An instance can hold several databases: createDatabase may be called on it
+# again later, and this file used to be rewritten from scratch each time, so
+# the credentials for every earlier database were lost and the console could
+# only ever reach the newest one. Merge instead, keyed by database name, and
+# keep the flat owner/readonly pair pointing at the newest -- that pair is
+# what an agent older than this change reads.
+existing = {}
+try:
+    with open(target) as f:
+        existing = json.load(f)
+except (IOError, OSError, ValueError):
+    existing = {}
+
+databases = existing.get("databases") or {}
+# An instance provisioned before this map existed still has its one database
+# in the flat pair; carry it in so it does not disappear from the console the
+# moment a second database is added.
+if not databases and existing.get("owner", {}).get("user"):
+    legacy_name = existing.get("database", "")
+    if legacy_name:
+        legacy = {"owner": existing["owner"]}
+        if existing.get("readonly"):
+            legacy["readonly"] = existing["readonly"]
+        databases[legacy_name] = legacy
+
+if db_name:
+    databases[db_name] = entry
+
+out = dict(entry)
+out["databases"] = databases
+if db_name:
+    out["database"] = db_name
+
+fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 with os.fdopen(fd, "w") as f:
     json.dump(out, f)
 PY

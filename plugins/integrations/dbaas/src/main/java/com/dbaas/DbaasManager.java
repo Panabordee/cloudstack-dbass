@@ -25,6 +25,9 @@ public interface DbaasManager {
     // check pass for any caller. Throws PermissionDeniedException otherwise.
     void checkCallerOwnsVm(Long vmId);
 
+    /** The databases provisioned on an instance, newest credential per name. */
+    java.util.List<DbaasDatabaseResponse> listDatabases(Long vmId);
+
     String agentPollJob(String vmUuid, int longPollSeconds);
 
     boolean agentReportResult(String vmUuid, String token, String jobUuid, String status,

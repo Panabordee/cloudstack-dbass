@@ -11,6 +11,9 @@ import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.api.BaseCmd;
 import com.cloud.exception.InvalidParameterValueException;
 import org.apache.cloudstack.api.Parameter;
+
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.apache.cloudstack.api.ServerApiException;
 import org.apache.cloudstack.api.response.UserVmResponse;
 
@@ -132,6 +135,19 @@ public abstract class DbaasConsoleJobCmdBase extends BaseCmd {
         return engineType;
     }
 
+    /** Which database on the instance the job runs against. An instance can
+     *  hold several (createDatabase may be called on it repeatedly); omitted
+     *  means the one the guest was configured with last, which is the only
+     *  behaviour that existed before this parameter. */
+    @Parameter(name = "database", type = CommandType.STRING, required = false,
+            description = "the database on this instance to run against; defaults to the instance's"
+                    + " most recently provisioned database")
+    private String database;
+
+    public String getDatabase() {
+        return database;
+    }
+
     @Override
     public void execute() throws ServerApiException {
         _dbaasManager.checkCallerOwnsVm(getVirtualMachineId());
@@ -139,8 +155,18 @@ public abstract class DbaasConsoleJobCmdBase extends BaseCmd {
             throw new InvalidParameterValueException("the DBaaS console is disabled"
                     + " (dbaas.console.enabled=false)");
         }
+        // Added here rather than in each subclass's jobPayload(): the target
+        // database is a property of the job, not of the statement being run,
+        // and every console command needs it the same way.
+        String payload = jobPayload();
+        if (database != null && !database.isEmpty()) {
+            DbaasManagerImpl.validateIdentifier(database, "database");
+            JsonObject withDatabase = JsonParser.parseString(payload).getAsJsonObject();
+            withDatabase.addProperty("database", database);
+            payload = withDatabase.toString();
+        }
         String jobUuid = _dbaasManager.createConsoleJob(getVirtualMachineId(), getEntityOwnerId(),
-                jobType(), jobPayload(), jobDbRole());
+                jobType(), payload, jobDbRole());
         DbaasJobResponse response = new DbaasJobResponse();
         response.setJobId(jobUuid);
         response.setState(DbaasManagerImpl.STATUS_PENDING);

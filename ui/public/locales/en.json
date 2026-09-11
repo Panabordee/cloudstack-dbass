@@ -863,6 +863,7 @@
   "label.dbaas.console.column.primary": "Primary key",
   "label.dbaas.console.column.type": "Type",
   "label.dbaas.console.create.table": "Create Table",
+  "label.dbaas.console.database": "Database",
   "label.dbaas.console.describe": "Describe",
   "label.dbaas.console.drop": "Drop",
   "label.dbaas.console.drop.confirm": "Type the table name to confirm",

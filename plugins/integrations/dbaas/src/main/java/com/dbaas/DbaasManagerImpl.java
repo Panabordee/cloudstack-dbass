@@ -720,6 +720,27 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
+    // The database this credential belongs to. Added after the fact: an
+    // instance can hold several databases (createDatabase can be called on it
+    // repeatedly), and without this column the server had no idea which ones
+    // existed -- so the console could only ever reach whichever one the guest
+    // happened to have configured last. Rows written before this column
+    // existed have no name and are reported as the legacy default.
+    private void ensureDbNameColumn(TransactionLegacy txn) throws SQLException {
+        String check = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()"
+                + " AND TABLE_NAME = 'dbaas_credentials' AND COLUMN_NAME = 'db_name'";
+        try (PreparedStatement pstmt = txn.prepareStatement(check); ResultSet rs = pstmt.executeQuery()) {
+            if (rs.next() && rs.getInt(1) > 0) {
+                return;
+            }
+        }
+        try (PreparedStatement pstmt = txn.prepareStatement(
+                "ALTER TABLE `dbaas_credentials` ADD COLUMN `db_name` varchar(255) DEFAULT NULL")) {
+            pstmt.executeUpdate();
+            logger.info("added db_name column to dbaas_credentials (existing rows keep a null name)");
+        }
+    }
+
     // One live agent token per instance: minted at createDatabase, rotated by
     // the agent itself, revoked with the instance by the sweeper.
     private void recordAgentToken(Long vmId, String tokenHash) {
@@ -1212,6 +1233,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             pstmt.executeUpdate();
             ensureLegacyVmColumnsDropped(txn);
             ensureDbRoleColumn(txn);
+            ensureDbNameColumn(txn);
         } catch (Exception e) {
             // Credential storage degrades gracefully (see storeCredential), so
             // a management server that can't create this table should still
@@ -1347,11 +1369,11 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                         + " and its credential will stay 'pending'", vm.getUuid());
             }
             storeCredential(vm.getUuid(), dbUsername, dbPassword, engineName, STATUS_PENDING,
-                    reportTokenHash, reportExpiresAt, ROLE_OWNER);
+                    reportTokenHash, reportExpiresAt, ROLE_OWNER, cmd.getDbName());
             // The console's read-only credential, stored as its own row so
             // Show Password per role and the agent's roles.json both resolve.
             storeCredential(vm.getUuid(), dbUserRo, dbPasswordRo, engineName, STATUS_PENDING,
-                    reportTokenHash, reportExpiresAt, ROLE_READONLY);
+                    reportTokenHash, reportExpiresAt, ROLE_READONLY, cmd.getDbName());
             if (agentToken != null) {
                 recordAgentToken(vm.getId(), sha256Hex(agentToken));
             }
@@ -1547,9 +1569,12 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
 
         String engine;
         String dbRole;
+        // Carried onto the new row so a reset does not detach the credential
+        // from the database it belongs to.
+        String dbName = null;
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             try (PreparedStatement pstmt = txn.prepareStatement(
-                    "SELECT engine, db_role, status FROM dbaas_credentials"
+                    "SELECT engine, db_role, status, db_name FROM dbaas_credentials"
                     + " WHERE vm_id = ? AND db_username = ? ORDER BY created_at DESC, id DESC LIMIT 1")) {
                 pstmt.setString(1, vmUuid);
                 pstmt.setString(2, dbUsername);
@@ -1561,6 +1586,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
                     engine = rs.getString(1);
                     dbRole = rs.getString(2);
                     String status = rs.getString(3);
+                    dbName = rs.getString(4);
                     if (!STATUS_CONFIRMED.equals(status)) {
                         throw new InvalidParameterValueException("database user '" + dbUsername
                                 + "' is not confirmed yet (status=" + status + ") -- nothing to reset");
@@ -1646,7 +1672,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         // the new password, so this is the first moment it is safe to store
         // it. New row, same convention as createDatabase/every other write
         // to this table -- history stays intact, newest wins on read.
-        storeCredential(vmUuid, dbUsername, newPassword, engine, STATUS_CONFIRMED, null, null, dbRole);
+        storeCredential(vmUuid, dbUsername, newPassword, engine, STATUS_CONFIRMED, null, null, dbRole, dbName);
 
         DbaasResponse response = new DbaasResponse();
         response.setObjectName("dbaas");
@@ -1746,15 +1772,21 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
     // instance login password is intentionally not stored here; it is shown
     // exactly once on the creation screen / notification.
     private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status) {
-        storeCredential(vmId, dbUsername, dbPassword, engine, status, null, null, ROLE_OWNER);
+        storeCredential(vmId, dbUsername, dbPassword, engine, status, null, null, ROLE_OWNER, null);
     }
 
     private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status,
             String reportTokenHash, java.sql.Timestamp reportTokenExpiresAt, String dbRole) {
+        storeCredential(vmId, dbUsername, dbPassword, engine, status, reportTokenHash, reportTokenExpiresAt,
+                dbRole, null);
+    }
+
+    private void storeCredential(String vmId, String dbUsername, String dbPassword, String engine, String status,
+            String reportTokenHash, java.sql.Timestamp reportTokenExpiresAt, String dbRole, String dbName) {
         String sql = "INSERT INTO dbaas_credentials"
                 + " (vm_id, db_username, db_password_encrypted, engine, status, report_token_hash,"
-                + " report_token_expires_at, db_role)"
-                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+                + " report_token_expires_at, db_role, db_name)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
             PreparedStatement pstmt = txn.prepareStatement(sql);
             pstmt.setString(1, vmId);
@@ -1765,6 +1797,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
             pstmt.setString(6, reportTokenHash);
             pstmt.setTimestamp(7, reportTokenExpiresAt);
             pstmt.setString(8, dbRole);
+            pstmt.setString(9, dbName);
             pstmt.executeUpdate();
         } catch (Exception e) {
             // The provisioning call already succeeded and the tenant already
@@ -1838,6 +1871,47 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         return result;
     }
 
+    // The databases on an instance: one entry per distinct db_name, taking the
+    // newest owner credential for each. Rows written before the db_name column
+    // existed carry no name -- they are still reported, under the name the
+    // guest was configured with, so an instance provisioned by an older build
+    // is not invisible here.
+    @Override
+    public List<DbaasDatabaseResponse> listDatabases(Long vmId) {
+        List<DbaasDatabaseResponse> result = new ArrayList<>();
+        VirtualMachine vm = _entityMgr.findById(VirtualMachine.class, vmId);
+        if (vm == null) {
+            return result;
+        }
+        // Newest row wins per database name, matching how every other read of
+        // this table resolves a credential.
+        String sql = "SELECT c.db_name, c.db_username, c.status, c.engine FROM dbaas_credentials c"
+                + " JOIN (SELECT db_name, MAX(id) AS newest FROM dbaas_credentials"
+                + "       WHERE vm_id = ? AND db_role = ? GROUP BY db_name) newest_per_db"
+                + "   ON newest_per_db.newest = c.id"
+                + " ORDER BY c.db_name IS NULL, c.db_name";
+        try (TransactionLegacy txn = TransactionLegacy.open(TransactionLegacy.CLOUD_DB)) {
+            try (PreparedStatement pstmt = txn.prepareStatement(sql)) {
+                pstmt.setString(1, vm.getUuid());
+                pstmt.setString(2, ROLE_OWNER);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    while (rs.next()) {
+                        DbaasDatabaseResponse entry = new DbaasDatabaseResponse();
+                        entry.setDatabase(rs.getString(1));
+                        entry.setUsername(rs.getString(2));
+                        entry.setStatus(rs.getString(3));
+                        entry.setEngine(rs.getString(4));
+                        entry.setObjectName("dbaasdatabase");
+                        result.add(entry);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("could not list databases for instance {}", vm.getUuid(), e);
+        }
+        return result;
+    }
+
     // The engines map inside config.json is the single source of truth for
     // which templates are DBaaS engines.
     private JsonObject readEnginesConfig() {
@@ -1876,6 +1950,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         cmdList.add(ResetDatabasePasswordCmd.class);
         cmdList.add(GetDatabasePasswordCmd.class);
         cmdList.add(ListDbaasEnginesCmd.class);
+        cmdList.add(ListDbaasDatabasesCmd.class);
         cmdList.add(DeleteDbaasCredentialsCmd.class);
         // console job commands (PLAN-DBAAS-CONSOLE.md section 4.1)
         cmdList.add(ListDbaasTablesCmd.class);

@@ -1,5 +1,30 @@
 # DBaaS on CloudStack — what it adds, what it needs, how to install
 
+> ## ⚠️ This document describes the retired v1 architecture
+>
+> DBaaS v1 provisioned databases by **SSHing into the instance** with a
+> forced-command key. **v2 does not do that, and the plugin has no SSH path at
+> all.** Provisioning is delivered through a **config drive** the instance
+> reads at boot, and everything after boot -- the console, password resets --
+> goes through an **agent inside the instance that polls the management
+> server outbound**. Nothing in the management server ever connects *to* a
+> tenant instance.
+>
+> Anything below about SSH keys, `authorized_keys`, forced commands,
+> `vmaccess.sh` or `dbaas-provisioner` is therefore **wrong for the current
+> system**. It is kept because the v1 history is occasionally useful when
+> reading old commits.
+>
+> **Current sources of truth:**
+>
+> | For | Read |
+> | --- | --- |
+> | architecture and the phase plan | `plugins/integrations/dbaas/PLAN.md` |
+> | building / patching / verifying template images | `TEMPLATE-RUNBOOK.md` (repo root) |
+> | building the packages and deploying them | `packaging/dbaas-build-and-deploy.sh`, `README-BUILD-DEPLOY.md` |
+> | what is done and what is left | `MASTER-PLAN-2026-09-08.md` |
+
+
 Self-service databases inside the CloudStack UI: pick an engine, get an
 instance with MySQL / PostgreSQL / MongoDB on it and a set of credentials,
 without touching SSH.
