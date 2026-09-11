@@ -21,6 +21,8 @@ import com.cloud.user.AccountService;
 import com.cloud.user.DomainService;
 import com.cloud.user.User;
 import com.cloud.user.UserAccountVO;
+import org.apache.cloudstack.acl.Role;
+import org.apache.cloudstack.acl.RoleService;
 import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.response.LinkDomainToLdapResponse;
 import org.apache.cloudstack.ldap.LdapManager;
@@ -36,6 +38,7 @@ import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -56,6 +59,7 @@ public class LinkDomainToLdapCmdTest implements LdapConfigurationChanger
         setHiddenField(linkDomainToLdapCmd, "_ldapManager", ldapManager);
         setHiddenField(linkDomainToLdapCmd, "_accountService", accountService);
         setHiddenField(linkDomainToLdapCmd, "_domainService", domainService);
+        linkDomainToLdapCmd.roleService = mock(RoleService.class);
     }
 
     @After
@@ -97,6 +101,25 @@ public class LinkDomainToLdapCmdTest implements LdapConfigurationChanger
         assertEquals("type", type, result.getType());
         assertEquals("name", ldapDomain, result.getLdapDomain());
         assertEquals("accountId", String.valueOf(accountId), result.getAdminId());
+    }
+
+    @Test
+    public void getAccountTypeAndRoleFromRoleId() throws Exception {
+        Role role = mock(Role.class);
+        when(role.getRoleType()).thenReturn(RoleType.User);
+        when(linkDomainToLdapCmd.roleService.findRole(123L)).thenReturn(role);
+        setHiddenField(linkDomainToLdapCmd, "roleId", 123L);
+
+        assertEquals(Account.Type.NORMAL, linkDomainToLdapCmd.getAccountType());
+        assertEquals(Long.valueOf(123L), linkDomainToLdapCmd.getRoleId());
+    }
+
+    @Test
+    public void getAccountTypeAndDefaultRoleFromAccountType() throws Exception {
+        setHiddenField(linkDomainToLdapCmd, "accountType", 2);
+
+        assertEquals(Account.Type.DOMAIN_ADMIN, linkDomainToLdapCmd.getAccountType());
+        assertEquals(Long.valueOf(RoleType.DomainAdmin.getId()), linkDomainToLdapCmd.getRoleId());
     }
 
 }

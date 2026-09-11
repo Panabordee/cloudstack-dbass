@@ -22,27 +22,16 @@ import org.apache.cloudstack.gpu.GpuDevice;
 public class LibvirtGpuDef {
 
     private VgpuTypesInfo vgpuType;
-    private String pciBusAddress;
 
     public LibvirtGpuDef() {}
 
     public void defGpu(VgpuTypesInfo vgpuType) {
         this.vgpuType = vgpuType;
-        this.pciBusAddress = null;
-    }
-
-    /** Defines a plain PCI host device (for example an SR-IOV virtual function). */
-    public void defPci(String pciBusAddress) {
-        this.pciBusAddress = pciBusAddress;
-        this.vgpuType = null;
     }
 
     @Override
     public String toString() {
         StringBuilder gpuBuilder = new StringBuilder();
-        if (pciBusAddress != null) {
-            return generatePciXml(gpuBuilder, pciBusAddress);
-        }
         GpuDevice.DeviceType deviceType = vgpuType.getDeviceType();
 
         if (deviceType == GpuDevice.DeviceType.MDEV) {
@@ -50,7 +39,7 @@ public class LibvirtGpuDef {
             generateMdevXml(gpuBuilder);
         } else {
             // Generate XML for PCI device (passthrough GPU or VF)
-            generatePciXml(gpuBuilder, vgpuType.getBusAddress());
+            generatePciXml(gpuBuilder);
         }
 
         return gpuBuilder.toString();
@@ -67,7 +56,8 @@ public class LibvirtGpuDef {
         gpuBuilder.append("</hostdev>\n");
     }
 
-    private String generatePciXml(StringBuilder gpuBuilder, String busAddress) {
+    private void generatePciXml(StringBuilder gpuBuilder) {
+        String busAddress = vgpuType.getBusAddress();
 
         // For VDI use cases with display=on, ramfb provides early boot framebuffer
         // before GPU driver loads. This is critical for:
@@ -77,10 +67,10 @@ public class LibvirtGpuDef {
         // - Multi-monitor VDI setups (primary display)
         String managed = "yes";
         // To support passthrough NVIDIA GPUs with SR-IOV & vendor specific GPU integration
-        if (vgpuType != null && "10de".equals(vgpuType.getVendorId()) && !"passthrough".equals(vgpuType.getModelName())) {
+        if (vgpuType.getVendorId().equals("10de") && !vgpuType.getModelName().equals("passthrough")) {
             managed = "no";
         }
-        if (vgpuType != null && vgpuType.isDisplay()) {
+        if (vgpuType.isDisplay()) {
             gpuBuilder.append("<hostdev mode='subsystem' type='pci' managed='").append(managed).append("' display='on' ramfb='on'>\n");
         } else {
             // Compute-only workloads don't need display or ramfb
@@ -132,6 +122,5 @@ public class LibvirtGpuDef {
                 .append(slot).append("' function='").append(function).append("'/>\n");
         gpuBuilder.append("  </source>\n");
         gpuBuilder.append("</hostdev>\n");
-        return gpuBuilder.toString();
     }
 }

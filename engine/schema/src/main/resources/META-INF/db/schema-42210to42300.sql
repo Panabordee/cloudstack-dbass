@@ -651,3 +651,6 @@ WHERE `name`='user.vm.readonly.details' AND `value` IS NOT NULL;
 -- usage records introduced in 4.22.1 (cumulative and per-VM) can coexist. See #13399.
 CALL `cloud_usage`.`IDEMPOTENT_DROP_INDEX`('id', 'cloud_usage.usage_volume');
 CALL `cloud_usage`.`IDEMPOTENT_ADD_UNIQUE_INDEX`('cloud_usage.usage_volume', 'id', '(volume_id ASC, created ASC, vm_id ASC)');
+
+-- Custom role for accounts/users created by LDAP autoimport (linkDomainToLdap/linkAccountToLdap)
+CALL `cloud`.`IDEMPOTENT_ADD_COLUMN`('cloud.ldap_trust_map','role_id', 'BIGINT(20) unsigned DEFAULT 0 COMMENT ''Id of the role to assign to accounts and users created by LDAP autoimport; 0 means the default role for the mapped account type'' ');

@@ -41,7 +41,6 @@ import com.cloud.domain.DomainVO;
 import com.cloud.domain.dao.DomainDao;
 import com.cloud.gpu.VgpuProfileVO;
 import com.cloud.gpu.dao.VgpuProfileDao;
-import com.cloud.hypervisor.Hypervisor.HypervisorType;
 import com.cloud.network.vpc.VpcVO;
 import com.cloud.network.vpc.dao.VpcDao;
 import com.cloud.projects.ProjectVO;
@@ -97,7 +96,6 @@ import com.cloud.vm.UserVmManager;
 import com.cloud.vm.VMInstanceVO;
 import com.cloud.vm.VirtualMachine;
 import com.cloud.vm.VirtualMachineProfile;
-import com.cloud.vm.VmDetailConstants;
 import com.cloud.vm.dao.NicDao;
 import com.cloud.vm.dao.NicSecondaryIpDao;
 import com.cloud.vm.dao.VMInstanceDetailsDao;
@@ -362,19 +360,6 @@ public abstract class HypervisorGuruBase extends AdapterBase implements Hypervis
         if (detailsInVm != null) {
             to.setDetails(detailsInVm);
             addExtraConfig(detailsInVm, to, vm.getAccountId(), vm.getHypervisorType());
-            if (HypervisorType.KVM.equals(vm.getHypervisorType())) {
-                String pciAddresses = detailsInVm.get(VmDetailConstants.KVM_PCI_BUS_ADDRESSES);
-                if (StringUtils.isNotBlank(pciAddresses)) {
-                    List<String> addresses = new ArrayList<>();
-                    for (String address : pciAddresses.split(",")) {
-                        String value = address.trim();
-                        if (StringUtils.isNotBlank(value)) {
-                            addresses.add(value);
-                        }
-                    }
-                    to.setPciBusAddresses(addresses);
-                }
-            }
         }
 
         addServiceOfferingExtraConfiguration(offering, to);

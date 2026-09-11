@@ -55,16 +55,24 @@ public class LdapTrustMapVO implements InternalIdentity {
     @Enumerated(value = EnumType.ORDINAL)
     private Account.Type accountType;
 
+    @Column(name = "role_id")
+    private long roleId = 0L;
+
 
     public LdapTrustMapVO() {
     }
 
     public LdapTrustMapVO(long domainId, LdapManager.LinkType type, String name, Account.Type accountType, long accountId) {
+        this(domainId, type, name, accountType, accountId, 0L);
+    }
+
+    public LdapTrustMapVO(long domainId, LdapManager.LinkType type, String name, Account.Type accountType, long accountId, long roleId) {
         this.domainId = domainId;
         this.type = type;
         this.name = name;
         this.accountType = accountType;
         this.accountId = accountId;
+        this.roleId = roleId;
     }
 
     @Override
@@ -92,6 +100,10 @@ public class LdapTrustMapVO implements InternalIdentity {
         return accountId;
     }
 
+    public long getRoleId() {
+        return roleId;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -107,6 +119,9 @@ public class LdapTrustMapVO implements InternalIdentity {
             return false;
         }
         if (accountId != that.accountId) {
+            return false;
+        }
+        if (roleId != that.roleId) {
             return false;
         }
         if (accountType != that.accountType) {
@@ -125,6 +140,7 @@ public class LdapTrustMapVO implements InternalIdentity {
         result = 31 * result + name.hashCode();
         result = 31 * result + Long.hashCode(domainId);
         result = 31 * result + Long.hashCode(accountId);
+        result = 31 * result + Long.hashCode(roleId);
         result = 31 * result + accountType.ordinal();
         return result;
     }

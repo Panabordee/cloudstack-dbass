@@ -25,6 +25,7 @@ import com.cloud.user.UserAccount;
 import com.cloud.user.UserAccountVO;
 import com.cloud.user.dao.UserAccountDao;
 import com.cloud.utils.Pair;
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.auth.UserAuthenticator;
 import org.junit.Before;
 import org.junit.Test;
@@ -42,8 +43,12 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 
@@ -129,5 +134,43 @@ public class LdapAuthenticatorTest {
         Pair<Boolean, UserAuthenticator.ActionOnFailedAuthentication> rc = ldapAuthenticator.authenticate(username, hardcoded, domainId, user);
         assertTrue("authentication failed when it should have succeeded", rc.first());
         assertNull(rc.second());
+    }
+
+    @Test
+    public void authenticateAutoImportUsesCustomRoleFromTrustMap() throws Exception {
+        LdapUser ldapUser = new LdapUser(username, "a@b", "b", "banner", principal, "", false, null);
+        when(userAccountDao.getUserAccount(username, domainId)).thenReturn(null);
+        when(ldapManager.isLdapEnabled(domainId)).thenReturn(true);
+        when(ldapManager.getDomainLinkage(domainId)).thenReturn(List.of(
+                new LdapTrustMapVO(domainId, LdapManager.LinkType.GROUP, "cn=name", Account.Type.NORMAL, 0L, 123L)));
+        when(ldapManager.getUser(username, "GROUP", "cn=name", domainId)).thenReturn(ldapUser);
+        when(ldapManager.canAuthenticate(principal, hardcoded, domainId)).thenReturn(true);
+        when(accountManager.getActiveUserAccount(username, domainId)).thenReturn(null);
+
+        Pair<Boolean, UserAuthenticator.ActionOnFailedAuthentication> rc = ldapAuthenticator.authenticate(username, hardcoded, domainId, (Map<String, Object[]>)null);
+        assertTrue("authentication failed when it should have succeeded", rc.first());
+        assertNull(rc.second());
+        verify(accountManager).createUserAccount(eq(username), eq(""), eq("b"), eq("banner"), eq("a@b"), isNull(),
+                eq(username), eq(Account.Type.NORMAL), eq(Long.valueOf(123L)), eq(domainId), isNull(),
+                isNull(), anyString(), anyString(), eq(User.Source.LDAP));
+    }
+
+    @Test
+    public void authenticateAutoImportUsesDefaultRoleWhenTrustMapHasNoRole() throws Exception {
+        LdapUser ldapUser = new LdapUser(username, "a@b", "b", "banner", principal, "", false, null);
+        when(userAccountDao.getUserAccount(username, domainId)).thenReturn(null);
+        when(ldapManager.isLdapEnabled(domainId)).thenReturn(true);
+        when(ldapManager.getDomainLinkage(domainId)).thenReturn(List.of(
+                new LdapTrustMapVO(domainId, LdapManager.LinkType.GROUP, "cn=name", Account.Type.NORMAL, 0L)));
+        when(ldapManager.getUser(username, "GROUP", "cn=name", domainId)).thenReturn(ldapUser);
+        when(ldapManager.canAuthenticate(principal, hardcoded, domainId)).thenReturn(true);
+        when(accountManager.getActiveUserAccount(username, domainId)).thenReturn(null);
+
+        Pair<Boolean, UserAuthenticator.ActionOnFailedAuthentication> rc = ldapAuthenticator.authenticate(username, hardcoded, domainId, (Map<String, Object[]>)null);
+        assertTrue("authentication failed when it should have succeeded", rc.first());
+        assertNull(rc.second());
+        verify(accountManager).createUserAccount(eq(username), eq(""), eq("b"), eq("banner"), eq("a@b"), isNull(),
+                eq(username), eq(Account.Type.NORMAL), eq(RoleType.User.getId()), eq(domainId), isNull(),
+                isNull(), anyString(), anyString(), eq(User.Source.LDAP));
     }
 }
