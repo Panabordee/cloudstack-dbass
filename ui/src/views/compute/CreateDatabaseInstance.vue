@@ -59,11 +59,17 @@
                   :status="form.zoneid ? 'process' : 'wait'">
                   <template #description>
                     <div v-if="form.zoneid" class="step-content">
+                      <!-- Filters as you type. It used to act only on Enter
+                           or the magnifier, which reads as a dead control:
+                           you type an engine name, nothing moves, and there
+                           is no hint that a keypress is owed. -->
                       <a-input-search
                         v-model:value="imageSearch"
+                        allowClear
                         class="selection-search"
                         :placeholder="$t('label.search')"
-                        @search="value => updateSelectionOptions('templates', { page: 1, pageSize: 10, keyword: value })" />
+                        @change="onImageSearch"
+                        @search="onImageSearch" />
                       <a-spin :spinning="optionsLoading">
                         <template-iso-radio-group
                           input-decorator="templateid"
@@ -190,8 +196,16 @@
                   :status="form.zoneid ? 'process' : 'wait'">
                   <template #description>
                     <div v-if="form.zoneid" class="step-content">
-                      <a-form-item name="name" ref="name" :label="$t('label.name.optional')">
-                        <a-input v-model:value="form.name" />
+                      <!-- :required="false" explicitly: the label already
+                           says Optional, and a red asterisk beside it says
+                           the opposite. There is no rule for this field, so
+                           the marker was pure contradiction. -->
+                      <a-form-item
+                        name="name"
+                        ref="name"
+                        :required="false"
+                        :label="$t('label.name.optional')">
+                        <a-input v-model:value="form.name" :placeholder="$t('label.name.optional')" />
                       </a-form-item>
                       <a-form-item name="setvmpassword" ref="setvmpassword">
                         <a-checkbox v-model:checked="form.setvmpassword" @change="onSetVmPasswordChange">
@@ -536,6 +550,16 @@ export default {
     this.closed = true
   },
   methods: {
+    // One handler for both typing and submitting, reading the bound value
+    // rather than the event payload -- @change hands over an event and
+    // @search a string, and taking the model avoids caring which.
+    onImageSearch () {
+      this.updateSelectionOptions('templates', {
+        page: 1,
+        pageSize: 10,
+        keyword: this.imageSearch || ''
+      })
+    },
     updateSelectionOptions (name, options) {
       this.selectionOptions[name] = {
         ...this.selectionOptions[name],
@@ -945,15 +969,15 @@ export default {
     margin-top: 15px;
   }
 
+  // Sits directly above the list it filters, full width of the step. It
+  // used to be 25vw pushed right with `margin-left: auto`, which floated it
+  // away from the engine list into its own column -- it read as an unrelated
+  // control rather than that list's filter.
   .selection-search {
     display: block;
-    width: 25vw;
-    margin: 0 0 10px auto;
+    width: 100%;
+    margin: 0 0 10px 0;
     z-index: 8;
-
-    @media (max-width: 600px) {
-      width: 100%;
-    }
   }
 
   .card-footer {

@@ -55,12 +55,15 @@
               :actions="createActions"
               :loading="loading"
               @exec-action="openCreateDatabase" />
+            <!-- Filters as you type: @search alone fires only on Enter or
+                 the magnifier, so typing appeared to do nothing. -->
             <a-input-search
               v-model:value="searchQuery"
               allowClear
               class="database-search"
               :placeholder="$t('label.search')"
-              @search="onSearch" />
+              @change="applySearch"
+              @search="applySearch" />
           </a-col>
         </a-row>
       </a-card>
@@ -88,18 +91,6 @@
             {{ engineLabel(record.templatename) }}
           </template>
           <template v-else-if="column.key === 'actions'">
-            <!-- The console is the one action a tenant uses all day; keep it
-                 visible while the remaining actions stay in the row menu. -->
-            <a-button
-              v-if="canConsole(record)"
-              type="primary"
-              size="small"
-              class="console-button"
-              :title="$t('label.dbaas.console')"
-              @click="runRowAction('console', record)">
-              <template #icon><console-sql-outlined /></template>
-              {{ $t('label.dbaas.console') }}
-            </a-button>
             <a-button
               v-if="canDestroy"
               type="text"
@@ -157,28 +148,12 @@
         @cancel="closeModal">
         <template #title>
           <span>{{ $t(modalTitleFor(activeRowAction)) }}</span>
-          <!-- The console renders tenant tables of unknown width; a fixed
-               modal is the wrong shape for that often enough that it needs
-               to be the user's call, not ours. -->
-          <a-button
-            v-if="activeRowAction === 'console'"
-            type="link"
-            size="small"
-            style="float: right; margin-right: 32px"
-            @click="consoleMaximized = !consoleMaximized">
-            {{ consoleMaximized
-              ? $t('label.dbaas.console.restore')
-              : $t('label.dbaas.console.maximize') }}
-          </a-button>
         </template>
         <create-database
           v-if="activeRowAction === 'createDatabase'"
           :resource="activeRecord"
           @close-action="closeModal"
           @refresh-data="fetchData" />
-        <dbaas-console
-          v-else-if="activeRowAction === 'console'"
-          :resource="activeRecord" />
         <show-database-password
           v-else-if="activeRowAction === 'getDatabasePassword'"
           :resource="activeRecord"
@@ -201,7 +176,6 @@ import ActionButton from '@/components/view/ActionButton.vue'
 import Breadcrumb from '@/components/widgets/Breadcrumb.vue'
 import Status from '@/components/widgets/Status.vue'
 import CreateDatabase from '@/views/compute/CreateDatabase.vue'
-import DbaasConsole from '@/views/compute/DbaasConsole.vue'
 import ResetDatabasePassword from '@/views/compute/ResetDatabasePassword.vue'
 import ShowDatabasePassword from '@/views/compute/ShowDatabasePassword.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
@@ -209,7 +183,7 @@ import { isZoneCreated } from '@/utils/zone'
 
 export default {
   name: 'DatabaseInstances',
-  components: { ActionButton, Breadcrumb, Status, CreateDatabase, DbaasConsole, ShowDatabasePassword, ResetDatabasePassword },
+  components: { ActionButton, Breadcrumb, Status, CreateDatabase, ShowDatabasePassword, ResetDatabasePassword },
   data () {
     return {
       loading: false,
@@ -225,7 +199,6 @@ export default {
       engineLabels: {},
       engineNames: new Set(),
       activeRowAction: '',
-      consoleMaximized: false,
       activeRecord: null,
       createActions: [{
         api: 'createDatabase',
@@ -294,8 +267,10 @@ export default {
     openCreateDatabase () {
       this.$router.push({ name: 'createDatabase' })
     },
-    onSearch (value) {
-      this.appliedSearch = value || ''
+    // Reads the bound model rather than the event payload, because @change
+    // passes an event and @search passes a string.
+    applySearch () {
+      this.appliedSearch = this.searchQuery || ''
       this.page = 1
     },
     onStateFilterChange () {
@@ -322,29 +297,15 @@ export default {
     // /vm/<id> route never showed this because AutogenView opens
     // component-backed actions with width="auto", which sizes to content.
     // Each width below is the content's own width plus the modal's padding,
-    // and the console gets far more because it renders data tables rather
-    // than a form.
     modalTitleFor (action) {
       switch (action) {
         case 'createDatabase': return 'label.create.database'
-        case 'console': return 'label.dbaas.console'
         case 'resetDatabasePassword': return 'label.reset.database.password'
         default: return 'label.show.database.password'
       }
     },
     modalWidthFor (action) {
-      if (action === 'console') {
-        return this.consoleMaximized ? '96vw' : '1000px'
-      }
       return '620px'
-    },
-    canConsole (record) {
-      // Same gate rowActions applies to the console entry: running only
-      // (the agent is not polling while stopped) and the engine console
-      // command must exist for the caller's role.
-      return record.state === 'Running' &&
-        'listDbaasTables' in this.$store.getters.apis &&
-        this.isEngineMember(record)
     },
     rowActions (record) {
       // Same conditions and permission gates the /vm/<id> dataView actions
@@ -368,9 +329,6 @@ export default {
       // 2026-09-09, when that transport was proven on all four engines.
       if (isRunning && 'resetDatabasePassword' in apis && this.isEngineMember(record)) {
         actions.push({ key: 'resetDatabasePassword', label: 'label.reset.database.password' })
-      }
-      if (isRunning && 'listDbaasTables' in apis && this.isEngineMember(record)) {
-        actions.push({ key: 'console', label: 'label.dbaas.console' })
       }
       // The instance's own login password, not the database user's. DBaaS
       // instances are hidden from the Instances list, so without this a
@@ -400,11 +358,6 @@ export default {
       return (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
     },
     runRowAction (key, record) {
-      if (key === 'console') {
-        this.activeRecord = record
-        this.activeRowAction = key
-        return
-      }
       if (key === 'createDatabase' || key === 'getDatabasePassword' ||
           key === 'resetDatabasePassword') {
         this.activeRecord = record
@@ -471,7 +424,6 @@ export default {
       })
     },
     closeModal () {
-      this.consoleMaximized = false
       this.activeRowAction = ''
       this.activeRecord = null
       this.fetchData()
@@ -676,10 +628,6 @@ export default {
   .database-resource-icon {
     margin-right: 10px;
     font-size: 18px;
-  }
-
-  .console-button {
-    margin-right: 6px;
   }
 
   .database-pagination {

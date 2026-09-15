@@ -588,6 +588,16 @@ export default {
       ]
     },
     {
+      // A page of its own, deliberately: the query console used to be an
+      // action inside a row's overflow menu, which is not where anyone looks
+      // for the thing they use every day.
+      name: 'databasequery',
+      title: 'label.dbaas.query',
+      icon: 'console-sql-outlined',
+      permission: ['listDbaasTables'],
+      component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DbaasQuery.vue')))
+    },
+    {
       name: 'vmsnapshot',
       title: 'label.vm.snapshots',
       icon: 'camera-outlined',

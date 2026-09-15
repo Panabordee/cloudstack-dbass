@@ -235,7 +235,10 @@ import { getAPI, postAPI } from '@/api'
 export default {
   name: 'DbaasConsole',
   props: {
-    resource: { type: Object, required: true }
+    resource: { type: Object, required: true },
+    // Set by the Database Query page, which has already asked which database
+    // to open. Empty elsewhere, where the picker chooses for itself.
+    initialDatabase: { type: String, default: '' }
   },
   data () {
     return {
@@ -387,6 +390,10 @@ export default {
         // A row provisioned before the db_name column existed reports no
         // name; it is the instance's default and needs no entry here.
         this.databases = list.filter(d => !!d.database)
+        if (this.initialDatabase &&
+            this.databases.some(d => d.database === this.initialDatabase)) {
+          this.selectedDatabase = this.initialDatabase
+        }
         if (!this.selectedDatabase && this.databases.length > 0) {
           const confirmed = this.databases.find(d => d.status === 'confirmed')
           this.selectedDatabase = (confirmed || this.databases[0]).database

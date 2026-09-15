@@ -18,14 +18,38 @@
 <template>
   <div class="form-layout">
     <a-spin :spinning="loading">
-      <a-descriptions v-if="credentials.found && credentials.password" bordered size="small" :column="1" class="credentials">
-        <a-descriptions-item :label="$t('label.engine')">{{ credentials.engine }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.connect.command')">
-          <span class="connect-command">{{ connectCommand }}</span>
-        </a-descriptions-item>
-      </a-descriptions>
+      <!-- One block per database on this instance, not just the newest.
+           An instance can hold several (createDatabase may be called on it
+           again at any time) and this dialog used to fetch a single
+           credential, so every database but the last one was unreachable
+           from the UI. -->
+      <div v-for="entry in entries" :key="entry.key" class="credentials-block">
+        <div v-if="entry.database" class="database-heading">{{ entry.database }}</div>
+        <a-descriptions bordered size="small" :column="1" class="credentials">
+          <a-descriptions-item :label="$t('label.engine')">{{ entry.engine }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.username')">{{ entry.username }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.password')">
+            <span v-if="entry.password">{{ entry.password }}</span>
+            <span v-else class="unavailable">{{ entry.statusmessage || $t('message.dbaas.status.pending') }}</span>
+          </a-descriptions-item>
+          <a-descriptions-item v-if="entry.connectCommand" :label="$t('label.connect.command')">
+            <span class="connect-command">{{ entry.connectCommand }}</span>
+          </a-descriptions-item>
+        </a-descriptions>
+        <div v-if="entry.password" class="entry-actions">
+          <a-button size="small" type="primary" @click="notifyCopied" v-clipboard:copy="entry.password">
+            {{ $t('label.copy.password') }}
+          </a-button>
+          <a-button
+            v-if="entry.connectCommand"
+            size="small"
+            type="primary"
+            @click="notifyCopied"
+            v-clipboard:copy="entry.connectCommand">
+            {{ $t('label.copy.connect.command') }}
+          </a-button>
+        </div>
+      </div>
       <!-- A credential exists but the instance has not confirmed it applied
            it (config-drive provisioning stores the credential before the
            instance boots). The password below is the one it will use. -->
@@ -119,7 +143,9 @@ export default {
       // regularly gave up while the instance was still working.
       maxAutoChecks: 30,
       retryTimerId: null,
-      credentials: {}
+      credentials: {},
+      // One resolved credential per database on this instance.
+      entries: []
     }
   },
   created () {
@@ -172,6 +198,7 @@ export default {
       getAPI('getDatabasePassword', { virtualmachineid: this.resource.id }).then(json => {
         this.credentials = json.getdatabasepasswordresponse?.dbaas || {}
         this.loaded = true
+        this.fetchAllDatabases()
         const unsettled = this.credentials.found === false || this.credentials.status === 'pending'
         if (unsettled && this.autoChecks < this.maxAutoChecks) {
           this.autoChecks++
@@ -185,6 +212,71 @@ export default {
       }).finally(() => {
         this.loading = false
       })
+    },
+    // Every database on the instance, each with its own credential.
+    // listDbaasDatabases gives the names and usernames; the password comes
+    // from getDatabasePassword per username, which is the only call that
+    // decrypts one. A database whose credential has not been confirmed yet
+    // is still listed, with its status in place of the password, rather than
+    // being hidden until it settles.
+    fetchAllDatabases () {
+      getAPI('listDbaasDatabases', { virtualmachineid: this.resource.id }).then(json => {
+        const list = (json.listdbaasdatabasesresponse || {}).dbaasdatabase || []
+        if (list.length === 0) {
+          this.entries = this.fallbackEntries()
+          return
+        }
+        Promise.all(list.map(db => this.fetchOne(db))).then(rows => {
+          this.entries = rows.filter(Boolean)
+        })
+      }).catch(() => {
+        // An older management server has no listDbaasDatabases: fall back to
+        // the single credential this dialog has always shown.
+        this.entries = this.fallbackEntries()
+      })
+    },
+    fetchOne (db) {
+      const params = { virtualmachineid: this.resource.id }
+      if (db.username) {
+        params.dbusername = db.username
+      }
+      return getAPI('getDatabasePassword', params).then(json => {
+        const c = json.getdatabasepasswordresponse?.dbaas || {}
+        return {
+          key: db.database || db.username || 'default',
+          database: db.database,
+          engine: c.engine || db.engine,
+          username: c.username || db.username,
+          password: c.password,
+          status: c.status || db.status,
+          statusmessage: c.statusmessage,
+          connectCommand: buildConnectCommand({ ...c, database: db.database })
+        }
+      }).catch(() => ({
+        key: db.database || db.username || 'default',
+        database: db.database,
+        engine: db.engine,
+        username: db.username,
+        password: '',
+        status: db.status,
+        statusmessage: ''
+      }))
+    },
+    fallbackEntries () {
+      const c = this.credentials
+      if (!c.found || !c.username) {
+        return []
+      }
+      return [{
+        key: c.username,
+        database: c.database,
+        engine: c.engine,
+        username: c.username,
+        password: c.password,
+        status: c.status,
+        statusmessage: c.statusmessage,
+        connectCommand: this.connectCommand
+      }]
     },
     retry () {
       // A manual retry restarts the auto-check budget as well.
