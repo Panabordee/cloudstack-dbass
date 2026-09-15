@@ -223,8 +223,83 @@ def rows_from_cursor(cursor, row_limit, bytes_limit):
     return columns, rows, truncated
 
 
+def run_mongo_job(conf, job, role):
+    # mongodb has no SQL, so the console's SQL box carries a small JSON
+    # command instead: {"collection": "...", "op": "find"|"insert"|"update"|
+    # "delete", "filter": {...}, ...}. "find" is read-only and always
+    # allowed; the other three mutate and need the owner credential -- same
+    # gate run_sql_job relies on for mysql/postgres, where "write" is never
+    # read back from the job at all: connect_mysql/connect_postgresql are
+    # simply handed the readonly role's own DB grant, which physically
+    # cannot write. db_role is the one place that decision already landed
+    # (set server-side from RunDbaasQueryCmd.isWrite()); "write" inside the
+    # payload is never echoed back into the top-level job dict, so reading
+    # job.get("write") here always read nothing and every insert/update/
+    # delete failed with "requires write mode" regardless of the checkbox.
+    payload = json.loads(job.get("payload", "{}"))
+    raw = payload.get("sql", "")
+    write = job.get("db_role") != "readonly"
+    row_limit = job.get("row_limit", 1000)
+    client = None
+    try:
+        try:
+            spec = json.loads(raw)
+        except Exception:
+            return "failed", 0, False, "", (
+                "mongo query must be a JSON object, e.g. "
+                '{"collection": "users", "filter": {"age": {"$gt": 18}}}')
+        if not isinstance(spec, dict):
+            return "failed", 0, False, "", "mongo query must be a JSON object"
+        collection = spec.get("collection", "")
+        if not IDENTIFIER_RE.match(collection):
+            return "failed", 0, False, "", "invalid or missing 'collection'"
+        op = spec.get("op", "find")
+        client, database = connect_mongodb(role)
+        coll = database[collection]
+        if op == "find":
+            filt = spec.get("filter", {}) or {}
+            limit = min(int(spec.get("limit", 100)), row_limit)
+            docs = list(coll.find(filt).limit(limit))
+            columns = sorted({key for doc in docs for key in doc.keys()})
+            rows = [[str(doc.get(c, "")) for c in columns] for doc in docs]
+            truncated = len(docs) >= limit
+            return "confirmed", len(rows), truncated, json.dumps({"columns": columns, "rows": rows}), ""
+        if not write:
+            return "failed", 0, False, "", "op '%s' requires write mode" % op
+        if op == "insert":
+            document = spec.get("document")
+            if not isinstance(document, dict):
+                return "failed", 0, False, "", "insert requires a 'document' object"
+            result = coll.insert_one(document)
+            return "confirmed", 1, False, json.dumps(
+                {"columns": ["inserted_id"], "rows": [[str(result.inserted_id)]]}), ""
+        if op == "update":
+            filt = spec.get("filter", {}) or {}
+            update = spec.get("update")
+            if not isinstance(update, dict):
+                return "failed", 0, False, "", "update requires an 'update' object"
+            result = coll.update_many(filt, update, upsert=bool(spec.get("upsert", False)))
+            return "confirmed", result.modified_count, False, json.dumps({
+                "columns": ["matched", "modified"],
+                "rows": [[str(result.matched_count), str(result.modified_count)]]
+            }), ""
+        if op == "delete":
+            filt = spec.get("filter", {}) or {}
+            result = coll.delete_many(filt)
+            return "confirmed", result.deleted_count, False, json.dumps(
+                {"columns": ["deleted"], "rows": [[str(result.deleted_count)]]}), ""
+        return "failed", 0, False, "", "unsupported op '%s' (find, insert, update, delete)" % op
+    except Exception as error:
+        return "failed", 0, False, "", str(error)[:1000]
+    finally:
+        if client is not None:
+            client.close()
+
+
 def run_sql_job(conf, job, role):
     engine = engine_name()
+    if engine == "mongodb":
+        return run_mongo_job(conf, job, role)
     payload = json.loads(job.get("payload", "{}"))
     sql = payload.get("sql", "")
     row_limit = job.get("row_limit", 1000)

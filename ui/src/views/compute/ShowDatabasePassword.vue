@@ -18,34 +18,33 @@
 <template>
   <div class="form-layout">
     <a-spin :spinning="loading">
-      <!-- One block per database on this instance, not just the newest.
-           An instance can hold several (createDatabase may be called on it
-           again at any time) and this dialog used to fetch a single
-           credential, so every database but the last one was unreachable
-           from the UI. -->
-      <div v-for="entry in entries" :key="entry.key" class="credentials-block">
-        <div v-if="entry.database" class="database-heading">{{ entry.database }}</div>
+      <!-- One database's credential at a time, picked from the dropdown
+           below, not every database dumped on screen at once. An instance
+           can hold several (createDatabase may be called on it again at any
+           time); entries still holds all of them so switching the dropdown
+           is instant, nothing is re-fetched. -->
+      <a-form-item v-if="entries.length > 1" :label="$t('label.database')" class="database-picker">
+        <a-select v-model:value="selectedKey" :options="entryOptions" style="width: 100%" />
+      </a-form-item>
+      <div v-if="selectedEntry" class="credentials-block">
+        <div v-if="selectedEntry.database" class="database-heading">{{ selectedEntry.database }}</div>
         <a-descriptions bordered size="small" :column="1" class="credentials">
-          <a-descriptions-item :label="$t('label.engine')">{{ entry.engine }}</a-descriptions-item>
-          <a-descriptions-item :label="$t('label.username')">{{ entry.username }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.engine')">{{ selectedEntry.engine }}</a-descriptions-item>
+          <a-descriptions-item :label="$t('label.username')">{{ selectedEntry.username }}</a-descriptions-item>
           <a-descriptions-item :label="$t('label.password')">
-            <span v-if="entry.password">{{ entry.password }}</span>
-            <span v-else class="unavailable">{{ entry.statusmessage || $t('message.dbaas.status.pending') }}</span>
+            <span v-if="selectedEntry.password">{{ selectedEntry.password }}</span>
+            <span v-else class="unavailable">{{ selectedEntry.statusmessage || $t('message.dbaas.status.pending') }}</span>
           </a-descriptions-item>
-          <a-descriptions-item v-if="entry.connectCommand" :label="$t('label.connect.command')">
-            <span class="connect-command">{{ entry.connectCommand }}</span>
+          <a-descriptions-item v-if="selectedEntry.connectCommand" :label="$t('label.connect.command')">
+            <span class="connect-command">{{ selectedEntry.connectCommand }}</span>
           </a-descriptions-item>
         </a-descriptions>
-        <div v-if="entry.password" class="entry-actions">
-          <a-button size="small" type="primary" @click="notifyCopied" v-clipboard:copy="entry.password">
-            {{ $t('label.copy.password') }}
-          </a-button>
+        <div v-if="selectedEntry.connectCommand" class="entry-actions">
           <a-button
-            v-if="entry.connectCommand"
             size="small"
             type="primary"
             @click="notifyCopied"
-            v-clipboard:copy="entry.connectCommand">
+            v-clipboard:copy="selectedEntry.connectCommand">
             {{ $t('label.copy.connect.command') }}
           </a-button>
         </div>
@@ -100,13 +99,6 @@
       <p v-if="credentials.found && credentials.password" class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
       <div :span="24" class="action-button">
         <a-button
-          v-if="credentials.found && credentials.password"
-          @click="notifyCopied"
-          v-clipboard:copy="credentials.password"
-          type="primary">
-          {{ $t('label.copy.password') }}
-        </a-button>
-        <a-button
           v-if="credentials.found && connectCommand"
           @click="notifyCopied"
           v-clipboard:copy="connectCommand"
@@ -145,7 +137,11 @@ export default {
       retryTimerId: null,
       credentials: {},
       // One resolved credential per database on this instance.
-      entries: []
+      entries: [],
+      // Which entry's password is on screen. Fetching every credential up
+      // front (fetchAllDatabases) still happens, so this never triggers a
+      // network call -- it only picks which already-loaded entry to render.
+      selectedKey: null
     }
   },
   created () {
@@ -179,6 +175,12 @@ export default {
     },
     provisioningFailed () {
       return this.credentials.status === 'failed'
+    },
+    entryOptions () {
+      return this.entries.map(e => ({ value: e.key, label: e.database || e.username || e.key }))
+    },
+    selectedEntry () {
+      return this.entries.find(e => e.key === this.selectedKey) || this.entries[0]
     }
   },
   methods: {
@@ -224,16 +226,28 @@ export default {
         const list = (json.listdbaasdatabasesresponse || {}).dbaasdatabase || []
         if (list.length === 0) {
           this.entries = this.fallbackEntries()
+          this.selectDefaultEntry()
           return
         }
         Promise.all(list.map(db => this.fetchOne(db))).then(rows => {
           this.entries = rows.filter(Boolean)
+          this.selectDefaultEntry()
         })
       }).catch(() => {
         // An older management server has no listDbaasDatabases: fall back to
         // the single credential this dialog has always shown.
         this.entries = this.fallbackEntries()
+        this.selectDefaultEntry()
       })
+    },
+    // Keep whatever the user already picked if it still exists (a retry or
+    // auto-check re-fetches everything); otherwise default to the first
+    // entry so something renders without the user having to touch the
+    // dropdown.
+    selectDefaultEntry () {
+      if (!this.entries.some(e => e.key === this.selectedKey)) {
+        this.selectedKey = this.entries[0]?.key ?? null
+      }
     },
     fetchOne (db) {
       const params = { virtualmachineid: this.resource.id }
@@ -311,6 +325,11 @@ export default {
 
   // No word-break here: labels wrap at spaces; only the value spans
   // (.connect-command) break-all, since commands have no spaces to wrap on.
+  .database-picker {
+    margin-top: 16px;
+    margin-bottom: 0;
+  }
+
   .credentials {
     margin-top: 16px;
 

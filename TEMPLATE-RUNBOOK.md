@@ -225,6 +225,16 @@ script and `ui/package.json`.
 **A patched image provisions but the console does nothing**: check
 `/opt/dbaas/engine` (§1) and `journalctl -u dbaas-provision` on the guest.
 
+**SSH with the VM's login password gets `Permission denied (publickey)`**:
+expected, not a bug. The `dbaas-*` images are the stock Debian cloud image
+with its default `sshd_config`, which ships `PasswordAuthentication no` --
+none of the provisioning scripts touch sshd at all. The password CloudStack
+generates (`deployVirtualMachine`'s own VM-password feature, unrelated to
+the DBaaS database password) is real and logs in fine through Console/VNC;
+it was never going to work over SSH on these images. Use a keypair instead
+(`keypair=dbaas-build`, private key at `~/.ssh/dbaas_build_key`, §3) and log
+in as `debian`, not `root`.
+
 ---
 
 ## 5. Building a brand-new image from scratch

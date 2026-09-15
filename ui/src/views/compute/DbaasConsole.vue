@@ -99,13 +99,19 @@
         </a-card>
       </a-tab-pane>
       <a-tab-pane key="sql" :tab="$t('label.dbaas.console.sql.tab')">
+        <a-alert
+          v-if="isMongo"
+          type="info"
+          show-icon
+          :message="$t('message.dbaas.console.sql.mongo.hint')"
+          class="console-note" />
         <a-form layout="vertical">
-          <a-form-item :label="$t('label.dbaas.console.sql.editor')">
+          <a-form-item :label="$t(sqlEditorLabel)">
             <a-textarea
               v-model:value="sqlText"
               :rows="sqlRows"
               class="sql-editor"
-              :placeholder="$t('label.dbaas.console.sql.editor')" />
+              :placeholder="$t(sqlEditorLabel)" />
           </a-form-item>
           <a-form-item>
             <a-checkbox v-model:checked="writeMode">
@@ -301,6 +307,14 @@ export default {
       return idOk(this.newTable.name) &&
         this.newTable.columns.length > 0 &&
         this.newTable.columns.every(c => idOk(c.name) && !!c.type)
+    },
+    // Same detection quoteIdent already uses: the template name is the only
+    // place the engine is known client-side, there is no separate field for it.
+    isMongo () {
+      return /mongodb/i.test(this.resource.templatename || '')
+    },
+    sqlEditorLabel () {
+      return this.isMongo ? 'label.dbaas.console.sql.editor.mongo' : 'label.dbaas.console.sql.editor'
     }
   },
   created () {
@@ -492,7 +506,9 @@ export default {
     // so the table's own row offers it: fill the editor with a statement that
     // runs as-is and switch to the SQL tab, ready to edit or replace.
     queryTable (name) {
-      this.sqlText = 'SELECT * FROM ' + this.quoteIdent(name) + ' LIMIT 100'
+      this.sqlText = this.isMongo
+        ? JSON.stringify({ collection: name, op: 'find', filter: {}, limit: 100 }, null, 2)
+        : 'SELECT * FROM ' + this.quoteIdent(name) + ' LIMIT 100'
       this.activeTab = 'sql'
     },
     // Matches what the server does when it builds DDL: backticks on

@@ -71,11 +71,14 @@
               </a-select>
             </a-form-item>
 
-            <a-form-item :label="$t('label.dbaas.query.type')" required>
-              <a-select v-model:value="form.engineType" :placeholder="$t('label.dbaas.query.type')">
-                <a-select-option v-for="t in engineTypes" :key="t" :value="t">{{ t }}</a-select-option>
-              </a-select>
-              <span class="hint">{{ $t('message.dbaas.query.type.hint') }}</span>
+            <!-- Not a picker: one instance is built with exactly one engine
+                 baked into its image (firstboot.sh reads a single
+                 /opt/dbaas/engine marker, there is no per-request engine
+                 choice), so the type is already decided the moment an
+                 instance is chosen above. Showing it as a tag confirms what
+                 was auto-detected without asking for a redundant click. -->
+            <a-form-item v-if="form.engineType" :label="$t('label.dbaas.query.type')">
+              <a-tag>{{ form.engineType }}</a-tag>
             </a-form-item>
 
             <a-form-item :label="$t('label.dbaas.console.database')" required>
@@ -157,12 +160,6 @@ export default {
   computed: {
     selectedInstance () {
       return this.instances.find(vm => vm.id === this.form.instanceId) || {}
-    },
-    // Offered rather than inferred, because the point of asking is that the
-    // person connecting confirms what they are connecting to. Prefilled from
-    // the instance's own template so the common case is one glance.
-    engineTypes () {
-      return [...new Set(this.engines.map(e => this.engineTypeOf(e.template)).filter(Boolean))]
     },
     canConnect () {
       return !!this.form.instanceId && !!this.form.database && !!this.form.engineType
