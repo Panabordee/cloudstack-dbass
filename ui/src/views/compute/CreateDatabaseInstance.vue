@@ -16,230 +16,331 @@
 // under the License.
 
 <template>
-  <div class="form-layout">
-    <a-steps :current="stepIndex" size="small" class="steps">
-      <a-step :title="$t('label.instance')" />
-      <a-step :title="$t('label.database')" />
-      <a-step :title="$t('label.status')" />
-    </a-steps>
+  <div>
+    <a-row :gutter="12">
+      <a-col :md="24" :lg="step === 'form' ? 17 : 24">
+        <a-card :bordered="true" :title="$t('label.create.database.instance')">
+          <!-- step 1: the form -->
+          <a-spin :spinning="loading" v-if="step === 'form'">
+            <p v-html="$t('message.desc.create.database.instance')"></p>
+            <a-alert
+              type="info"
+              show-icon
+              banner
+              :message="$t('message.dbaas.username.default')"
+              class="form-banner" />
+            <a-form
+              v-ctrl-enter="handleSubmit"
+              :ref="formRef"
+              :model="form"
+              :rules="rules"
+              @finish="handleSubmit"
+              layout="vertical">
+              <a-steps direction="vertical" size="small">
+                <a-step
+                  :title="$t('label.select.deployment.infrastructure')"
+                  status="process">
+                  <template #description>
+                    <div class="step-content">
+                      <span>{{ $t('message.select.a.zone') }}</span><br/>
+                      <a-form-item name="zoneid" ref="zoneid" :label="$t('label.zoneid')">
+                        <zone-block-radio-group-select
+                          :items="zones"
+                          :selectedValue="form.zoneid"
+                          :loading="optionsLoading"
+                          @change="onSelectZone" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
 
-    <!-- step 1: the form -->
-    <a-spin :spinning="loading" v-if="step === 'form'">
-      <p v-html="$t('message.desc.create.database.instance')"></p>
-      <a-alert
-        type="info"
-        show-icon
-        banner
-        :message="$t('message.dbaas.username.default')"
-        class="form-banner" />
-      <a-form
-        v-ctrl-enter="handleSubmit"
-        :ref="formRef"
-        :model="form"
-        :rules="rules"
-        @finish="handleSubmit"
-        layout="vertical">
-        <a-form-item name="engine" ref="engine" :label="$t('label.engine')">
-          <a-select
-            v-model:value="form.engine"
-            @change="onEngineChange"
-            :loading="optionsLoading"
-            :placeholder="$t('label.engine')"
-            v-focus="true">
-            <a-select-option v-for="t in templates" :key="t.id" :label="t.engineLabel">
-              {{ t.engineLabel }}
-            </a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item name="zoneid" ref="zoneid" :label="$t('label.zoneid')">
-          <a-select
-            v-model:value="form.zoneid"
-            :loading="optionsLoading"
-            :placeholder="$t('label.zoneid')"
-            @change="fetchNetworks">
-            <a-select-option v-for="z in zones" :key="z.id" :label="z.name">{{ z.name }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item name="serviceofferingid" ref="serviceofferingid" :label="$t('label.serviceofferingid')">
-          <!-- Filtered to offerings with enough RAM for the selected engine
-               (listDbaasEngines' minmemorymb) -- an offering too small has
-               been observed OOM-killing the database engine under console
-               load (ACCEPTANCE-REPORT-2026-09-08.md section 7). Filtering
-               here means a tenant cannot pick one; createDatabase enforces
-               the same number server-side for callers that bypass the
-               wizard. -->
-          <a-select
-            v-model:value="form.serviceofferingid"
-            :loading="optionsLoading"
-            :disabled="!form.engine"
-            :placeholder="form.engine ? $t('label.serviceofferingid') : $t('message.dbaas.select.engine.first')">
-            <a-select-option v-for="o in availableOfferings" :key="o.id" :label="o.label">{{ o.label }}</a-select-option>
-          </a-select>
-          <p v-if="form.engine && availableOfferings.length === 0" class="offering-warning">
-            {{ $t('message.dbaas.no.offering.fits', { mb: selectedEngineMinMemory }) }}
-          </p>
-        </a-form-item>
-        <a-form-item
-          name="rootdisksize"
-          ref="rootdisksize"
-          :label="$t('label.rootdisksize')"
-          v-if="selectedOfferingIsCustomized">
-          <a-input-number
-            v-model:value="form.rootdisksize"
-            :min="1"
-            style="width: 100%"
-            :placeholder="$t('label.rootdisksize')" />
-        </a-form-item>
-        <a-form-item name="diskofferingid" ref="diskofferingid" :label="$t('label.datadiskoffering')">
-          <a-select
-            v-model:value="form.diskofferingid"
-            allowClear
-            :loading="optionsLoading"
-            :placeholder="$t('label.datadiskoffering')">
-            <a-select-option v-for="d in diskOfferings" :key="d.id" :label="d.label">{{ d.label }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item
-          name="networkid"
-          ref="networkid"
-          :label="$t('label.networkid')"
-          v-if="needsNetwork">
-          <a-select
-            v-model:value="form.networkid"
-            :loading="networkLoading"
-            :placeholder="$t('label.networkid')">
-            <a-select-option v-for="n in networks" :key="n.id" :label="n.name">{{ n.name }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <a-form-item name="keypair" ref="keypair" :label="$t('label.keypair')" v-if="showKeyPairs">
-          <a-select
-            v-model:value="form.keypair"
-            allowClear
-            :loading="keyPairLoading"
-            :placeholder="$t('label.keypair')">
-            <a-select-option v-for="k in keyPairs" :key="k" :label="k">{{ k }}</a-select-option>
-          </a-select>
-        </a-form-item>
-        <!-- The VM's own login password, not the database user's.
-             deployVirtualMachine has taken `password` since 4.19 and
-             generates a random one when it is omitted, which is the right
-             default for almost everyone -- so the field stays out of the way
-             behind a checkbox rather than asking every tenant to make a
-             decision they usually do not need to make. It matters when they
-             deploy without an RSA keypair: a generated password cannot be
-             retrieved afterwards in that case, so setting one here is then
-             the only way they will ever log in. -->
-        <a-form-item name="setvmpassword" ref="setvmpassword">
-          <a-checkbox v-model:checked="form.setvmpassword" @change="onSetVmPasswordChange">
-            {{ $t('label.dbaas.vm.password.set') }}
-          </a-checkbox>
-          <span class="hint">{{ $t('message.dbaas.vm.password.hint') }}</span>
-        </a-form-item>
-        <a-form-item
-          v-if="form.setvmpassword"
-          name="vmpassword"
-          ref="vmpassword"
-          :label="$t('label.dbaas.vm.password')">
-          <a-input-password
-            v-model:value="form.vmpassword"
-            autocomplete="new-password"
-            :placeholder="$t('label.dbaas.vm.password')" />
-        </a-form-item>
-        <a-form-item name="name" ref="name" :label="$t('label.name')">
-          <a-input v-model:value="form.name" :placeholder="$t('label.name')" />
-        </a-form-item>
-        <a-form-item name="dbname" ref="dbname" :label="$t('label.dbname')">
-          <a-input v-model:value="form.dbname" :placeholder="$t('label.dbname')" />
-        </a-form-item>
-        <a-form-item name="dbusername" ref="dbusername" :label="$t('label.dbusername')">
-          <a-input v-model:value="form.dbusername" :placeholder="form.dbname || $t('label.dbusername')" />
-        </a-form-item>
-        <a-form-item name="dbpassword" ref="dbpassword" :label="$t('label.dbpassword')">
-          <a-input-password
-            v-model:value="form.dbpassword"
-            :placeholder="$t('message.dbaas.password.optional')" />
-        </a-form-item>
+                <a-step
+                  :title="$t('label.image')"
+                  :status="form.zoneid ? 'process' : 'wait'">
+                  <template #description>
+                    <div v-if="form.zoneid" class="step-content">
+                      <a-input-search
+                        v-model:value="imageSearch"
+                        class="selection-search"
+                        :placeholder="$t('label.search')"
+                        @search="value => updateSelectionOptions('templates', { page: 1, pageSize: 10, keyword: value })" />
+                      <a-spin :spinning="optionsLoading">
+                        <template-iso-radio-group
+                          input-decorator="templateid"
+                          :osList="pagedTemplates"
+                          :itemCount="filteredTemplates.length"
+                          :selected="form.engine || ''"
+                          :preFillContent="{}"
+                          @emit-update-template-iso="(name, id) => onSelectEngine(id)"
+                          @handle-search-filter="options => updateSelectionOptions('templates', options)" />
+                      </a-spin>
+                      <a-form-item name="engine" ref="engine" class="form-item-hidden">
+                        <a-input v-model:value="form.engine" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
 
-        <div :span="24" class="action-button">
-          <a-button @click="closeAction">{{ $t('label.cancel') }}</a-button>
-          <a-button :loading="loading" ref="submit" type="primary" @click="handleSubmit">{{ $t('label.ok') }}</a-button>
-        </div>
-      </a-form>
-    </a-spin>
+                <a-step
+                  :title="$t('label.serviceofferingid')"
+                  :status="form.engine && form.zoneid ? 'process' : 'wait'">
+                  <template #description>
+                    <div v-if="form.zoneid" class="step-content">
+                      <a-form-item name="serviceofferingid" ref="serviceofferingid">
+                        <compute-offering-selection
+                          v-if="form.engine"
+                          :compute-items="pagedOfferings"
+                          :selected-template="selectedTemplate"
+                          :row-count="filteredOfferings.length"
+                          :zoneId="form.zoneid || ''"
+                          :value="form.serviceofferingid || ''"
+                          :loading="optionsLoading"
+                          :minimum-memory="selectedEngineMinMemory"
+                          @select-compute-item="onSelectOffering"
+                          @handle-search-filter="options => updateSelectionOptions('offerings', options)" />
+                        <a-alert
+                          v-else
+                          type="info"
+                          show-icon
+                          :message="$t('message.dbaas.select.engine.first')" />
+                        <p v-if="form.engine && availableOfferings.length === 0" class="offering-warning">
+                          {{ $t('message.dbaas.no.offering.fits', { mb: selectedEngineMinMemory }) }}
+                        </p>
+                      </a-form-item>
+                      <a-form-item
+                        name="rootdisksize"
+                        ref="rootdisksize"
+                        :label="$t('label.rootdisksize')"
+                        v-if="selectedOfferingIsCustomized">
+                        <a-input-number
+                          v-model:value="form.rootdisksize"
+                          :min="1"
+                          style="width: 100%"
+                          :placeholder="$t('label.rootdisksize')" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
 
-    <!-- step 2: deploying, then waiting for the engine -->
-    <div v-if="step === 'deploying' || step === 'provisioning'" class="progress-pane">
-      <a-spin size="large" />
-      <p class="progress-text">
-        {{ step === 'deploying' ? $t('message.dbaas.deploying') : $t('message.dbaas.waiting.engine') }}
-      </p>
-      <!-- The instance already exists once this step is reached; if the
-           createDatabase call outlives this dialog (ignoreCancelToken) it
-           still finishes in the background. -->
-      <p v-if="step === 'provisioning'" class="progress-sub">
-        {{ $t('message.dbaas.close.early') }}
-      </p>
-      <div :span="24" class="action-button">
-        <a-button v-if="step === 'provisioning'" @click="closeAction">{{ $t('label.close') }}</a-button>
-      </div>
-    </div>
+                <a-step
+                  :title="$t('label.data.disk')"
+                  :status="form.engine && form.zoneid ? 'process' : 'wait'">
+                  <template #description>
+                    <div v-if="form.zoneid" class="step-content">
+                      <a-form-item name="diskofferingid" ref="diskofferingid">
+                        <disk-offering-selection
+                          :items="pagedDiskOfferings"
+                          :row-count="filteredDiskOfferings.length"
+                          :zoneId="form.zoneid || ''"
+                          :value="form.diskofferingid || '0'"
+                          :loading="optionsLoading"
+                          :preFillContent="{}"
+                          @select-disk-offering-item="onSelectDiskOffering"
+                          @handle-search-filter="options => updateSelectionOptions('diskOfferings', options)" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
 
-    <!-- step 3a: success -->
-    <div v-if="step === 'done'">
-      <a-alert type="warning" showIcon :message="$t('message.desc.created.database')" />
-      <a-descriptions bordered size="small" :column="1" class="credentials">
-        <a-descriptions-item :label="$t('label.engine')">{{ credentials.engine }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.host')">{{ credentials.host }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.port')">{{ credentials.port }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.database')">{{ credentials.database }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
-        <a-descriptions-item :label="$t('label.connect.command')">
-          <span class="connect-command">{{ connectCommand }}</span>
-        </a-descriptions-item>
-      </a-descriptions>
-      <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
-      <div :span="24" class="action-button">
-        <a-button @click="markCopied" v-clipboard:copy="connectCommand" type="primary">
-          {{ $t('label.copy.connect.command') }}
-        </a-button>
-        <a-button @click="markCopied" v-clipboard:copy="credentials.password">
-          {{ $t('label.copy.password') }}
-        </a-button>
-        <a-button @click="confirmClose(goToInstance)">{{ $t('label.go.to.instance') }}</a-button>
-        <a-button @click="confirmClose(closeAction)">{{ $t('label.close') }}</a-button>
-      </div>
-    </div>
+                <a-step
+                  v-if="needsNetwork"
+                  :title="$t('label.networks')"
+                  :status="form.zoneid ? 'process' : 'wait'">
+                  <template #description>
+                    <div class="step-content">
+                      <a-form-item name="networkid" ref="networkid">
+                        <network-selection
+                          autoscale
+                          :items="pagedNetworks"
+                          :row-count="filteredNetworks.length"
+                          :zoneId="form.zoneid || ''"
+                          :value="form.networkid ? [form.networkid] : []"
+                          :loading="networkLoading"
+                          :preFillContent="{}"
+                          @select-network-item="onSelectNetwork"
+                          @handle-search-filter="options => updateSelectionOptions('networks', options)" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
 
-    <!-- step 3b: the instance exists but the database step failed -->
-    <div v-if="step === 'partial'">
-      <a-alert type="error" showIcon :message="$t('label.dbaas.database.failed')">
-        <template #description>
-          <p>{{ $t('message.dbaas.database.failed') }}</p>
-          <p class="error-detail">{{ failureMessage }}</p>
-        </template>
-      </a-alert>
-      <div :span="24" class="action-button">
-        <a-button type="primary" @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
-        <a-button @click="notifyCopied" v-clipboard:copy="failureMessage">{{ $t('label.copy.error') }}</a-button>
-        <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
-      </div>
-    </div>
+                <a-step
+                  v-if="showKeyPairs"
+                  :title="$t('label.sshkeypairs')"
+                  :status="form.zoneid ? 'process' : 'wait'">
+                  <template #description>
+                    <div class="step-content">
+                      <a-form-item name="keypairs" ref="keypairs">
+                        <ssh-key-pair-selection
+                          :items="pagedKeyPairs"
+                          :row-count="filteredKeyPairs.length"
+                          :zoneId="form.zoneid || ''"
+                          :value="form.keypairs || []"
+                          :loading="keyPairLoading"
+                          :preFillContent="{}"
+                          @select-ssh-key-pair-item="onSelectKeyPairs"
+                          @handle-search-filter="options => updateSelectionOptions('keyPairs', options)" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
 
-    <!-- step 3c: the browser stopped listening (the user navigated away) before
-         the answer came back. The request was already accepted, so this is not
-         a failure of anything -- only of our ability to watch it finish. -->
-    <div v-if="step === 'detached'">
-      <a-alert type="info" showIcon :message="$t('label.dbaas.database.submitted')">
-        <template #description>
-          <p>{{ $t('message.dbaas.database.submitted') }}</p>
-        </template>
-      </a-alert>
-      <div :span="24" class="action-button">
-        <a-button type="primary" @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
-        <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
-      </div>
-    </div>
+                <a-step
+                  :title="$t('label.details')"
+                  :status="form.zoneid ? 'process' : 'wait'">
+                  <template #description>
+                    <div v-if="form.zoneid" class="step-content">
+                      <a-form-item name="name" ref="name" :label="$t('label.name.optional')">
+                        <a-input v-model:value="form.name" />
+                      </a-form-item>
+                      <a-form-item name="setvmpassword" ref="setvmpassword">
+                        <a-checkbox v-model:checked="form.setvmpassword" @change="onSetVmPasswordChange">
+                          {{ $t('label.dbaas.vm.password.set') }}
+                        </a-checkbox>
+                        <span class="hint">{{ $t('message.dbaas.vm.password.hint') }}</span>
+                      </a-form-item>
+                      <a-form-item
+                        v-if="form.setvmpassword"
+                        name="vmpassword"
+                        ref="vmpassword"
+                        :label="$t('label.dbaas.vm.password')">
+                        <a-input-password
+                          v-model:value="form.vmpassword"
+                          autocomplete="new-password"
+                          :placeholder="$t('label.dbaas.vm.password')" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
+
+                <a-step
+                  :title="$t('label.database')"
+                  :status="form.zoneid ? 'process' : 'wait'">
+                  <template #description>
+                    <div v-if="form.zoneid" class="step-content">
+                      <a-form-item name="dbname" ref="dbname" :label="$t('label.dbname')">
+                        <a-input v-model:value="form.dbname" :placeholder="$t('label.dbname')" />
+                      </a-form-item>
+                      <a-form-item name="dbusername" ref="dbusername" :label="$t('label.dbusername')">
+                        <a-input v-model:value="form.dbusername" :placeholder="form.dbname || $t('label.dbusername')" />
+                      </a-form-item>
+                      <a-form-item name="dbpassword" ref="dbpassword" :label="$t('label.dbpassword')">
+                        <a-input-password
+                          v-model:value="form.dbpassword"
+                          :placeholder="$t('message.dbaas.password.optional')" />
+                      </a-form-item>
+                    </div>
+                  </template>
+                </a-step>
+              </a-steps>
+
+              <div class="card-footer" v-if="isMobile()">
+                <deploy-buttons
+                  :loading="loading"
+                  :deployButtonText="$t('label.create.database.instance')"
+                  @handle-cancel="closeAction"
+                  @handle-deploy="handleSubmit" />
+              </div>
+            </a-form>
+          </a-spin>
+
+          <a-steps v-if="step !== 'form'" :current="stepIndex" size="small" class="steps">
+            <a-step :title="$t('label.instance')" />
+            <a-step :title="$t('label.database')" />
+            <a-step :title="$t('label.status')" />
+          </a-steps>
+
+          <!-- step 2: deploying, then waiting for the engine -->
+          <div v-if="step === 'deploying' || step === 'provisioning'" class="progress-pane">
+            <a-spin size="large" />
+            <p class="progress-text">
+              {{ step === 'deploying' ? $t('message.dbaas.deploying') : $t('message.dbaas.waiting.engine') }}
+            </p>
+            <!-- The instance already exists once this step is reached; if the
+                 createDatabase call outlives this dialog (ignoreCancelToken) it
+                 still finishes in the background. -->
+            <p v-if="step === 'provisioning'" class="progress-sub">
+              {{ $t('message.dbaas.close.early') }}
+            </p>
+            <div :span="24" class="action-button">
+              <a-button v-if="step === 'provisioning'" @click="closeAction">{{ $t('label.close') }}</a-button>
+            </div>
+          </div>
+
+          <!-- step 3a: success -->
+          <div v-if="step === 'done'">
+            <a-alert type="warning" showIcon :message="$t('message.desc.created.database')" />
+            <a-descriptions bordered size="small" :column="1" class="credentials">
+              <a-descriptions-item :label="$t('label.engine')">{{ credentials.engine }}</a-descriptions-item>
+              <a-descriptions-item :label="$t('label.host')">{{ credentials.host }}</a-descriptions-item>
+              <a-descriptions-item :label="$t('label.port')">{{ credentials.port }}</a-descriptions-item>
+              <a-descriptions-item :label="$t('label.database')">{{ credentials.database }}</a-descriptions-item>
+              <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
+              <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
+              <a-descriptions-item :label="$t('label.connect.command')">
+                <span class="connect-command">{{ connectCommand }}</span>
+              </a-descriptions-item>
+            </a-descriptions>
+            <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
+            <div :span="24" class="action-button">
+              <a-button @click="markCopied" v-clipboard:copy="connectCommand" type="primary">
+                {{ $t('label.copy.connect.command') }}
+              </a-button>
+              <a-button @click="markCopied" v-clipboard:copy="credentials.password">
+                {{ $t('label.copy.password') }}
+              </a-button>
+              <a-button @click="confirmClose(goToInstance)">{{ $t('label.go.to.instance') }}</a-button>
+              <a-button @click="confirmClose(closeAction)">{{ $t('label.close') }}</a-button>
+            </div>
+          </div>
+
+          <!-- step 3b: the instance exists but the database step failed -->
+          <div v-if="step === 'partial'">
+            <a-alert type="error" showIcon :message="$t('label.dbaas.database.failed')">
+              <template #description>
+                <p>{{ $t('message.dbaas.database.failed') }}</p>
+                <p class="error-detail">{{ failureMessage }}</p>
+              </template>
+            </a-alert>
+            <div :span="24" class="action-button">
+              <a-button type="primary" @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
+              <a-button @click="notifyCopied" v-clipboard:copy="failureMessage">{{ $t('label.copy.error') }}</a-button>
+              <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
+            </div>
+          </div>
+
+          <!-- step 3c: the browser stopped listening before the answer came back. -->
+          <div v-if="step === 'detached'">
+            <a-alert type="info" showIcon :message="$t('label.dbaas.database.submitted')">
+              <template #description>
+                <p>{{ $t('message.dbaas.database.submitted') }}</p>
+              </template>
+            </a-alert>
+            <div :span="24" class="action-button">
+              <a-button type="primary" @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
+              <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
+            </div>
+          </div>
+        </a-card>
+      </a-col>
+
+      <a-col :md="24" :lg="7" v-if="step === 'form' && !isMobile()">
+        <a-affix :offsetTop="75" class="database-info-card">
+          <info-card
+            :footerVisible="true"
+            :resource="databaseInstance"
+            :title="$t('label.yourinstance')">
+            <template #footer-content>
+              <deploy-buttons
+                :loading="loading"
+                :deployButtonText="$t('label.create.database.instance')"
+                @handle-cancel="closeAction"
+                @handle-deploy="handleSubmit" />
+            </template>
+          </info-card>
+        </a-affix>
+      </a-col>
+    </a-row>
   </div>
 </template>
 
@@ -247,7 +348,15 @@
 import { ref, reactive, toRaw } from 'vue'
 import { Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
-import { mixinForm } from '@/utils/mixin'
+import { mixinDevice, mixinForm } from '@/utils/mixin'
+import InfoCard from '@/components/view/InfoCard'
+import ComputeOfferingSelection from '@/views/compute/wizard/ComputeOfferingSelection'
+import DeployButtons from '@/views/compute/wizard/DeployButtons'
+import DiskOfferingSelection from '@/views/compute/wizard/DiskOfferingSelection'
+import NetworkSelection from '@/views/compute/wizard/NetworkSelection'
+import SshKeyPairSelection from '@/views/compute/wizard/SshKeyPairSelection'
+import TemplateIsoRadioGroup from '@/views/compute/wizard/TemplateIsoRadioGroup'
+import ZoneBlockRadioGroupSelect from '@/views/compute/wizard/ZoneBlockRadioGroupSelect'
 import {
   buildConnectCommand,
   DBAAS_TEMPLATE_PREFIX,
@@ -257,8 +366,23 @@ import {
 
 export default {
   name: 'CreateDatabaseInstance',
-  mixins: [mixinForm],
+  components: {
+    ComputeOfferingSelection,
+    DeployButtons,
+    DiskOfferingSelection,
+    InfoCard,
+    NetworkSelection,
+    SshKeyPairSelection,
+    TemplateIsoRadioGroup,
+    ZoneBlockRadioGroupSelect
+  },
+  mixins: [mixinDevice, mixinForm],
   props: {},
+  provide () {
+    return {
+      vmFetchNetworks: this.fetchNetworks
+    }
+  },
   data () {
     return {
       loading: false,
@@ -278,6 +402,14 @@ export default {
       networks: [],
       keyPairs: [],
       keyPairLoading: false,
+      imageSearch: '',
+      selectionOptions: {
+        templates: { page: 1, pageSize: 10, keyword: '' },
+        offerings: { page: 1, pageSize: 10, keyword: '' },
+        diskOfferings: { page: 1, pageSize: 10, keyword: '' },
+        networks: { page: 1, pageSize: 10, keyword: '' },
+        keyPairs: { page: 1, pageSize: 10, keyword: '' }
+      },
       credentials: {},
       dbPasswordCopied: false,
       failureMessage: '',
@@ -286,6 +418,39 @@ export default {
     }
   },
   computed: {
+    selectedTemplate () {
+      return this.templates.find(item => item.id === this.form.engine) || {}
+    },
+    filteredTemplates () {
+      return this.filterSelection(this.templates, this.selectionOptions.templates, ['name', 'displaytext'])
+    },
+    pagedTemplates () {
+      return this.paginateSelection(this.filteredTemplates, this.selectionOptions.templates)
+    },
+    filteredOfferings () {
+      return this.filterSelection(this.availableOfferings, this.selectionOptions.offerings, ['name', 'displaytext'])
+    },
+    pagedOfferings () {
+      return this.paginateSelection(this.filteredOfferings, this.selectionOptions.offerings)
+    },
+    filteredDiskOfferings () {
+      return this.filterSelection(this.diskOfferings, this.selectionOptions.diskOfferings, ['name', 'displaytext'])
+    },
+    pagedDiskOfferings () {
+      return this.paginateSelection(this.filteredDiskOfferings, this.selectionOptions.diskOfferings)
+    },
+    filteredNetworks () {
+      return this.filterSelection(this.networks, this.selectionOptions.networks, ['name', 'displaytext', 'networkofferingdisplaytext'])
+    },
+    pagedNetworks () {
+      return this.paginateSelection(this.filteredNetworks, this.selectionOptions.networks)
+    },
+    filteredKeyPairs () {
+      return this.filterSelection(this.keyPairs, this.selectionOptions.keyPairs, ['name', 'account', 'domain'])
+    },
+    pagedKeyPairs () {
+      return this.paginateSelection(this.filteredKeyPairs, this.selectionOptions.keyPairs)
+    },
     stepIndex () {
       if (this.step === 'form') return 0
       if (this.step === 'deploying' || this.step === 'provisioning') return 1
@@ -325,6 +490,27 @@ export default {
       // hide a legitimately fine choice because this dropdown cannot know
       // the number yet.
       return this.offerings.filter(o => o.memory == null || o.memory >= minMb)
+    },
+    databaseInstance () {
+      const engine = this.templates.find(item => item.id === this.form.engine)
+      const zone = this.zones.find(item => item.id === this.form.zoneid)
+      const offering = this.offerings.find(item => item.id === this.form.serviceofferingid)
+      const diskOffering = this.diskOfferings.find(item => item.id === this.form.diskofferingid)
+      const network = this.networks.find(item => item.id === this.form.networkid)
+
+      return {
+        name: this.form.name || this.form.dbname || this.$t('label.database'),
+        templateid: engine?.id,
+        templatename: engine?.engineLabel,
+        zoneid: zone?.id,
+        zonename: zone?.name,
+        serviceofferingid: offering?.id,
+        serviceofferingname: offering?.name || offering?.displaytext,
+        datadiskofferingid: diskOffering?.id,
+        datadiskofferingdisplaytext: diskOffering?.displaytext || diskOffering?.name,
+        networks: network ? [network] : [],
+        keypairs: (this.form.keypairs || []).join(',')
+      }
     }
   },
   watch: {
@@ -350,6 +536,48 @@ export default {
     this.closed = true
   },
   methods: {
+    updateSelectionOptions (name, options) {
+      this.selectionOptions[name] = {
+        ...this.selectionOptions[name],
+        ...options
+      }
+    },
+    filterSelection (items, options, fields) {
+      const keyword = String(options.keyword || '').trim().toLowerCase()
+      if (!keyword) {
+        return items
+      }
+      return items.filter(item => fields.some(field =>
+        String(item[field] || '').toLowerCase().includes(keyword)))
+    },
+    paginateSelection (items, options) {
+      const start = (options.page - 1) * options.pageSize
+      return items.slice(start, start + options.pageSize)
+    },
+    onSelectEngine (engineId) {
+      this.form.engine = engineId
+      this.selectionOptions.offerings.page = 1
+      this.onEngineChange()
+    },
+    onSelectOffering (offeringId) {
+      this.form.serviceofferingid = offeringId
+    },
+    onSelectDiskOffering (diskOfferingId) {
+      this.form.diskofferingid = diskOfferingId && diskOfferingId !== '0'
+        ? diskOfferingId
+        : undefined
+    },
+    onSelectNetwork (networkId) {
+      this.form.networkid = Array.isArray(networkId) ? networkId[0] : networkId
+    },
+    onSelectKeyPairs (keyPairs) {
+      this.form.keypairs = (keyPairs || []).map(keyPair =>
+        typeof keyPair === 'string' ? keyPair : keyPair.name)
+    },
+    onSelectZone (zoneId) {
+      this.form.zoneid = zoneId
+      this.fetchNetworks()
+    },
     // Lives here, not in computed: it mutates form state and returns
     // nothing, and a computed is cached -- bound to @change it would run at
     // most once and then never fire again on later engine switches, which is
@@ -405,15 +633,15 @@ export default {
       // fallback for management servers running an older plugin build.
       const hasEnginesApi = 'listDbaasEngines' in this.$store.getters.apis
       const templateParams = hasEnginesApi
-        ? { templatefilter: 'executable' }
-        : { templatefilter: 'executable', keyword: DBAAS_TEMPLATE_PREFIX }
+        ? { templatefilter: 'executable', pagesize: -1, showicon: true }
+        : { templatefilter: 'executable', keyword: DBAAS_TEMPLATE_PREFIX, pagesize: -1, showicon: true }
       Promise.all([
         getAPI('listTemplates', templateParams),
         getAPI('listZones', { available: true }),
-        getAPI('listServiceOfferings'),
+        getAPI('listServiceOfferings', { pagesize: -1 }),
         // Data disk is entirely optional, so this is never in the required
         // rules -- it only ever adds an extra volume when actually picked.
-        getAPI('listDiskOfferings'),
+        getAPI('listDiskOfferings', { pagesize: -1 }),
         hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
       ]).then(([tpl, zone, off, diskOff, engines]) => {
         const engineList = engines ? (engines.listdbaasenginesresponse?.dbaasengine || []) : []
@@ -433,21 +661,14 @@ export default {
           // Same label source DatabaseInstances uses: the template's own
           // displaytext ("MySQL Community 8.0 on Debian 12 x86_64"), so a new
           // engine added to the backend config shows up without UI changes.
-          .map(t => ({ id: t.id, name: t.name, engineLabel: t.displaytext || t.name }))
+          .map(t => ({ ...t, engineLabel: t.displaytext || t.name }))
         this.engineMinMemoryByTemplate = {}
         this.templates.forEach(t => {
           this.engineMinMemoryByTemplate[t.id] = minMemoryByEngineName[t.name] || 0
         })
         this.zones = zone.listzonesresponse.zone || []
-        const mapOffering = o => ({
-          id: o.id,
-          label: `${o.name} (${o.cpunumber} vCPU, ${o.memory} MB)`,
-          memory: o.memory,
-          iscustomized: o.iscustomized
-        })
-        this.offerings = (off.listserviceofferingsresponse.serviceoffering || []).map(mapOffering)
-        this.diskOfferings = (diskOff.listdiskofferingsresponse.diskoffering || [])
-          .map(d => ({ id: d.id, label: d.iscustomized ? `${d.name} (${this.$t('label.iscustomized')})` : `${d.name} (${d.disksize} GB)` }))
+        this.offerings = off.listserviceofferingsresponse.serviceoffering || []
+        this.diskOfferings = diskOff.listdiskofferingsresponse.diskoffering || []
         if (this.zones.length === 1) {
           this.form.zoneid = this.zones[0].id
           this.fetchNetworks()
@@ -460,6 +681,7 @@ export default {
     },
     fetchNetworks () {
       this.form.networkid = undefined
+      this.selectionOptions.networks = { page: 1, pageSize: 10, keyword: '' }
       if (!this.needsNetwork) {
         this.networks = []
         // Basic zones take no networkids at all, so the field cannot be
@@ -474,7 +696,7 @@ export default {
       // opaque SSH "timed out" after the instance is already running.
       this.rules.networkid = [this.requiredRule]
       this.networkLoading = true
-      getAPI('listNetworks', { zoneid: this.form.zoneid }).then(json => {
+      getAPI('listNetworks', { zoneid: this.form.zoneid, pagesize: -1 }).then(json => {
         this.networks = json.listnetworksresponse.network || []
         if (this.networks.length === 1) {
           this.form.networkid = this.networks[0].id
@@ -490,8 +712,8 @@ export default {
         return
       }
       this.keyPairLoading = true
-      getAPI('listSSHKeyPairs', {}).then(json => {
-        this.keyPairs = (json.listsshkeypairsresponse.sshkeypair || []).map(k => k.name)
+      getAPI('listSSHKeyPairs', { pagesize: -1 }).then(json => {
+        this.keyPairs = json.listsshkeypairsresponse.sshkeypair || []
       }).catch(error => {
         this.$notifyError(error)
       }).finally(() => {
@@ -531,8 +753,8 @@ export default {
         }
         // deployVirtualMachine takes both `keypair` and `keypairs`; the standard
         // Add Instance wizard sends `keypairs`, so match it.
-        if (values.keypair) {
-          params.keypairs = values.keypair
+        if (values.keypairs && values.keypairs.length > 0) {
+          params.keypairs = values.keypairs.join(',')
         }
         // Only when the tenant asked to set one; otherwise CloudStack
         // generates it, which is the pre-existing behaviour.
@@ -719,17 +941,28 @@ export default {
 </script>
 
 <style scoped lang="less">
-  .form-layout {
-    width: 80vw;
-    // Never wider than whatever is hosting this dialog: the Database page
-    // opens these in a fixed-width modal, and fixed-width content inside a
-    // narrower modal spills over its background instead of wrapping
-    // (observed 2026-09-10 on Show Password, 134px past the panel).
-    max-width: 100%;
+  .step-content {
+    margin-top: 15px;
+  }
 
-    @media (min-width: 600px) {
-      width: 500px;
+  .selection-search {
+    display: block;
+    width: 25vw;
+    margin: 0 0 10px auto;
+    z-index: 8;
+
+    @media (max-width: 600px) {
+      width: 100%;
     }
+  }
+
+  .card-footer {
+    text-align: right;
+    margin-top: 2rem;
+  }
+
+  .form-item-hidden {
+    display: none;
   }
 
   .form-banner {
@@ -788,5 +1021,38 @@ export default {
     margin-top: 8px;
     font-family: monospace;
     word-break: break-all;
+  }
+</style>
+
+<style lang="less">
+  .database-info-card {
+    .ant-card-body {
+      min-height: 250px;
+      max-height: calc(100vh - 140px);
+      overflow: hidden;
+    }
+
+    .card-content {
+      max-height: calc(100vh - 240px);
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+
+    .card-footer {
+      border-top: 1px solid #f0f0f0;
+      flex-shrink: 0;
+    }
+
+    .resource-detail-item__label {
+      font-weight: normal;
+    }
+
+    .resource-detail-item__details, .resource-detail-item {
+      a {
+        color: rgba(0, 0, 0, 0.65);
+        cursor: default;
+        pointer-events: none;
+      }
+    }
   }
 </style>

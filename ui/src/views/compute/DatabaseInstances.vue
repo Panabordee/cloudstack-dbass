@@ -16,88 +16,134 @@
 // under the License.
 
 <template>
-  <a-row :gutter="12">
-    <a-col :md="24" :lg="24">
-      <a-card class="database-instances-card" :bordered="false">
-        <template #title>
-          {{ $t('label.database') }}
-          <a-button
-            style="margin-left: 12px; margin-top: 4px"
-            :loading="loading"
-            size="small"
-            shape="round"
-            @click="fetchData">
-            <template #icon><reload-outlined /></template>
-          </a-button>
-          <router-link
-            v-if="canCreateDatabase"
-            :to="{ path: '/action/createDatabase' }"
-            style="float: right">
-            <a-button type="primary" size="small">
-              <template #icon><plus-outlined /></template>
-              {{ $t('label.create.database.instance') }}
-            </a-button>
-          </router-link>
-        </template>
-        <a-table
-          :data-source="instances"
-          :loading="loading"
-          class="database-instances-table"
-          size="middle"
-          :pagination="{ pageSize: 10, showSizeChanger: false }"
-          :scroll="{ x: 800 }"
-          :columns="columns"
-          rowKey="id">
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'name'">
-              <router-link :to="{ path: '/vm/' + record.id }">{{ record.displayname || record.name }}</router-link>
-            </template>
-            <template v-else-if="column.key === 'state'">
-              <status :text="record.state" displayText />
-            </template>
-            <template v-else-if="column.key === 'engine'">
-              {{ engineLabel(record.templatename) }}
-            </template>
-            <template v-else-if="column.key === 'actions'">
-              <!-- The console is the one action a tenant uses all day; it was
-                   only reachable through the actions menu (2026-09-10
-                   feedback) -- give it its own always-visible button. -->
-              <a-button
-                v-if="canConsole(record)"
-                type="primary"
-                size="small"
-                style="margin-right: 6px"
-                :title="$t('label.dbaas.console')"
-                @click="runRowAction('console', record)">
-                <template #icon><console-sql-outlined /></template>
-                {{ $t('label.dbaas.console') }}
-              </a-button>
-              <a-button
-                v-if="canDestroy"
-                type="text"
-                danger
-                size="small"
-                :title="$t('label.action.destroy.instance')"
-                @click="confirmDestroy(record)">
-                <template #icon><delete-outlined /></template>
-              </a-button>
-              <a-dropdown v-if="rowActions(record).length > 0">
-                <a-button type="text" size="small" :title="$t('label.actions')">
-                  <template #icon><more-outlined /></template>
+  <div>
+    <a-affix
+      :offsetTop="$store.getters.maintenanceInitiated || $store.getters.shutdownTriggered ? 103 : 78">
+      <a-card class="breadcrumb-card" style="z-index: 10">
+        <a-row>
+          <a-col :xs="24" :lg="12" class="toolbar-left">
+            <breadcrumb>
+              <template #end>
+                <a-button
+                  :loading="loading"
+                  class="toolbar-control"
+                  shape="round"
+                  size="small"
+                  @click="fetchData">
+                  <template #icon><reload-outlined /></template>
+                  {{ $t('label.refresh') }}
                 </a-button>
-                <template #overlay>
-                  <a-menu @click="({ key }) => runRowAction(key, record)">
-                    <a-menu-item v-for="action in rowActions(record)" :key="action.key">
-                      {{ $t(action.label) }}
-                    </a-menu-item>
-                  </a-menu>
-                </template>
-              </a-dropdown>
-            </template>
-          </template>
-        </a-table>
-        <a-empty v-if="!loading && instances.length === 0" :description="$t('label.database.instances.empty')" />
+                <a-tooltip placement="right">
+                  <template #title>{{ $t('label.filterby') }}</template>
+                  <a-select
+                    v-model:value="stateFilter"
+                    class="state-filter toolbar-control"
+                    size="small"
+                    @change="onStateFilterChange">
+                    <template #suffixIcon><filter-outlined /></template>
+                    <a-select-option value="all">{{ $t('label.all') }}</a-select-option>
+                    <a-select-option value="Running">{{ $t('label.running') }}</a-select-option>
+                    <a-select-option value="Stopped">{{ $t('label.stopped') }}</a-select-option>
+                    <a-select-option value="Destroyed">{{ $t('label.destroyed') }}</a-select-option>
+                  </a-select>
+                </a-tooltip>
+              </template>
+            </breadcrumb>
+          </a-col>
+          <a-col :xs="24" :lg="12" class="toolbar-right">
+            <action-button
+              :actions="createActions"
+              :loading="loading"
+              @exec-action="openCreateDatabase" />
+            <a-input-search
+              v-model:value="searchQuery"
+              allowClear
+              class="database-search"
+              :placeholder="$t('label.search')"
+              @search="onSearch" />
+          </a-col>
+        </a-row>
       </a-card>
+    </a-affix>
+
+    <div class="row-element">
+      <a-table
+        :data-source="paginatedInstances"
+        :loading="loading"
+        class="database-instances-table"
+        size="middle"
+        :pagination="false"
+        :scroll="{ x: 900 }"
+        :columns="columns"
+        rowKey="id">
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'name'">
+            <database-outlined class="database-resource-icon" />
+            <router-link :to="{ path: '/vm/' + record.id }">{{ record.displayname || record.name }}</router-link>
+          </template>
+          <template v-else-if="column.key === 'state'">
+            <status :text="record.state" displayText :styles="{ 'min-width': '80px' }" />
+          </template>
+          <template v-else-if="column.key === 'engine'">
+            {{ engineLabel(record.templatename) }}
+          </template>
+          <template v-else-if="column.key === 'actions'">
+            <!-- The console is the one action a tenant uses all day; keep it
+                 visible while the remaining actions stay in the row menu. -->
+            <a-button
+              v-if="canConsole(record)"
+              type="primary"
+              size="small"
+              class="console-button"
+              :title="$t('label.dbaas.console')"
+              @click="runRowAction('console', record)">
+              <template #icon><console-sql-outlined /></template>
+              {{ $t('label.dbaas.console') }}
+            </a-button>
+            <a-button
+              v-if="canDestroy"
+              type="text"
+              danger
+              size="small"
+              :title="$t('label.action.destroy.instance')"
+              @click="confirmDestroy(record)">
+              <template #icon><delete-outlined /></template>
+            </a-button>
+            <a-dropdown v-if="rowActions(record).length > 0">
+              <a-button type="text" size="small" :title="$t('label.actions')">
+                <template #icon><more-outlined /></template>
+              </a-button>
+              <template #overlay>
+                <a-menu @click="({ key }) => runRowAction(key, record)">
+                  <a-menu-item v-for="action in rowActions(record)" :key="action.key">
+                    {{ $t(action.label) }}
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
+          </template>
+        </template>
+      </a-table>
+
+      <a-pagination
+        v-if="filteredInstances.length > 0"
+        class="database-pagination"
+        size="small"
+        :current="page"
+        :pageSize="pageSize"
+        :total="filteredInstances.length"
+        :showTotal="paginationTotal"
+        :pageSizeOptions="pageSizeOptions"
+        showSizeChanger
+        showQuickJumper
+        @change="changePage"
+        @showSizeChange="changePageSize">
+        <template #buildOptionText="props">
+          <span>{{ props.value }} / {{ $t('label.page') }}</span>
+        </template>
+      </a-pagination>
+    </div>
+
       <!-- Row actions that open a dialog reuse the exact components the
            /vm/<id> dataView actions render, receiving the same resource
            shape. closeModal refreshes the list so state changes made inside
@@ -144,28 +190,35 @@
           @close-action="closeModal"
           @refresh-data="fetchData" />
       </a-modal>
-    </a-col>
-  </a-row>
+  </div>
 </template>
 
 <script>
 import { h, ref } from 'vue'
 import { Checkbox, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
+import ActionButton from '@/components/view/ActionButton.vue'
+import Breadcrumb from '@/components/widgets/Breadcrumb.vue'
 import Status from '@/components/widgets/Status.vue'
 import CreateDatabase from '@/views/compute/CreateDatabase.vue'
 import DbaasConsole from '@/views/compute/DbaasConsole.vue'
 import ResetDatabasePassword from '@/views/compute/ResetDatabasePassword.vue'
 import ShowDatabasePassword from '@/views/compute/ShowDatabasePassword.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
+import { isZoneCreated } from '@/utils/zone'
 
 export default {
   name: 'DatabaseInstances',
-  components: { Status, CreateDatabase, DbaasConsole, ShowDatabasePassword, ResetDatabasePassword },
+  components: { ActionButton, Breadcrumb, Status, CreateDatabase, DbaasConsole, ShowDatabasePassword, ResetDatabasePassword },
   data () {
     return {
       loading: false,
       instances: [],
+      searchQuery: '',
+      appliedSearch: '',
+      stateFilter: 'all',
+      page: 1,
+      pageSize: this.$store.getters.defaultListViewPageSize,
       // Rendered from the same template name the extension itself keys off
       // of -- if it doesn't recognize a template name, neither would the
       // backend, so falling back to the raw name here is the honest answer.
@@ -174,19 +227,54 @@ export default {
       activeRowAction: '',
       consoleMaximized: false,
       activeRecord: null,
+      createActions: [{
+        api: 'createDatabase',
+        icon: 'plus-outlined',
+        label: 'label.create.database.instance',
+        listView: true,
+        show: isZoneCreated
+      }],
       columns: [
         { key: 'name', title: this.$t('label.name'), dataIndex: 'name' },
-        { key: 'engine', title: this.$t('label.engine'), dataIndex: 'templatename' },
         { key: 'state', title: this.$t('label.state'), dataIndex: 'state' },
         { key: 'ipaddress', title: this.$t('label.ipaddress'), dataIndex: 'ipaddress' },
+        { key: 'engine', title: this.$t('label.engine'), dataIndex: 'templatename' },
+        { key: 'serviceofferingname', title: this.$t('label.serviceoffering'), dataIndex: 'serviceofferingname' },
         { key: 'zonename', title: this.$t('label.zonename'), dataIndex: 'zonename' },
-        { key: 'actions', title: this.$t('label.actions'), dataIndex: 'actions', width: 100 }
+        { key: 'actions', title: this.$t('label.actions'), dataIndex: 'actions', width: 160 }
       ]
     }
   },
   computed: {
-    canCreateDatabase () {
-      return 'createDatabase' in this.$store.getters.apis
+    filteredInstances () {
+      const query = this.appliedSearch.trim().toLowerCase()
+      return this.instances.filter(record => {
+        if (this.stateFilter !== 'all' && record.state !== this.stateFilter) {
+          return false
+        }
+        if (!query) {
+          return true
+        }
+        return [
+          record.displayname,
+          record.name,
+          record.state,
+          record.ipaddress,
+          record.templatename,
+          this.engineLabel(record.templatename),
+          record.serviceofferingname,
+          record.zonename
+        ].some(value => String(value || '').toLowerCase().includes(query))
+      })
+    },
+    paginatedInstances () {
+      const start = (this.page - 1) * this.pageSize
+      return this.filteredInstances.slice(start, start + this.pageSize)
+    },
+    pageSizeOptions () {
+      return [...new Set([20, 50, 100, 200, this.$store.getters.defaultListViewPageSize])]
+        .sort((a, b) => a - b)
+        .map(String)
     },
     // These instances are hidden from the generic Instances list, so this
     // page has to carry the destroy action itself -- otherwise the only way
@@ -203,6 +291,28 @@ export default {
     this.fetchData()
   },
   methods: {
+    openCreateDatabase () {
+      this.$router.push({ name: 'createDatabase' })
+    },
+    onSearch (value) {
+      this.appliedSearch = value || ''
+      this.page = 1
+    },
+    onStateFilterChange () {
+      this.page = 1
+    },
+    changePage (page) {
+      this.page = page
+    },
+    changePageSize (page, pageSize) {
+      this.page = 1
+      this.pageSize = pageSize
+    },
+    paginationTotal (total) {
+      const start = total === 0 ? 0 : 1 + ((this.page - 1) * this.pageSize)
+      const end = Math.min(this.page * this.pageSize, total)
+      return `${this.$t('label.showing')} ${start}-${end} ${this.$t('label.of')} ${total} ${this.$t('label.items')}`
+    },
     // The dialogs this modal hosts set their own content width
     // (.form-layout is 560px above the 600px breakpoint, matching the core
     // CloudStack dialogs), so a modal narrower than that pushes the content
@@ -506,7 +616,7 @@ export default {
         // pagesize: -1 -- without it the response is capped at the default
         // page size and every DBaaS VM beyond it silently vanishes from this
         // list even though the instance exists and is reachable.
-        return getAPI('listVirtualMachines', { listall: true, details: 'tmpl,nics', pagesize: -1 }).then(vmResponse => {
+        return getAPI('listVirtualMachines', { listall: true, details: 'tmpl,nics,servoff', pagesize: -1 }).then(vmResponse => {
           this.instances = (vmResponse.listvirtualmachinesresponse.virtualmachine || [])
             .filter(vm => templateIds.has(vm.templateid))
         })
@@ -521,13 +631,74 @@ export default {
 </script>
 
 <style scoped lang="less">
-  .database-instances-card {
-    width: 100%;
-    max-width: 100%;
-    overflow: hidden;
+  .breadcrumb-card {
+    margin-left: -24px;
+    margin-right: -24px;
+    margin-top: -16px;
+    margin-bottom: 12px;
+  }
+
+  .toolbar-left {
+    padding-left: 12px;
+    margin-top: 10px;
+  }
+
+  .toolbar-right {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    padding-right: 10px;
+    margin-top: 6px;
+  }
+
+  .toolbar-control {
+    margin-left: 10px;
+    margin-bottom: 5px;
+  }
+
+  .state-filter {
+    min-width: 110px;
+  }
+
+  .database-search {
+    width: 240px;
+  }
+
+  .row-element {
+    margin-bottom: 10px;
   }
 
   .database-instances-table :deep(.ant-table) {
     overflow-x: auto;
+  }
+
+  .database-resource-icon {
+    margin-right: 10px;
+    font-size: 18px;
+  }
+
+  .console-button {
+    margin-right: 6px;
+  }
+
+  .database-pagination {
+    margin-top: 10px;
+  }
+
+  @media (max-width: 991px) {
+    .toolbar-right {
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      padding-left: 12px;
+      padding-right: 0;
+      margin-top: 8px;
+      margin-bottom: 6px;
+    }
+
+    .database-search {
+      flex: 1;
+      min-width: 180px;
+    }
   }
 </style>
