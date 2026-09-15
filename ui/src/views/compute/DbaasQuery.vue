@@ -124,7 +124,7 @@
 
 <script>
 import { getAPI } from '@/api'
-import { defineAsyncComponent, shallowRef } from 'vue'
+import { defineAsyncComponent } from 'vue'
 import Breadcrumb from '@/components/widgets/Breadcrumb'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
@@ -132,7 +132,11 @@ export default {
   name: 'DbaasQuery',
   components: {
     Breadcrumb,
-    DbaasConsole: shallowRef(defineAsyncComponent(() => import('@/views/compute/DbaasConsole.vue')))
+    // Not wrapped in shallowRef: `components` takes the component itself.
+    // shallowRef is what the section config uses because it stores components
+    // inside reactive data; here a ref is not something Vue can resolve as a
+    // component, so the console silently rendered nothing at all.
+    DbaasConsole: defineAsyncComponent(() => import('@/views/compute/DbaasConsole.vue'))
   },
   data () {
     return {
