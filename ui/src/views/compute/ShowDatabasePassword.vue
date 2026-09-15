@@ -52,11 +52,20 @@
       <!-- A credential exists but the instance has not confirmed it applied
            it (config-drive provisioning stores the credential before the
            instance boots). The password below is the one it will use. -->
+      <!-- This branch's own v-if runs before the miss/autoChecking one
+           below, so it has to carry the same progress-count / gave-up
+           wording itself -- putting it only in the later block left this
+           one showing a bare, unchanging "pending" message for the whole
+           5-minute retry window, indistinguishable from having already
+           given up. -->
       <a-alert
         v-if="credentials.found && provisioningPending"
         type="info"
         showIcon
-        :message="$t('message.dbaas.status.pending')"
+        :message="autoChecking
+          ? $t('message.dbaas.provisioning.inprogress', { count: autoChecks, total: maxAutoChecks })
+          : $t('message.dbaas.status.pending')"
+        :description="autoChecks >= maxAutoChecks ? $t('message.dbaas.status.pending.gaveup') : ''"
         class="state-alert" />
       <a-alert
         v-else-if="credentials.found && provisioningFailed"
@@ -116,7 +125,14 @@
         </div>
       </template>
       <div :span="24" class="action-button">
-        <a-button v-if="loaded && miss" @click="retry">{{ $t('label.retry') }}</a-button>
+        <!-- Not just `miss`: a credential that exists but stayed 'pending'
+             (the instance provisioned locally off the config drive but
+             could never reach the management server to report it, e.g. no
+             outbound network) hits the same dead end -- autoChecking stops
+             on its own after maxAutoChecks (5 minutes) with nothing left to
+             retry it, and closing/reopening the dialog was the only way to
+             trigger another check. -->
+        <a-button v-if="loaded && (miss || provisioningPending)" @click="retry">{{ $t('label.retry') }}</a-button>
         <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
       </div>
     </a-spin>
@@ -175,8 +191,15 @@ export default {
     miss () {
       return this.loaded && this.credentials.found === false
     },
+    // Both unsettled shapes retry the same way (fetchPassword's own
+    // `unsettled` check covers both), so the "still checking" indicator
+    // has to as well -- gating this on `miss` alone meant a credential
+    // that existed but stayed 'pending' (found=true) showed no progress
+    // during the whole 5-minute retry window, just a bare "pending" alert
+    // that looked identical whether it was the 1st check or the 30th.
     autoChecking () {
-      return this.miss && this.autoChecks > 0 && this.autoChecks < this.maxAutoChecks
+      return (this.miss || this.provisioningPending) &&
+        this.autoChecks > 0 && this.autoChecks < this.maxAutoChecks
     },
     // Reported by the instance, not inferred here: 'pending' means the
     // credential was generated and handed to the instance but nothing has

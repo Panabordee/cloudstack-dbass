@@ -209,7 +209,12 @@ export default {
       this.form.database = undefined
       this.databases = []
       const vm = this.selectedInstance
-      this.form.engineType = this.engineTypeOf(vm.templatename) || this.form.engineType
+      // No fallback to the previous value: falling back here meant
+      // switching to an instance whose engine could not be looked up (e.g.
+      // listDbaasEngines still loading, or its config entry removed after
+      // this VM was deployed) left the tag showing the *previous* instance's
+      // engine instead of clearing -- silently wrong, not just unknown.
+      this.form.engineType = this.engineTypeOf(vm.templatename)
       if (!vm.id) {
         return
       }

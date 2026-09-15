@@ -3644,6 +3644,7 @@
   "message.dbaas.select.engine.first": "Select a database engine first",
   "message.dbaas.status.failed": "The instance reported that it could not configure its database engine with this credential.",
   "message.dbaas.status.pending": "The credential below is the one this instance will use, but it has not confirmed yet that its database engine came up with it. If it never confirms, use the Create Database action to run provisioning again.",
+  "message.dbaas.status.pending.gaveup": "Still pending after 5 minutes of automatic checks. This usually means the instance could not reach the management server to report in -- check its network, then click Retry to check again.",
   "message.dbaas.username.default": "Leave Username empty and it defaults to the database name. The password is always generated for you and shown once this finishes.",
   "message.dbaas.vm.password.hint": "This is the password for logging into the instance itself (via Console, not SSH -- these images ship with SSH password login disabled; use an SSH keypair instead), not the database user's password. If you leave it empty CloudStack generates one, but a generated password can only be retrieved later if you also attach an RSA SSH keypair.",
   "message.dbaas.waiting.engine": "Attaching the provisioning request and starting the instance -- the database engine is configured at first boot...",
