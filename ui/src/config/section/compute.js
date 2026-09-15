@@ -594,6 +594,11 @@ export default {
       name: 'databasequery',
       title: 'label.dbaas.query',
       icon: 'console-sql-outlined',
+      // Routable but not listed in the navigation: the way in is the
+      // Database Query button on the Database page, next to the instances
+      // it operates on. A second entry in the sidebar, below everything
+      // else, was both easy to miss and redundant with that button.
+      hidden: true,
       permission: ['listDbaasTables'],
       component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DbaasQuery.vue')))
     },
