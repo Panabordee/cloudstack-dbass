@@ -50,7 +50,8 @@
           type="info"
           show-icon
           class="connect-note"
-          :message="$t('message.dbaas.query.intro')" />
+          :message="$t('message.dbaas.query.intro')"
+          :description="$t('message.dbaas.query.access')" />
         <a-spin :spinning="loading">
           <a-form layout="vertical" :model="form">
             <a-form-item :label="$t('label.dbaas.query.instance')" required>
@@ -88,22 +89,22 @@
               </a-select>
             </a-form-item>
 
-            <a-form-item :label="$t('label.username')">
-              <a-input v-model:value="form.username" :placeholder="suggestedUsername" />
-            </a-form-item>
-
-            <a-form-item :label="$t('label.password')" required>
-              <a-input-password
-                v-model:value="form.password"
-                autocomplete="off"
-                :placeholder="$t('label.password')"
-                @pressEnter="connect" />
-              <span class="hint">{{ $t('message.dbaas.query.password.hint') }}</span>
-            </a-form-item>
+            <!-- No password field, deliberately. Asking for one here could
+                 only be checked in the browser against the stored credential,
+                 which means fetching that credential into the browser to
+                 compare it -- handing over the very secret the prompt is
+                 pretending to guard, while the check itself is a JS variable
+                 anyone can set from devtools. It would also control nothing:
+                 the agent connects with the credential held inside the
+                 instance regardless of what was typed.
+                 The real gate is server-side and already enforced on every
+                 command: checkCallerOwnsVm refuses anyone who does not own
+                 this instance, and reads run as the read-only role with the
+                 engine itself enforcing it. -->
 
             <a-alert v-if="connectError" type="error" show-icon class="connect-note" :message="connectError" />
 
-            <a-button type="primary" :loading="connecting" :disabled="!canConnect" @click="connect">
+            <a-button type="primary" :disabled="!canConnect" @click="connect">
               {{ $t('label.dbaas.query.connect') }}
             </a-button>
           </a-form>
@@ -137,7 +138,6 @@ export default {
     return {
       loading: false,
       databasesLoading: false,
-      connecting: false,
       connected: false,
       connectError: '',
       instances: [],
@@ -146,9 +146,7 @@ export default {
       form: {
         instanceId: undefined,
         engineType: undefined,
-        database: undefined,
-        username: '',
-        password: ''
+        database: undefined
       }
     }
   },
@@ -162,13 +160,8 @@ export default {
     engineTypes () {
       return [...new Set(this.engines.map(e => this.engineTypeOf(e.template)).filter(Boolean))]
     },
-    suggestedUsername () {
-      const match = this.databases.find(d => d.database === this.form.database)
-      return (match && match.username) || this.$t('label.username')
-    },
     canConnect () {
-      return !!this.form.instanceId && !!this.form.database &&
-        !!this.form.engineType && !!this.form.password
+      return !!this.form.instanceId && !!this.form.database && !!this.form.engineType
     },
     connectedResource () {
       return this.selectedInstance
@@ -213,7 +206,6 @@ export default {
     },
     onInstanceChange () {
       this.form.database = undefined
-      this.form.username = ''
       this.databases = []
       const vm = this.selectedInstance
       this.form.engineType = this.engineTypeOf(vm.templatename) || this.form.engineType
@@ -233,40 +225,18 @@ export default {
         this.databasesLoading = false
       })
     },
+    // Opening the editor is not itself a privileged step -- every command it
+    // then issues is authorised server-side on its own. So this only records
+    // what was chosen; there is nothing here worth checking in the browser.
     connect () {
       if (!this.canConnect) {
         return
       }
-      this.connecting = true
       this.connectError = ''
-      // Checked against the credential this instance actually has, so a
-      // wrong password stops here rather than opening an editor that then
-      // fails on every statement.
-      const match = this.databases.find(d => d.database === this.form.database)
-      const username = this.form.username || (match && match.username)
-      getAPI('getDatabasePassword', {
-        virtualmachineid: this.form.instanceId,
-        ...(username ? { dbusername: username } : {})
-      }).then(json => {
-        const stored = (json.getdatabasepasswordresponse || {}).dbaas || {}
-        if (!stored.password) {
-          this.connectError = this.$t('message.dbaas.query.no.credential')
-          return
-        }
-        if (stored.password !== this.form.password) {
-          this.connectError = this.$t('message.dbaas.query.bad.password')
-          return
-        }
-        this.connected = true
-      }).catch(error => {
-        this.connectError = error?.message || String(error)
-      }).finally(() => {
-        this.connecting = false
-      })
+      this.connected = true
     },
     disconnect () {
       this.connected = false
-      this.form.password = ''
       this.connectError = ''
     }
   }

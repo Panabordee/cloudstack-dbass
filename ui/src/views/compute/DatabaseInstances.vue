@@ -51,6 +51,18 @@
             </breadcrumb>
           </a-col>
           <a-col :xs="24" :lg="12" class="toolbar-right">
+            <!-- The way into the query page, on the page people are already
+                 looking at. It lives here rather than in a row so it does not
+                 repeat once per instance, and rather than only in the left
+                 navigation, where it is easy to miss. -->
+            <a-button
+              class="query-entry"
+              type="primary"
+              ghost
+              @click="openQuery">
+              <template #icon><console-sql-outlined /></template>
+              {{ $t('label.dbaas.query') }}
+            </a-button>
             <action-button
               :actions="createActions"
               :loading="loading"
@@ -212,7 +224,10 @@ export default {
         { key: 'state', title: this.$t('label.state'), dataIndex: 'state' },
         { key: 'ipaddress', title: this.$t('label.ipaddress'), dataIndex: 'ipaddress' },
         { key: 'engine', title: this.$t('label.engine'), dataIndex: 'templatename' },
-        { key: 'serviceofferingname', title: this.$t('label.serviceoffering'), dataIndex: 'serviceofferingname' },
+        // label.serviceoffering does not exist in the locale files, so the
+        // column header rendered as the raw key. label.serviceofferingname is
+        // the one that is actually defined ("Compute Offering").
+        { key: 'serviceofferingname', title: this.$t('label.serviceofferingname'), dataIndex: 'serviceofferingname' },
         { key: 'zonename', title: this.$t('label.zonename'), dataIndex: 'zonename' },
         { key: 'actions', title: this.$t('label.actions'), dataIndex: 'actions', width: 160 }
       ]
@@ -264,6 +279,9 @@ export default {
     this.fetchData()
   },
   methods: {
+    openQuery () {
+      this.$router.push({ path: '/databasequery' })
+    },
     openCreateDatabase () {
       this.$router.push({ name: 'createDatabase' })
     },
