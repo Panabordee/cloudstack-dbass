@@ -96,15 +96,26 @@
         showIcon
         :message="$t('message.desc.show.database.password')"
         class="state-alert" />
-      <p v-if="credentials.found && credentials.password" class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
+      <!-- Only when the per-entry block above has nothing to show: entries
+           is empty exactly when fetchAllDatabases itself found nothing (an
+           older server, or the list call failing outright) but the single
+           fetchPassword call that ran alongside it still did. Whenever
+           entries is non-empty, selectedEntry already carries this same
+           command with its own button -- showing both duplicated the
+           button and the hint underneath it (observed 2026-09-15). -->
+      <template v-if="entries.length === 0">
+        <p v-if="credentials.found && credentials.password" class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
+        <div :span="24" class="action-button">
+          <a-button
+            v-if="credentials.found && connectCommand"
+            @click="notifyCopied"
+            v-clipboard:copy="connectCommand"
+            type="primary">
+            {{ $t('label.copy.connect.command') }}
+          </a-button>
+        </div>
+      </template>
       <div :span="24" class="action-button">
-        <a-button
-          v-if="credentials.found && connectCommand"
-          @click="notifyCopied"
-          v-clipboard:copy="connectCommand"
-          type="primary">
-          {{ $t('label.copy.connect.command') }}
-        </a-button>
         <a-button v-if="loaded && miss" @click="retry">{{ $t('label.retry') }}</a-button>
         <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
       </div>
