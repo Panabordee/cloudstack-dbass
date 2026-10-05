@@ -220,7 +220,7 @@ export default {
 <style scoped lang="less">
 :deep(.ant-descriptions-item-label),
 :deep(.ant-descriptions-item-content) {
-  color: inherit;
+  color: inherit !important;
   background: transparent !important;
 }
   .form-layout {
@@ -253,7 +253,7 @@ export default {
 
   .connect-hint {
     margin-top: 4px;
-    color: inherit;
+    color: inherit !important;
     word-break: break-all;
   }
 </style>

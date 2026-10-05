@@ -172,7 +172,7 @@ export default {
 <style scoped lang="less">
 :deep(.ant-descriptions-item-label),
 :deep(.ant-descriptions-item-content) {
-  color: inherit;
+  color: inherit !important;
   background: transparent !important;
 }
   .form-layout {
