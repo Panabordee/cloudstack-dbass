@@ -11,6 +11,10 @@
 # caller only meant to rotate.
 set -euo pipefail
 
+# Prefer the native client; the legacy alias adds warnings to verification output.
+client=mariadb
+command -v mariadb >/dev/null 2>&1 || client=mysql
+
 payload=$(cat)
 db_user=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin)["db_user"])')
 db_password=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin)["db_password"])')
@@ -20,14 +24,14 @@ if [[ ! "$db_user" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]]; then
   exit 1
 fi
 
-USER_EXISTS=$(mysql --protocol=socket -uroot -N -B -e \
+USER_EXISTS=$("$client" --protocol=socket -uroot -N -B -e \
   "SELECT COUNT(*) FROM mysql.user WHERE user='${db_user}' AND host='%'")
 if [[ "$(echo "$USER_EXISTS" | tr -d '[:space:]')" == "0" ]]; then
   echo "user does not exist: ${db_user}@%" >&2
   exit 1
 fi
 
-mysql --protocol=socket -uroot <<SQL
+"$client" --protocol=socket -uroot <<SQL
 ALTER USER '${db_user}'@'%' IDENTIFIED BY '${db_password}';
 FLUSH PRIVILEGES;
 SQL
@@ -35,7 +39,7 @@ SQL
 # Same discipline as mariadb.sh: prove the new credential authenticates before
 # reporting success, and keep the password out of the process list by going
 # through MYSQL_PWD rather than -p.
-VERIFY_OUTPUT=$(MYSQL_PWD="${db_password}" mysql -h127.0.0.1 -u"${db_user}" -N -B -e "SELECT 1" 2>&1) \
+VERIFY_OUTPUT=$(MYSQL_PWD="${db_password}" "$client" -h127.0.0.1 -u"${db_user}" -N -B -e "SELECT 1" 2>&1) \
   || { echo "post-reset login verification failed: ${VERIFY_OUTPUT}" >&2; exit 1; }
 
 if [[ "$(echo "$VERIFY_OUTPUT" | tr -d '[:space:]')" != "1" ]]; then
