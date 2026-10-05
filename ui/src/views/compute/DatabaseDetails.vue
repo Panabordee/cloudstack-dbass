@@ -24,11 +24,11 @@
     <a-spin :spinning="loading">
       <a-alert v-if="error" type="error" show-icon :message="error" style="margin: 16px 0" />
       <template v-if="resource.id">
-        <a-card class="row-element">
+        <a-card class="row-element database-summary" size="small">
           <h2><database-outlined /> {{ resource.displayname || resource.name }}</h2>
           <a-tag color="blue">{{ engineLabel }}</a-tag>
           <status :text="resource.state" displayText />
-          <a-descriptions :column="{ xs: 1, sm: 2, lg: 3 }" style="margin-top: 20px">
+          <a-descriptions :column="{ xs: 1, sm: 2, lg: 3 }" size="small" style="margin-top: 12px">
             <a-descriptions-item label="Endpoint">{{ endpoint }}</a-descriptions-item>
             <a-descriptions-item label="Databases">{{ databases.length }}</a-descriptions-item>
           </a-descriptions>
@@ -45,7 +45,7 @@
             </a-dropdown>
           </a-space>
         </a-card>
-        <a-card class="row-element">
+        <a-card class="row-element" size="small">
           <a-tabs v-model:activeKey="tab">
             <a-tab-pane key="query" tab="Query">
               <dbaas-console v-if="resource.state === 'Running' && can('listDbaasTables')" :key="resource.id + openedDatabase" :resource="resource" :initial-database="openedDatabase" initial-tab="sql" />
@@ -54,6 +54,9 @@
             <a-tab-pane key="databases" tab="Databases">
               <a-table :columns="columns" :data-source="databases" row-key="database" :pagination="false">
                 <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'status'">
+                    {{ ({ confirmed: 'Ready', pending: 'Creating', failed: 'Failed' })[record.status] || record.status }}
+                  </template>
                   <template v-if="column.key === 'open'">
                     <a-button type="link" :disabled="resource.state !== 'Running' || !can('listDbaasTables')" @click="openDatabase(record.database)">Open query</a-button>
                   </template>
