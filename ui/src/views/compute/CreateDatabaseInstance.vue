@@ -968,7 +968,7 @@ export default {
 .database-wizard-dark {
   --database-wizard-text: rgba(255, 255, 255, 0.65);
 }
-:deep(.ant-steps-item-title),
+.database-wizard :deep(.ant-steps .ant-steps-item .ant-steps-item-content .ant-steps-item-title),
 :deep(.ant-descriptions-item-label),
 :deep(.ant-descriptions-item-content) {
   color: var(--database-wizard-text) !important;
