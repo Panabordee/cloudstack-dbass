@@ -274,7 +274,7 @@ export default {
     display: block;
     margin-top: 4px;
     font-size: 12px;
-    color: rgba(0, 0, 0, 0.45);
+    color: inherit;
     line-height: 1.4;
   }
 </style>

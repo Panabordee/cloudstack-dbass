@@ -475,7 +475,7 @@ export default {
           // Expunging also drops the instance's data disks, which is the only
           // way they ever get cleaned up -- say so before it happens.
           this.canExpunge
-            ? h('p', { style: { marginTop: '8px', color: 'rgba(0, 0, 0, 0.45)' } },
+            ? h('p', { style: { marginTop: '8px' } },
               this.$t('message.dbaas.expunge.datadisks'))
             : null
         ]),

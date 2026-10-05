@@ -878,7 +878,7 @@
   "label.dbaas.console.sql.editor.mongo": "Mongo command (JSON)",
   "label.dbaas.console.sql.no.rows": "The statement ran successfully and returned no rows",
   "label.dbaas.console.sql.tab": "SQL",
-  "message.dbaas.console.sql.mongo.hint": "mongodb has no SQL. Send a JSON object instead: {\"collection\": \"name\", \"op\": \"find\", \"filter\": {}, \"limit\": 100}. op defaults to find (always allowed); insert/update/delete need write mode -- insert takes \"document\", update takes \"filter\" and \"update\", delete takes \"filter\".",
+  "message.dbaas.console.sql.mongo.hint": "Enter a JSON query. Enable writes for insert, update or delete.",
   "label.dbaas.console.tables.tab": "Tables",
   "label.dbaas.console.truncated": "The result was truncated at the row or size cap",
   "label.dbaas.console.write.mode": "Write mode (runs as the owner credential; read-only otherwise)",
