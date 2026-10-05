@@ -44,6 +44,21 @@ Engine client library, which the agent imports:
 | postgresql | `python3-psycopg2` |
 | mongodb | `python3-pymongo` |
 
+### MongoDB on Ubuntu 24.04
+
+Use MongoDB's official 8.0 repository for Noble. Allocate an 8 GB root disk
+for the builder; the small Ubuntu base image can run out of space unpacking
+MongoDB and mongosh. Check free space again before capturing the template.
+
+MongoDB requires AVX on x86_64 ([MongoDB platform requirements](https://www.mongodb.com/docs/v8.0/administration/production-notes/#platform-support-notes)).
+For a KVM host whose default guest CPU is `qemu64`, add the admin-only detail
+`details[0].guest.cpu.mode=host-passthrough` to the MongoDB builder's
+`deployVirtualMachine` request and to its `createTemplate` request. Keep
+`details[0].dbaas.configdrive=true` on the template as well. Verify `avx` in
+the builder's `/proc/cpuinfo` before installing MongoDB, and verify a fresh
+tenant VM after capture. These template details apply to MongoDB guests;
+the host's global guest CPU configuration does not need changing.
+
 ### `/opt/dbaas/engine` is a marker, not a copy
 
 It contains **only the script's file name**, e.g. `mysql.sh`. `firstboot.sh`
