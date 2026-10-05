@@ -968,6 +968,26 @@ export default {
 .database-wizard-dark {
   --database-wizard-text: rgba(255, 255, 255, 0.65);
 }
+.database-wizard-dark :deep(.ant-alert-info) {
+  background-color: #111b26 !important;
+  border-color: #153450 !important;
+}
+.database-wizard-dark :deep(.ant-alert-success) {
+  background-color: #162312 !important;
+  border-color: #274916 !important;
+}
+.database-wizard-dark :deep(.ant-alert-warning) {
+  background-color: #2b2111 !important;
+  border-color: #594214 !important;
+}
+.database-wizard-dark :deep(.ant-alert-error) {
+  background-color: #2a1215 !important;
+  border-color: #58181c !important;
+}
+.database-wizard :deep(.ant-alert .ant-alert-message),
+.database-wizard :deep(.ant-alert .ant-alert-description) {
+  color: var(--database-wizard-text) !important;
+}
 .database-wizard :deep(.ant-steps .ant-steps-item .ant-steps-item-content .ant-steps-item-title),
 :deep(.ant-descriptions-item-label),
 :deep(.ant-descriptions-item-content) {
