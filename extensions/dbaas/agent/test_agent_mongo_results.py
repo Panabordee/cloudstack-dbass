@@ -50,6 +50,12 @@ class MongoResultTests(unittest.TestCase):
         self.assertEqual(row['enabled'], 'true')
         self.assertEqual(json.loads(row['nested']), {'value': False})
 
+    def test_unicode_wire_encoding_obeys_byte_cap(self):
+        result, _ = self.query([{'value': '\u0e01' * 100}], bytes_limit=500)
+        self.assertLessEqual(len(result[3].encode('utf-8')), 500)
+        self.assertEqual(result[1], 0)
+        self.assertTrue(result[2])
+
     def test_preview_uses_same_byte_cap(self):
         client, database = MagicMock(), MagicMock()
         database.__getitem__.return_value.find.return_value.skip.return_value.limit.return_value = iter([
