@@ -347,7 +347,7 @@ export default {
 :deep(.ant-descriptions-item-label),
 :deep(.ant-descriptions-item-content) {
   color: inherit;
-  background: transparent;
+  background: transparent !important;
 }
   .form-layout {
     width: 80vw;
