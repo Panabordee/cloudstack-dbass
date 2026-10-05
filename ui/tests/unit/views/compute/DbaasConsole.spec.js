@@ -52,3 +52,25 @@ it('refuses a missing or invalid parameter instead of sending literal n', () => 
     expect(DbaasConsole.methods.columnType({ type: 'VARCHAR(n)', size })).toBe('')
   }
 })
+
+it.each(['ctrlKey', 'metaKey'])('runs the editor with %s + Enter', modifier => {
+  const vm = { runQuery: jest.fn() }
+  const event = { key: 'Enter', [modifier]: true, preventDefault: jest.fn() }
+  DbaasConsole.methods.onQueryKeydown.call(vm, event)
+  expect(event.preventDefault).toHaveBeenCalledTimes(1)
+  expect(vm.runQuery).toHaveBeenCalledTimes(1)
+})
+
+it('keeps plain Enter and IME composition in the editor', () => {
+  const vm = { runQuery: jest.fn() }
+  for (const event of [{ key: 'Enter' }, { key: 'Enter', ctrlKey: true, isComposing: true }]) {
+    DbaasConsole.methods.onQueryKeydown.call(vm, event)
+  }
+  expect(vm.runQuery).not.toHaveBeenCalled()
+})
+
+it.each([{ sqlText: '  ', submitting: false }, { sqlText: 'SELECT 1', submitting: true }])('does not queue an empty query or duplicate in-flight query', state => {
+  const vm = { ...state, submitJob: jest.fn() }
+  DbaasConsole.methods.runQuery.call(vm)
+  expect(vm.submitJob).not.toHaveBeenCalled()
+})

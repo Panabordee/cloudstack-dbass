@@ -108,7 +108,7 @@
                           type="info"
                           show-icon
                           :message="$t('message.dbaas.select.engine.first')" />
-                        <p v-if="form.engine && availableOfferings.length === 0" class="offering-warning">
+                        <p v-if="form.engine && availableOfferings.length === 0" class="offering-warning" :style="{ color: $store.getters.darkMode ? '#ff7875' : '#cf1322' }">
                           {{ $t('message.dbaas.no.offering.fits', { mb: selectedEngineMinMemory }) }}
                         </p>
                       </a-form-item>
@@ -996,7 +996,6 @@ export default {
 
   .offering-warning {
     margin-top: 4px;
-    color: #cf1322;
   }
 
   .steps {
@@ -1014,7 +1013,7 @@ export default {
   }
 
   .progress-sub {
-    color: rgba(0, 0, 0, 0.45);
+    color: inherit;
   }
 
   // No word-break here: labels wrap at spaces; only the value spans
@@ -1032,13 +1031,13 @@ export default {
     display: block;
     margin-top: 4px;
     font-size: 12px;
-    color: rgba(0, 0, 0, 0.45);
+    color: inherit;
     line-height: 1.4;
   }
 
   .connect-hint {
     margin-top: 4px;
-    color: rgba(0, 0, 0, 0.45);
+    color: inherit;
     word-break: break-all;
   }
 
@@ -1064,7 +1063,8 @@ export default {
     }
 
     .card-footer {
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid;
+      border-top-color: inherit;
       flex-shrink: 0;
     }
 
@@ -1074,7 +1074,7 @@ export default {
 
     .resource-detail-item__details, .resource-detail-item {
       a {
-        color: rgba(0, 0, 0, 0.65);
+        color: inherit;
         cursor: default;
         pointer-events: none;
       }

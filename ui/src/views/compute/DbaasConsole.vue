@@ -4,7 +4,7 @@
      render the result once it arrives. Results are delivered exactly once per
      fetch -- this component owns the single fetch. -->
 <template>
-  <a-spin :spinning="loading || submitting">
+  <a-spin :spinning="loading || submitting" class="database-console" :class="{ 'database-console-dark': $store.getters.darkMode }">
     <!-- An instance can hold several databases (createDatabase may be called
          on it repeatedly). Every console command below runs against whichever
          one is selected here; with one database this is just a label. -->
@@ -23,7 +23,7 @@
     </div>
     <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
     <a-tabs v-model:activeKey="activeTab" destroyInactiveTabPane>
-      <a-tab-pane key="tables" :tab="$t('label.dbaas.console.tables.tab')">
+      <a-tab-pane key="tables" :tab="isMongo ? 'Collections' : $t('label.dbaas.console.tables.tab')">
         <div class="console-toolbar">
           <a-button :loading="submitting" @click="listTables">
             {{ $t('label.dbaas.console.refresh') }}
@@ -99,30 +99,43 @@
             class="console-card" />
         </a-card>
       </a-tab-pane>
-      <a-tab-pane key="sql" :tab="$t('label.dbaas.console.sql.tab')">
+      <a-tab-pane key="sql" :tab="isMongo ? 'Query' : $t('label.dbaas.console.sql.tab')">
         <a-alert
           v-if="isMongo"
           type="info"
           show-icon
           :message="$t('message.dbaas.console.sql.mongo.hint')"
           class="console-note" />
-        <a-form layout="vertical">
-          <a-form-item :label="$t(sqlEditorLabel)">
-            <a-textarea
-              v-model:value="sqlText"
-              :rows="sqlRows"
-              class="sql-editor"
-              :placeholder="$t(sqlEditorLabel)" />
-          </a-form-item>
-          <a-form-item>
+        <div class="query-workspace">
+          <div class="query-toolbar">
+            <strong>{{ isMongo ? 'Query editor' : 'SQL editor' }}</strong>
+            <div class="query-controls">
+              <span class="query-shortcut">Ctrl / ⌘ + Enter</span>
+              <a-button type="primary" :loading="submitting" :disabled="!sqlText.trim() || submitting" @click="runQuery">
+                <template #icon><play-circle-outlined /></template>
+                {{ $t('label.dbaas.console.run') }}
+              </a-button>
+            </div>
+          </div>
+          <a-textarea
+            v-model:value="sqlText"
+            :rows="sqlRows"
+            class="sql-editor"
+            :aria-label="$t(sqlEditorLabel)"
+            :placeholder="isMongo ? '{ &quot;collection&quot;: &quot;name&quot;, &quot;op&quot;: &quot;find&quot;, &quot;filter&quot;: {}, &quot;limit&quot;: 100 }' : 'SELECT * FROM your_table LIMIT 100;'"
+            spellcheck="false"
+            @keydown="onQueryKeydown" />
+          <div class="query-options">
             <a-checkbox v-model:checked="writeMode">
               Allow writes
             </a-checkbox>
-          </a-form-item>
-          <a-button type="primary" :loading="submitting" @click="runQuery">
-            {{ $t('label.dbaas.console.run') }}
-          </a-button>
-        </a-form>
+            <a-tag :color="writeMode ? 'orange' : 'blue'">{{ writeMode ? 'Write enabled' : 'Read only' }}</a-tag>
+          </div>
+        </div>
+        <div v-if="resultShown" class="query-results-heading">
+          <strong>Results</strong>
+          <span>{{ resultRows.length }} rows</span>
+        </div>
         <a-alert
           v-if="truncated"
           type="warning"
@@ -597,7 +610,13 @@ export default {
         this.activeTab = 'sql'
       }).catch(error => this.fail(error))
     },
+    onQueryKeydown (event) {
+      if (event.key !== 'Enter' || (!event.ctrlKey && !event.metaKey) || event.isComposing) return
+      event.preventDefault()
+      this.runQuery()
+    },
     runQuery () {
+      if (this.submitting || !this.sqlText.trim()) return
       this.describedTable = null
       this.resultRows = []
       this.resultColumns = []
@@ -617,6 +636,16 @@ export default {
 </script>
 
 <style scoped>
+.database-console {
+  --query-border: #d9e1ea;
+  --query-editor-bg: #fafbfd;
+  --query-muted: #526174;
+}
+.database-console-dark {
+  --query-border: #434343;
+  --query-editor-bg: #171c24;
+  --query-muted: #b6c2d2;
+}
 .database-picker {
   display: flex;
   align-items: center;
@@ -624,7 +653,7 @@ export default {
   margin-bottom: 8px;
 }
 .database-picker-label {
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--query-muted);
 }
 .console-note {
   margin: 8px 0;
@@ -638,7 +667,45 @@ export default {
 .sql-editor {
   resize: vertical;
   min-height: 120px;
-  font-family: monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  padding: 16px;
+  border-radius: 0;
+  border-left: 0;
+  border-right: 0;
+  background: var(--query-editor-bg);
+}
+.query-workspace {
+  border: 1px solid var(--query-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.query-toolbar,
+.query-options,
+.query-results-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+}
+.query-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.query-shortcut,
+.query-results-heading span {
+  color: var(--query-muted);
+  font-size: 12px;
+}
+.query-results-heading {
+  padding: 16px 0 0;
+}
+@media (max-width: 480px) {
+  .query-shortcut { display: none; }
 }
 /* Every table in here renders tenant data of unknown width. Without this a
    wide result pushes the panel out instead of scrolling inside it. */

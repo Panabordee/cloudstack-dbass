@@ -401,7 +401,7 @@ export default {
 
   .connect-hint {
     margin-top: 4px;
-    color: rgba(0, 0, 0, 0.45);
+    color: inherit;
     word-break: break-all;
   }
 
