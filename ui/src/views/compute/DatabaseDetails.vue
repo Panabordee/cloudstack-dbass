@@ -127,7 +127,7 @@ export default {
   methods: {
     can (api) { return !!this.$store.getters.apis?.[api] },
     openDatabase (name) { this.openedDatabase = name; this.tab = 'query' },
-    closeAction () { this.action = ''; this.fetchData() },
+    closeAction () { this.action = '' },
     async fetchData () {
       const id = this.$route.params.id
       this.loading = true
