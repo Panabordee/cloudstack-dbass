@@ -221,6 +221,14 @@ fill="currentColor"
                 {{ $t('label.forgot.password') }}
               </router-link>
             </a-col>
+            <a-col>
+              <a
+                href="https://iam.cloud.ce-nacl.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="account-portal-link"
+              >Account portal</a>
+            </a-col>
           </a-row>
           <div class="content" v-if="socialLogin && oauthButtons.length > 0">
             <p class="or">{{ $t('label.or.sign.in.with') }}</p>
@@ -1110,6 +1118,17 @@ html, body {
     }
   }
 
+  .account-portal-link {
+    color: #1890ff;
+    font-weight: 500;
+    transition: color 0.3s ease;
+
+    &:hover {
+      color: #40a9ff;
+      text-decoration: underline;
+    }
+  }
+
   .oauth-section {
     margin-top: 16px;
     margin-bottom: 4px;
@@ -1200,6 +1219,14 @@ html, body {
   }
 
   .forgot-password-link {
+    color: #40a9ff;
+
+    &:hover {
+      color: #69c0ff;
+    }
+  }
+
+  .account-portal-link {
     color: #40a9ff;
 
     &:hover {

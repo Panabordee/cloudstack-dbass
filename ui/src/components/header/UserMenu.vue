@@ -18,11 +18,11 @@
 <template>
   <div class="user-menu">
     <span class="vpn-menu">
-      <a-button type="default" class="vpn-button" href="https://vpn.ce-nacl.com" target="_blank">
+      <a-button type="default" class="vpn-button" href="https://public-storage.ce-nacl.com/cloud/NaCl%20OpenVPN.ovpn" target="_blank">
         <DownloadOutlined />
         <span class="vpn-label">VPN Profile</span>
       </a-button>
-      <a-button type="text" size="small" class="vpn-info-button" href="#">
+      <a-button type="text" size="small" class="vpn-info-button" href="https://docs.cloud.ce-nacl.com/vpn-setup/" target="_blank">
       <a-tooltip title="To enable all functionalities, VPN connection is required. Click here for setup instructions.">
         <InfoCircleOutlined :style="{ fontSize: '14px' }" />
       </a-tooltip>
@@ -36,11 +36,13 @@
     <header-notice class="action"/>
     <label class="user-menu-server-info action" v-if="$config.multipleServer">
       <database-outlined />
-      {{ server.name || server.apiBase || 'Local-Server' }}
+      <span class="user-menu-label-text" :title="server.name || server.apiBase || 'Local-Server'">
+        {{ server.name || server.apiBase || 'Local-Server' }}
+      </span>
     </label>
     <label class="user-menu-domain-info action" v-if="domainDisplayname">
       <project-outlined />
-      {{ domainDisplayname }}
+      <span class="user-menu-domain-text" :title="domainDisplayname">{{ domainDisplayname }}</span>
     </label>
     <a-dropdown>
       <span class="user-menu-dropdown action">
@@ -53,13 +55,13 @@
         <a-avatar v-else class="user-menu-avatar avatar" size="small" :style="{ backgroundColor: $config.theme['@primary-color'], color: 'white' }">
           <template #icon><user-outlined /></template>
         </a-avatar>
-        <span>{{ nickname() }}</span>
+        <span class="user-menu-nickname">{{ nickname() }}</span>
       </span>
       <template #overlay>
         <a-menu class="user-menu-wrapper" @click="handleClickMenu">
           <a-menu-item v-if="domainDisplayname" class="user-menu-item" key="domain" disabled>
             <ProjectOutlined class="user-menu-item-icon" />
-            <span class="user-menu-item-name">{{ $t('label.domain') }}: {{ domainDisplayname }}</span>
+            <span class="user-menu-item-name" :title="`${$t('label.domain')}: ${domainDisplayname}`">{{ $t('label.domain') }}: {{ domainDisplayname }}</span>
           </a-menu-item>
           <a-menu-item class="user-menu-item" key="profile">
             <UserOutlined class="user-menu-item-icon" />
@@ -221,39 +223,84 @@ export default {
 
 <style lang="less" scoped>
 .user-menu {
-  &-wrapper {
-    padding: 4px 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  max-width: 100%;
+  min-width: 0;
+
+  .action {
+    flex-shrink: 0;
+    min-width: 0;
   }
 
-  &-item {
-    width: auto;
-  }
+  &-server-info,
+  &-domain-info {
+    flex-shrink: 1;
+    overflow: hidden;
 
-  &-item-name {
-    user-select: none;
-    margin-left: 8px;
-  }
-
-  &-item-icon i {
-    min-width: 12px;
-    margin-right: 8px;
+    .anticon {
+      flex-shrink: 0;
+      margin-right: 5px;
+    }
   }
 
   &-server-info {
-    .anticon {
-      margin-right: 5px;
-    }
+    max-width: clamp(80px, 16vw, 200px);
   }
 
   &-domain-info {
-    .anticon {
-      margin-right: 5px;
-    }
     color: inherit;
     cursor: default;
+    max-width: clamp(90px, 18vw, 220px);
   }
 
+  &-label-text,
+  &-domain-text {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &-nickname {
+    display: inline-block;
+    max-width: clamp(80px, 14vw, 180px);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
 }
+
+.user-menu-wrapper {
+  padding: 4px 0;
+  min-width: 200px;
+  max-width: ~"min(360px, 90vw)";
+}
+
+.user-menu-item {
+  width: auto;
+}
+
+.user-menu-item-name {
+  user-select: none;
+  margin-left: 8px;
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.user-menu-item-icon i {
+  min-width: 12px;
+  margin-right: 8px;
+}
+
 .vpn-menu {
   display: flex;
   align-items: center;
@@ -265,5 +312,35 @@ export default {
 
 .vpn-button:hover {
   cursor: pointer !important;
+}
+
+@media (max-width: 1200px) {
+  .user-menu .user-menu-domain-info {
+    max-width: 160px;
+  }
+}
+
+@media (max-width: 992px) {
+  .user-menu .user-menu-domain-info {
+    max-width: 120px;
+  }
+
+  .user-menu .user-menu-server-info {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .user-menu .user-menu-domain-info {
+    max-width: 90px;
+  }
+
+  .user-menu .user-menu-nickname {
+    display: none;
+  }
+
+  .vpn-label {
+    display: none;
+  }
 }
 </style>
