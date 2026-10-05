@@ -159,3 +159,11 @@ export default {
   }
 }
 </script>
+
+<style scoped>
+:deep(.ant-descriptions-item-label),
+:deep(.ant-descriptions-item-content) {
+  color: inherit;
+  background: transparent;
+}
+</style>
