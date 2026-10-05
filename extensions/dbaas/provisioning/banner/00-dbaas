@@ -8,14 +8,20 @@
 [ -r /etc/dbaas-engine ] || exit 0
 . /etc/dbaas-engine
 
-cat <<BANNER
+cat <<'BANNER'
 
-=== DBaaS Instance: ${DBAAS_ENGINE_NAME} ===
-OS login          : the username/key or password set when this instance was deployed
-Database engine   : ${DBAAS_ENGINE_NAME}, listening on 0.0.0.0:${DBAAS_ENGINE_PORT}
-Database accounts : created through the CloudStack "Create Database" action
-Lost a password?  : use "Reset Database Password" on this instance in CloudStack
+   ____    ___    _
+  / ___|  / _ \  | |
+  \___ \ | | | | | |
+   ___) || |_| | | |___
+  |____/  \__\_\ |_____|
 
-This instance is managed. Do not create database users by hand.
+  DATABASE SERVICE
+
+BANNER
+printf '  Engine  %s\n  Port    %s\n\n' "${DBAAS_ENGINE_NAME}" "${DBAAS_ENGINE_PORT}"
+cat <<'BANNER'
+  Query and connection details: CloudStack > Database
+  Password reset: More > Reset Database Password
 
 BANNER

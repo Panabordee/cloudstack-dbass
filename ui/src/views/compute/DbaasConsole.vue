@@ -290,7 +290,7 @@ export default {
         { title: '', key: 'remove', width: 50 }
       ],
       sqlText: '',
-      sqlRows: 8,
+      sqlRows: 5,
       writeMode: false,
       jobError: '',
       truncated: false,
