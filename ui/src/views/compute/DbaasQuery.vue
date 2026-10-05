@@ -50,8 +50,7 @@
           type="info"
           show-icon
           class="connect-note"
-          :message="$t('message.dbaas.query.intro')"
-          :description="$t('message.dbaas.query.access')" />
+          :message="$t('message.dbaas.query.intro')" />
         <a-spin :spinning="loading">
           <a-form layout="vertical" :model="form">
             <a-form-item :label="$t('label.dbaas.query.instance')" required>
@@ -145,6 +144,7 @@ export default {
     return {
       loading: false,
       databasesLoading: false,
+      databaseRequest: 0,
       connected: false,
       connectError: '',
       instances: [],
@@ -189,8 +189,10 @@ export default {
     fetchEngines () {
       return getAPI('listDbaasEngines').then(json => {
         this.engines = (json.listdbaasenginesresponse || {}).dbaasengine || []
+        this.form.engineType = this.engineTypeOf(this.selectedInstance.templatename)
       }).catch(() => {
         this.engines = []
+        this.form.engineType = ''
       })
     },
     fetchInstances () {
@@ -206,8 +208,11 @@ export default {
       })
     },
     onInstanceChange () {
+      const request = ++this.databaseRequest
       this.form.database = undefined
       this.databases = []
+      this.databasesLoading = false
+      this.connectError = ''
       const vm = this.selectedInstance
       // No fallback to the previous value: falling back here meant
       // switching to an instance whose engine could not be looked up (e.g.
@@ -219,16 +224,19 @@ export default {
         return
       }
       this.databasesLoading = true
-      getAPI('listDbaasDatabases', { virtualmachineid: vm.id }).then(json => {
+      return getAPI('listDbaasDatabases', { virtualmachineid: vm.id }).then(json => {
+        if (request !== this.databaseRequest) return
         const list = (json.listdbaasdatabasesresponse || {}).dbaasdatabase || []
         this.databases = list.filter(d => !!d.database)
         if (this.databases.length === 1) {
           this.form.database = this.databases[0].database
         }
-      }).catch(() => {
+      }).catch(error => {
+        if (request !== this.databaseRequest) return
         this.databases = []
+        this.connectError = error?.message || String(error)
       }).finally(() => {
-        this.databasesLoading = false
+        if (request === this.databaseRequest) this.databasesLoading = false
       })
     },
     // Opening the editor is not itself a privileged step -- every command it
