@@ -394,7 +394,6 @@ public class QueryManagerImpl extends MutualExclusiveIdsManagerBase implements Q
     @Inject
     protected LaunchPermissionDao launchPermissionDao;
 
-    @Inject
     RoleService roleService;
 
     @Inject

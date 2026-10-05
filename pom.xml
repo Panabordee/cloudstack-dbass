@@ -64,7 +64,7 @@
         <cs.jdk.version>11</cs.jdk.version>
         <cs.target.dir>target</cs.target.dir>
         <cs.replace.properties>build/replace.properties</cs.replace.properties>
-        <argLine>-Djava.security.egd=file:/dev/./urandom -noverify -Djdk.attach.allowAttachSelf=true --add-opens=java.base/java.lang=ALL-UNNAMED --add-exports=java.base/sun.security.x509=ALL-UNNAMED --add-exports=java.base/sun.security.provider=ALL-UNNAMED --add-opens=java.base/javax.net.ssl=ALL-UNNAMED -javaagent:${settings.localRepository}/org/mockito/mockito-core/${cs.mockito.version}/mockito-core-${cs.mockito.version}.jar</argLine>
+        <argLine>-Djava.security.egd=file:/dev/./urandom -noverify -Djdk.attach.allowAttachSelf=true --add-opens=java.base/java.lang=ALL-UNNAMED --add-exports=java.base/sun.security.x509=ALL-UNNAMED --add-exports=java.base/sun.security.provider=ALL-UNNAMED --add-opens=java.base/javax.net.ssl=ALL-UNNAMED</argLine>
 
         <!-- Plugins versions -->
         <cs.antrun-plugin.version>1.8</cs.antrun-plugin.version>
@@ -1236,16 +1236,6 @@
                     <version>${cs.surefire-plugin.version}</version>
                     <configuration>
                         <useSystemClassLoader>false</useSystemClassLoader>
-                        <!-- The project-wide argLine property (JDK module
-                             opens, java.security.egd, and above all
-                             jdk.attach.allowAttachSelf) was declared but
-                             never referenced, so surefire's forked JVM ran
-                             without it. Mockito 5's inline mock maker needs
-                             self-attach, and every test suite that touches
-                             a mock failed with "Could not initialize inline
-                             Byte Buddy mock maker" (NetUtilsTest 101 of 101
-                             and friends). -->
-                        <argLine>${argLine}</argLine>
                     </configuration>
                 </plugin>
                 <plugin>
