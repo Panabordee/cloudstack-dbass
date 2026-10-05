@@ -29,7 +29,7 @@
           <a-tag color="blue">{{ engineLabel }}</a-tag>
           <status :text="resource.state" displayText />
           <a-descriptions :column="{ xs: 1, sm: 2, lg: 3 }" style="margin-top: 20px">
-            <a-descriptions-item label="Endpoint"><a-typography-text :copyable="{ text: endpoint }">{{ endpoint }}</a-typography-text></a-descriptions-item>
+            <a-descriptions-item label="Endpoint">{{ endpoint }}</a-descriptions-item>
             <a-descriptions-item label="Databases">{{ databases.length }}</a-descriptions-item>
           </a-descriptions>
           <a-space wrap>
