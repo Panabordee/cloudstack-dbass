@@ -242,8 +242,7 @@ def rows_from_mongo_cursor(cursor, row_limit, bytes_limit):
             return str(value)
         next_rows = [[cell(item.get(column, "")) for column in next_columns]
                      for item in candidate]
-        size = len(json.dumps({'columns': next_columns, 'rows': next_rows},
-                              ensure_ascii=False).encode('utf-8'))
+        size = len(json.dumps({'columns': next_columns, 'rows': next_rows}).encode('utf-8'))
         if size > bytes_limit:
             truncated = True
             break
