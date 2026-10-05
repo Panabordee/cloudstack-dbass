@@ -8,6 +8,10 @@
 # the MySQL build (Debian's mariadb-server package, not MySQL's own).
 set -euo pipefail
 
+# Prefer the native client; the legacy alias adds warnings to verification output.
+client=mariadb
+command -v mariadb >/dev/null 2>&1 || client=mysql
+
 payload=$(cat)
 db_name=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin)["db_name"])')
 db_user=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin)["db_user"])')
@@ -24,14 +28,14 @@ done
 # postgresql.sh/mongodb.sh: CREATE USER IF NOT EXISTS silently skipped
 # creation on a repeat request but still reported ok with a password that
 # was never applied.
-USER_EXISTS=$(mysql --protocol=socket -uroot -N -B -e \
+USER_EXISTS=$("$client" --protocol=socket -uroot -N -B -e \
   "SELECT COUNT(*) FROM mysql.user WHERE user='${db_user}' AND host='%'")
 if [[ "$(echo "$USER_EXISTS" | tr -d '[:space:]')" != "0" ]]; then
   echo "user already exists: ${db_user}@%" >&2
   exit 1
 fi
 
-mysql --protocol=socket -uroot <<SQL
+"$client" --protocol=socket -uroot <<SQL
 CREATE DATABASE IF NOT EXISTS \`${db_name}\`;
 CREATE USER '${db_user}'@'%' IDENTIFIED BY '${db_password}';
 GRANT ALL PRIVILEGES ON \`${db_name}\`.* TO '${db_user}'@'%';
@@ -44,7 +48,7 @@ SQL
 db_user_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_user_ro",""))')
 db_password_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_password_ro",""))')
 if [[ -n "$db_user_ro" && -n "$db_password_ro" ]]; then
-  mysql --protocol=socket -uroot <<SQL
+  "$client" --protocol=socket -uroot <<SQL
 CREATE USER IF NOT EXISTS '${db_user_ro}'@'%' IDENTIFIED BY '${db_password_ro}';
 GRANT SELECT ON \`${db_name}\`.* TO '${db_user_ro}'@'%';
 FLUSH PRIVILEGES;
@@ -96,7 +100,7 @@ fi
 # print "Using a password on the command line interface can be insecure" on
 # stderr, which 2>&1 folds into VERIFY_OUTPUT and breaks the comparison below,
 # and it would also expose the password in `ps` on the VM.
-VERIFY_OUTPUT=$(MYSQL_PWD="${db_password}" mysql -h127.0.0.1 -u"${db_user}" "${db_name}" -N -B -e "SELECT 1" 2>&1) \
+VERIFY_OUTPUT=$(MYSQL_PWD="${db_password}" "$client" -h127.0.0.1 -u"${db_user}" "${db_name}" -N -B -e "SELECT 1" 2>&1) \
   || { echo "post-create login verification failed: ${VERIFY_OUTPUT}" >&2; exit 1; }
 
 if [[ "$(echo "$VERIFY_OUTPUT" | tr -d '[:space:]')" != "1" ]]; then
