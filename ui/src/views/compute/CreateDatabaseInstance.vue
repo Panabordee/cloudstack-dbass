@@ -16,7 +16,7 @@
 // under the License.
 
 <template>
-  <div class="database-wizard">
+  <div class="database-wizard" :class="{ 'database-wizard-dark': $store.getters.darkMode }">
     <a-row :gutter="12">
       <a-col :md="24" :lg="step === 'form' ? 17 : 24">
         <a-card :bordered="true" :title="$t('label.create.database')">
@@ -962,10 +962,16 @@ export default {
 </script>
 
 <style scoped lang="less">
+.database-wizard {
+  --database-wizard-text: rgba(0, 0, 0, 0.65);
+}
+.database-wizard-dark {
+  --database-wizard-text: rgba(255, 255, 255, 0.65);
+}
 :deep(.ant-steps-item-title),
 :deep(.ant-descriptions-item-label),
 :deep(.ant-descriptions-item-content) {
-  color: inherit !important;
+  color: var(--database-wizard-text) !important;
 }
 :deep(.ant-descriptions-item-label) {
   background: transparent !important;
@@ -1017,7 +1023,7 @@ export default {
   }
 
   .progress-sub {
-    color: inherit !important;
+    color: var(--database-wizard-text) !important;
   }
 
   // No word-break here: labels wrap at spaces; only the value spans
@@ -1035,13 +1041,13 @@ export default {
     display: block;
     margin-top: 4px;
     font-size: 12px;
-    color: inherit !important;
+    color: var(--database-wizard-text) !important;
     line-height: 1.4;
   }
 
   .connect-hint {
     margin-top: 4px;
-    color: inherit !important;
+    color: var(--database-wizard-text) !important;
     word-break: break-all;
   }
 
@@ -1078,7 +1084,7 @@ export default {
 
     .resource-detail-item__details, .resource-detail-item {
       a {
-        color: inherit !important;
+        color: var(--database-wizard-text) !important;
         cursor: default;
         pointer-events: none;
       }
