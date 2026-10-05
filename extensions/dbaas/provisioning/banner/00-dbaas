@@ -5,8 +5,19 @@
 # buried under the stock distro output; running first here is what actually
 # puts this in front of the user. /etc/motd is written too, for anything
 # that reads it directly.
-[ -r /etc/dbaas-engine ] || exit 0
-. /etc/dbaas-engine
+if [ -r /etc/dbaas-engine ]; then
+  . /etc/dbaas-engine
+elif [ -r /opt/dbaas/engine ]; then
+  case "$(cat /opt/dbaas/engine)" in
+    mysql|mysql.sh) DBAAS_ENGINE_NAME=MySQL; DBAAS_ENGINE_PORT=3306 ;;
+    mariadb|mariadb.sh) DBAAS_ENGINE_NAME=MariaDB; DBAAS_ENGINE_PORT=3306 ;;
+    postgresql|postgresql.sh) DBAAS_ENGINE_NAME=PostgreSQL; DBAAS_ENGINE_PORT=5432 ;;
+    mongodb|mongodb.sh) DBAAS_ENGINE_NAME=MongoDB; DBAAS_ENGINE_PORT=27017 ;;
+    *) exit 0 ;;
+  esac
+else
+  exit 0
+fi
 
 cat <<'BANNER'
 
