@@ -27,33 +27,35 @@
         <a-card class="row-element">
           <h2><database-outlined /> {{ resource.displayname || resource.name }}</h2>
           <a-tag color="blue">{{ engineLabel }}</a-tag>
-          <a-tag>{{ $t('label.database') }}</a-tag>
           <status :text="resource.state" displayText />
           <a-descriptions :column="{ xs: 1, sm: 2, lg: 3 }" style="margin-top: 20px">
-            <a-descriptions-item label="Database engine">{{ engineLabel }}</a-descriptions-item>
-            <a-descriptions-item label="Connection endpoint">{{ endpoint }}</a-descriptions-item>
+            <a-descriptions-item label="Endpoint"><a-typography-text :copyable="{ text: endpoint }">{{ endpoint }}</a-typography-text></a-descriptions-item>
             <a-descriptions-item label="Databases">{{ databases.length }}</a-descriptions-item>
-            <a-descriptions-item label="Account">{{ resource.account }}</a-descriptions-item>
-            <a-descriptions-item label="Memory">{{ resource.memory }} MB</a-descriptions-item>
-            <a-descriptions-item label="Database service ID">{{ resource.id }}</a-descriptions-item>
           </a-descriptions>
           <a-space wrap>
-            <a-button v-if="can('createDatabase')" :disabled="!available" @click="action = 'create'">{{ $t('label.create.database') }}</a-button>
-            <a-button v-if="can('getDatabasePassword')" :disabled="!available" @click="action = 'password'">{{ $t('label.show.database.password') }}</a-button>
-            <a-button v-if="can('resetDatabasePassword')" :disabled="resource.state !== 'Running'" @click="action = 'reset'">{{ $t('label.reset.database.password') }}</a-button>
+            <a-button v-if="can('createDatabase')" type="primary" :disabled="!available" @click="action = 'create'">{{ $t('label.create.database') }}</a-button>
+            <a-button v-if="can('getDatabasePassword')" :disabled="!available" @click="action = 'password'">Connection</a-button>
+            <a-dropdown v-if="can('resetDatabasePassword')">
+              <a-button aria-label="More database actions"><more-outlined /></a-button>
+              <template #overlay>
+                <a-menu @click="action = 'reset'">
+                  <a-menu-item key="reset" :disabled="resource.state !== 'Running'">{{ $t('label.reset.database.password') }}</a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
           </a-space>
         </a-card>
         <a-card class="row-element">
           <a-tabs v-model:activeKey="tab">
-            <a-tab-pane key="query" :tab="$t('label.dbaas.query')">
+            <a-tab-pane key="query" tab="Query">
               <dbaas-console v-if="resource.state === 'Running' && can('listDbaasTables')" :key="resource.id + openedDatabase" :resource="resource" :initial-database="openedDatabase" initial-tab="sql" />
-              <a-alert v-else type="info" show-icon message="Query is available when this database service is Running and your account has query permission." />
+              <a-alert v-else type="info" show-icon :message="resource.state !== 'Running' ? 'Start the database to run queries.' : 'Query access is unavailable.'" />
             </a-tab-pane>
             <a-tab-pane key="databases" tab="Databases">
               <a-table :columns="columns" :data-source="databases" row-key="database" :pagination="false">
                 <template #bodyCell="{ column, record }">
                   <template v-if="column.key === 'open'">
-                    <a-button :disabled="resource.state !== 'Running' || !can('listDbaasTables')" @click="openDatabase(record.database)">{{ $t('label.dbaas.query') }}</a-button>
+                    <a-button type="link" :disabled="resource.state !== 'Running' || !can('listDbaasTables')" @click="openDatabase(record.database)">Open query</a-button>
                   </template>
                 </template>
               </a-table>
@@ -94,7 +96,7 @@ export default {
       openedDatabase: '',
       columns: [
         { title: 'Database', dataIndex: 'database', key: 'database' },
-        { title: 'Provisioning status', dataIndex: 'status', key: 'status' },
+        { title: 'Status', dataIndex: 'status', key: 'status' },
         { title: 'Query', key: 'open' }
       ]
     }
@@ -115,7 +117,7 @@ export default {
     },
     available () { return ['Running', 'Stopped'].includes(this.resource.state) },
     actionTitle () {
-      return this.$t(({ create: 'label.create.database', password: 'label.show.database.password', reset: 'label.reset.database.password' })[this.action] || 'label.database')
+      return this.action === 'password' ? 'Connection' : this.$t(({ create: 'label.create.database', reset: 'label.reset.database.password' })[this.action] || 'label.database')
     }
   },
   watch: {

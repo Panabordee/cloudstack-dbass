@@ -116,7 +116,7 @@
           </a-form-item>
           <a-form-item>
             <a-checkbox v-model:checked="writeMode">
-              {{ $t('label.dbaas.console.write.mode') }}
+              Allow writes
             </a-checkbox>
           </a-form-item>
           <a-button type="primary" :loading="submitting" @click="runQuery">
@@ -126,7 +126,7 @@
         <a-alert
           v-if="truncated"
           type="warning"
-show-icon
+          show-icon
           :message="$t('label.dbaas.console.truncated')"
           class="console-note" />
         <a-table
@@ -141,7 +141,7 @@ show-icon
         <a-alert
           v-else-if="resultShown"
           type="success"
-show-icon
+          show-icon
           :message="$t('label.dbaas.console.sql.no.rows')"
           class="console-note" />
       </a-tab-pane>

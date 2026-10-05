@@ -89,7 +89,7 @@
         class="database-instances-table"
         size="middle"
         :pagination="false"
-        :scroll="{ x: 900 }"
+        :scroll="{ x: 650 }"
         :columns="columns"
         rowKey="id">
         <template #bodyCell="{ column, record }">
@@ -103,13 +103,16 @@
           <template v-else-if="column.key === 'engine'">
             {{ engineLabel(record.templatename) }}
           </template>
+          <template v-else-if="column.key === 'ipaddress'">
+            {{ connectionHost(record) }}
+          </template>
           <template v-else-if="column.key === 'actions'">
             <a-button
               v-if="canDestroy"
               type="text"
               danger
               size="small"
-              :title="$t('label.action.destroy.instance')"
+              title="Delete database service"
               @click="confirmDestroy(record)">
               <template #icon><delete-outlined /></template>
             </a-button>
@@ -226,11 +229,6 @@ export default {
         { key: 'state', title: this.$t('label.state'), dataIndex: 'state' },
         { key: 'ipaddress', title: this.$t('label.ipaddress'), dataIndex: 'ipaddress' },
         { key: 'engine', title: this.$t('label.engine'), dataIndex: 'templatename' },
-        // label.serviceoffering does not exist in the locale files, so the
-        // column header rendered as the raw key. label.serviceofferingname is
-        // the one that is actually defined ("Compute Offering").
-        { key: 'serviceofferingname', title: this.$t('label.serviceofferingname'), dataIndex: 'serviceofferingname' },
-        { key: 'zonename', title: this.$t('label.zonename'), dataIndex: 'zonename' },
         { key: 'actions', title: this.$t('label.actions'), dataIndex: 'actions', width: 160 }
       ]
     }
@@ -250,6 +248,7 @@ export default {
           record.name,
           record.state,
           record.ipaddress,
+          this.connectionHost(record),
           record.templatename,
           this.engineLabel(record.templatename),
           record.serviceofferingname,
@@ -281,6 +280,9 @@ export default {
     this.fetchData()
   },
   methods: {
+    connectionHost (record) {
+      return this.$config?.dbaas?.connectionHosts?.[record.ipaddress] || record.ipaddress
+    },
     openQuery () {
       this.$router.push({ path: '/databasequery' })
     },
