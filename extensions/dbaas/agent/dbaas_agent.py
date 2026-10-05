@@ -224,6 +224,33 @@ def rows_from_cursor(cursor, row_limit, bytes_limit):
     return columns, rows, truncated
 
 
+def rows_from_mongo_cursor(cursor, row_limit, bytes_limit):
+    documents = []
+    columns, rows = [], []
+    truncated = False
+    for document in cursor:
+        if len(documents) >= row_limit:
+            truncated = True
+            break
+        candidate = documents + [document]
+        next_columns = sorted({key for item in candidate for key in item})
+        def cell(value):
+            if value is None:
+                return None
+            if isinstance(value, (dict, list, bool)):
+                return json.dumps(value, default=str, ensure_ascii=False)
+            return str(value)
+        next_rows = [[cell(item.get(column, "")) for column in next_columns]
+                     for item in candidate]
+        size = len(json.dumps({'columns': next_columns, 'rows': next_rows},
+                              ensure_ascii=False).encode('utf-8'))
+        if size > bytes_limit:
+            truncated = True
+            break
+        documents, columns, rows = candidate, next_columns, next_rows
+    return columns, rows, truncated
+
+
 def run_mongo_job(conf, job, role):
     # mongodb has no SQL, so the console's SQL box carries a small JSON
     # command instead: {"collection": "...", "op": "find"|"insert"|"update"|
@@ -255,15 +282,17 @@ def run_mongo_job(conf, job, role):
         if not IDENTIFIER_RE.match(collection):
             return "failed", 0, False, "", "invalid or missing 'collection'"
         op = spec.get("op", "find")
+        if op == "find":
+            limit = min(int(spec.get("limit", 100)), int(row_limit))
+            bytes_limit = int(job.get("bytes_limit", 1048576))
+            if limit <= 0 or bytes_limit <= 0:
+                return "failed", 0, False, "", "limit and result size must be positive"
         client, database = connect_mongodb(role)
         coll = database[collection]
         if op == "find":
             filt = spec.get("filter", {}) or {}
-            limit = min(int(spec.get("limit", 100)), row_limit)
-            docs = list(coll.find(filt).limit(limit))
-            columns = sorted({key for doc in docs for key in doc.keys()})
-            rows = [[str(doc.get(c, "")) for c in columns] for doc in docs]
-            truncated = len(docs) >= limit
+            cursor = coll.find(filt).limit(limit + 1)
+            columns, rows, truncated = rows_from_mongo_cursor(cursor, limit, bytes_limit)
             return "confirmed", len(rows), truncated, json.dumps({"columns": columns, "rows": rows}), ""
         if not write:
             return "failed", 0, False, "", "op '%s' requires write mode" % op
@@ -575,12 +604,12 @@ def run_table_preview_job(conf, job, role):
             conn.commit()
             return "confirmed", len(rows), truncated, json.dumps({"columns": columns, "rows": rows}), ""
         elif engine == "mongodb":
+            limit = min(limit, int(row_limit))
+            if limit <= 0 or offset < 0 or int(bytes_limit) <= 0:
+                return "failed", 0, False, "", "limit must be positive and offset nonnegative"
             client, database = connect_mongodb(role)
-            cursor = database[table].find().skip(offset).limit(min(limit, row_limit))
-            docs = list(cursor)
-            columns = sorted({key for doc in docs for key in doc.keys()})
-            rows = [[str(doc.get(c, "")) for c in columns] for doc in docs]
-            truncated = len(docs) >= min(limit, row_limit)
+            cursor = database[table].find().skip(offset).limit(limit + 1)
+            columns, rows, truncated = rows_from_mongo_cursor(cursor, limit, int(bytes_limit))
             return "confirmed", len(rows), truncated, json.dumps({"columns": columns, "rows": rows}), ""
         else:
             return "failed", 0, False, "", "unsupported engine"
