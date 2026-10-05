@@ -945,7 +945,14 @@ export default {
       })
     },
     fetchData (params = {}) {
-      if (['deployVirtualMachine', 'usage'].includes(this.$route.name)) {
+      // Navigating to /database must not fetch anything here: the Database
+      // section renders its own component and fetches on its own, and since
+      // createDatabase is a mutating command (not a list* API), callAPI()
+      // would turn this spurious fetch into a POST createDatabase that
+      // fails with "missing parameter virtualmachineid" (HTTP 431).
+      // meta.name covers /database/:id, whose record has no route name.
+      const routeName = this.$route.name || this.$route.meta.name
+      if (['deployVirtualMachine', 'usage', 'database'].includes(routeName)) {
         return
       }
       if (this.routeName !== this.$route.name) {
@@ -1234,6 +1241,15 @@ export default {
         if (!this.items || this.items.length === 0) {
           this.items = []
         }
+        // Section-configured client-side exclusion (e.g. the Instances list
+        // keeps DBaaS instances out of the generic list; they live in the
+        // Database section). Detail views (dataView) are never filtered so a
+        // direct link to a hidden instance still renders. Note the footer
+        // count stays the unfiltered server-side total.
+        const excludePrefix = this.$route.meta.excludeTemplatePrefix
+        if (excludePrefix && !this.dataView && Array.isArray(this.items)) {
+          this.items = this.items.filter(x => !(x.templatename || '').startsWith(excludePrefix))
+        }
         this.itemCount = apiItemCount
 
         if (this.dataView && this.$route.path.includes('/zone/') && 'listVmwareDcs' in this.$store.getters.apis) {
@@ -1359,8 +1375,13 @@ export default {
       if ('action' in this.$route.query) {
         const actionName = this.$route.query.action
         for (const action of this.actions) {
-          if (action.listView && action.api === actionName) {
-            this.execAction(action, false)
+          // An action grouped under a menu is still reachable by name, so a
+          // link that names it opens the same dialog the menu entry does.
+          const match = action.listView && action.api === actionName
+            ? action
+            : (action.subActions || []).find(sub => sub.listView && sub.api === actionName)
+          if (match) {
+            this.execAction(match, false)
             const query = Object.assign({}, this.$route.query)
             delete query.action
             this.$router.replace({ query })

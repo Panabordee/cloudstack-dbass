@@ -1,0 +1,9 @@
+
+=== DBaaS Instance: MongoDB ===
+OS login          : the username/key or password set when this instance was deployed
+Database engine   : MongoDB, listening on 0.0.0.0:27017
+Database accounts : created through the CloudStack "Create Database" action
+Lost a password?  : use "Reset Database Password" on this instance in CloudStack
+
+This instance is managed. Do not create database users by hand.
+

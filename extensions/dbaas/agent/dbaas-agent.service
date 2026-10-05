@@ -1,0 +1,14 @@
+[Unit]
+Description=DBaaS console agent: long-polls the management server for jobs
+ConditionPathExists=/var/lib/dbaas/agent.json
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/dbaas/agent/dbaas_agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

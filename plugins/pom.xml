@@ -97,6 +97,7 @@
         <module>integrations/kubernetes-service</module>
         <module>integrations/reverseproxy</module>
         <module>integrations/veeam-control-service</module>
+        <module>integrations/dbaas</module>
 
         <module>kms</module>
 

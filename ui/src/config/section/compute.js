@@ -22,6 +22,7 @@ import { getAPI, postAPI, getBaseUrl } from '@/api'
 import { getLatestKubernetesIsoParams } from '@/utils/acsrepo'
 import kubernetesIcon from '@/assets/icons/kubernetes.svg?inline'
 import { escapeHtml } from '@/utils/util'
+import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 
 const attachedIsoCount = (record) => (record.isos && record.isos.length) || (record.isoid ? 1 : 0)
 // Server pre-computes the effective cap (cluster-scoped vm.iso.max.count clamped to the
@@ -44,6 +45,11 @@ export default {
       docHelp: 'adminguide/virtual_machines.html',
       permission: ['listVirtualMachinesMetrics'],
       resourceType: 'UserVm',
+      // DBaaS instances live in their own Database section; keeping them out
+      // of the generic Instances list here (client-side filter in
+      // AutogenView). Server-side pagination is unaffected, so a page can
+      // show slightly fewer rows than the page size when one is filtered.
+      excludeTemplatePrefix: DBAAS_TEMPLATE_PREFIX,
       params: () => {
         var params = { details: 'group,nics,secgrp,tmpl,servoff,diskoff,iso,volume,affgrp,backoff' }
         if (store.getters.metrics) {
@@ -425,6 +431,71 @@ export default {
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetUserData')))
         },
         {
+          api: 'createDatabase',
+          icon: 'database-outlined',
+          label: 'label.create.database',
+          message: 'message.desc.create.database',
+          dataView: true,
+          popup: true,
+          // Running or Stopped: config-drive provisioning only reads its
+          // request at boot, so a running instance is stopped and restarted
+          // as part of the call -- the dialog warns about that itself.
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running', 'Stopped'].includes(record.state) &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabase.vue')))
+        },
+        // The in-VM agent this was waiting on exists and is proven on all
+        // four engines (2026-09-09), so the reset is offered again: it
+        // dispatches a password_reset job over the agent transport and only
+        // updates the stored credential once the agent confirms the engine
+        // accepted the new password.
+        {
+          api: 'listDbaasTables',
+          icon: 'console-sql-outlined',
+          label: 'label.dbaas.console',
+          message: 'message.desc.dbaas.console',
+          dataView: true,
+          popup: true,
+          // Running only: every console command is a job the in-VM agent has
+          // to pick up, and it is not polling while the instance is stopped.
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              record.state === 'Running' &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DbaasConsole.vue')))
+        },
+        {
+          api: 'resetDatabasePassword',
+          icon: 'key-outlined',
+          label: 'label.reset.database.password',
+          message: 'message.desc.reset.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              record.state === 'Running' &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ResetDatabasePassword.vue')))
+        },
+        {
+          api: 'getDatabasePassword',
+          icon: 'eye-outlined',
+          label: 'label.show.database.password',
+          dataView: true,
+          popup: true,
+          show: (record) => {
+            return record.hypervisor !== 'External' &&
+              ['Running', 'Stopped'].includes(record.state) &&
+              (record.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)
+          },
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/ShowDatabasePassword.vue')))
+        },
+        {
           api: 'assignVirtualMachine',
           icon: 'user-add-outlined',
           label: 'label.assign.instance.another',
@@ -494,6 +565,42 @@ export default {
           component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DestroyVM.vue')))
         }
       ]
+    },
+    {
+      name: 'database',
+      title: 'label.database',
+      icon: 'database-outlined',
+      // Gated purely on the createDatabase permission, not on any DBaaS
+      // template existing yet -- a user who can't call the API shouldn't see
+      // an empty page inviting them to try.
+      permission: ['createDatabase'],
+      component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DatabaseInstances.vue'))),
+      actions: [
+        {
+          api: 'createDatabase',
+          icon: 'plus-outlined',
+          label: 'label.create.database.instance',
+          listView: true,
+          popup: true,
+          show: isZoneCreated,
+          component: shallowRef(defineAsyncComponent(() => import('@/views/compute/CreateDatabaseInstance.vue')))
+        }
+      ]
+    },
+    {
+      // A page of its own, deliberately: the query console used to be an
+      // action inside a row's overflow menu, which is not where anyone looks
+      // for the thing they use every day.
+      name: 'databasequery',
+      title: 'label.dbaas.query',
+      icon: 'console-sql-outlined',
+      // Routable but not listed in the navigation: the way in is the
+      // Database Query button on the Database page, next to the instances
+      // it operates on. A second entry in the sidebar, below everything
+      // else, was both easy to miss and redundant with that button.
+      hidden: true,
+      permission: ['listDbaasTables'],
+      component: shallowRef(defineAsyncComponent(() => import('@/views/compute/DbaasQuery.vue')))
     },
     {
       name: 'vmsnapshot',

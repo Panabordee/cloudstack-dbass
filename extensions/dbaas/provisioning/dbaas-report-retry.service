@@ -1,0 +1,12 @@
+[Unit]
+Description=DBaaS: deliver the provisioning result the first boot could not report
+Documentation=file:///opt/dbaas/report-retry.sh
+ConditionPathExists=/var/lib/dbaas/request.json
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/dbaas/report-retry.sh
+# The script never fails the unit on a failed attempt -- it exits 0 and waits
+# for the next tick -- so a non-zero here means the script itself broke.

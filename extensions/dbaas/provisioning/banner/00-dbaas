@@ -1,0 +1,21 @@
+#!/bin/sh
+# Installed at /etc/update-motd.d/00-dbaas inside each dbaas-* image.
+# Both Ubuntu 24.04 and Debian 12 (with the update-motd package installed)
+# build the login banner from this directory, so a plain /etc/motd gets
+# buried under the stock distro output; running first here is what actually
+# puts this in front of the user. /etc/motd is written too, for anything
+# that reads it directly.
+[ -r /etc/dbaas-engine ] || exit 0
+. /etc/dbaas-engine
+
+cat <<BANNER
+
+=== DBaaS Instance: ${DBAAS_ENGINE_NAME} ===
+OS login          : the username/key or password set when this instance was deployed
+Database engine   : ${DBAAS_ENGINE_NAME}, listening on 0.0.0.0:${DBAAS_ENGINE_PORT}
+Database accounts : created through the CloudStack "Create Database" action
+Lost a password?  : use "Reset Database Password" on this instance in CloudStack
+
+This instance is managed. Do not create database users by hand.
+
+BANNER
