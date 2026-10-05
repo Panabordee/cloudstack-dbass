@@ -1563,6 +1563,10 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         if (vm == null) {
             throw new InvalidParameterValueException("VM not found: " + cmd.getVirtualMachineId());
         }
+        if (vm.getState() != VirtualMachine.State.Running) {
+            throw new InvalidParameterValueException("database password reset requires a Running instance"
+                    + " (current state=" + vm.getState() + ")");
+        }
         String vmUuid = vm.getUuid();
         String dbUsername = cmd.getDbUsername();
         validateIdentifier(dbUsername, "dbusername");

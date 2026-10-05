@@ -16,7 +16,8 @@
 // under the License.
 
 <template>
-  <div>
+  <database-details v-if="$route.params.id" />
+  <div v-else>
     <a-affix
       :offsetTop="$store.getters.maintenanceInitiated || $store.getters.shutdownTriggered ? 103 : 78">
       <a-card class="breadcrumb-card" style="z-index: 10">
@@ -94,7 +95,7 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'name'">
             <database-outlined class="database-resource-icon" />
-            <router-link :to="{ path: '/vm/' + record.id }">{{ record.displayname || record.name }}</router-link>
+            <router-link :to="{ path: '/database/' + record.id }">{{ record.displayname || record.name }}</router-link>
           </template>
           <template v-else-if="column.key === 'state'">
             <status :text="record.state" displayText :styles="{ 'min-width': '80px' }" />
@@ -190,12 +191,13 @@ import Status from '@/components/widgets/Status.vue'
 import CreateDatabase from '@/views/compute/CreateDatabase.vue'
 import ResetDatabasePassword from '@/views/compute/ResetDatabasePassword.vue'
 import ShowDatabasePassword from '@/views/compute/ShowDatabasePassword.vue'
+import DatabaseDetails from './DatabaseDetails.vue'
 import { DBAAS_TEMPLATE_PREFIX } from '@/utils/dbaas'
 import { isZoneCreated } from '@/utils/zone'
 
 export default {
   name: 'DatabaseInstances',
-  components: { ActionButton, Breadcrumb, Status, CreateDatabase, ShowDatabasePassword, ResetDatabasePassword },
+  components: { DatabaseDetails, ActionButton, Breadcrumb, Status, CreateDatabase, ShowDatabasePassword, ResetDatabasePassword },
   data () {
     return {
       loading: false,
@@ -532,14 +534,15 @@ export default {
           jobId,
           title: this.$t('label.action.destroy.instance'),
           description: record.displayname || record.name,
-          // The stored credentials belong to the destroyed instance: wipe
-          // them server-side once the destroy job succeeds, so the rows the
-          // schema docs call out for manual cleanup stop accumulating. The
-          // call targets the instance UUID directly, so it still works when
-          // the destroy included an expunge.
+          // Wipe credentials only after irreversible expunge; soft destroy
+          // must preserve enough metadata for Recover to work.
           successMethod: () => {
-            postAPI('deleteDbaasCredentials', { virtualmachineid: record.id })
-              .catch(e => console.warn('deleteDbaasCredentials failed for', record.id, e))
+            // A soft-destroyed VM is recoverable, so retain its database
+            // credentials until expunge (or the orphan cleanup sweep).
+            if (expunge) {
+              postAPI('deleteDbaasCredentials', { virtualmachineid: record.id })
+                .catch(e => console.warn('deleteDbaasCredentials failed for', record.id, e))
+            }
             dataDisks.then(ids => this.deleteDataDisks(ids))
             this.fetchData()
           },

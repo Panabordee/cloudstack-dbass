@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -604,6 +605,32 @@ def run_table_preview_job(conf, job, role):
 RESET_SCRIPT_DIR = "/opt/dbaas"
 
 
+def prepare_password_role_update(db_user, db_password):
+    # Keep all databases and both roles; rotate only entries for this user.
+    with open(ROLES_FILE) as handle:
+        roles = json.load(handle)
+    entries = [roles] + list((roles.get("databases") or {}).values())
+    matched = False
+    for entry in entries:
+        for role_name in ("owner", "readonly"):
+            credential = entry.get(role_name) or {}
+            if credential.get("user") == db_user:
+                credential["password"] = db_password
+                matched = True
+    if not matched:
+        raise ValueError("no cached credential for the database user")
+    fd, path = tempfile.mkstemp(prefix="roles-reset-", dir=os.path.dirname(ROLES_FILE))
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(roles, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        os.unlink(path)
+        raise
+    return path
+
+
 def run_password_reset_job(conf, job, role):
     # Unlike the SQL/DDL jobs, this does not go through the Python DB driver
     # with a role's own credentials -- <engine>_reset.sh runs as root (the
@@ -621,16 +648,26 @@ def run_password_reset_job(conf, job, role):
     script = os.path.join(RESET_SCRIPT_DIR, "%s_reset.sh" % engine)
     if not os.path.isfile(script):
         return "failed", 0, False, "", "no reset script installed for engine %s" % engine
-    stdin_payload = json.dumps({"db_user": db_user, "db_password": db_password}).encode("utf-8")
+    staged_roles = None
     try:
+        # Stage the complete file before touching the database: a full disk
+        # must not rotate a password that the console cannot then remember.
+        staged_roles = prepare_password_role_update(db_user, db_password)
+        stdin_payload = json.dumps({"db_user": db_user, "db_password": db_password}).encode("utf-8")
         proc = subprocess.run(["bash", script], input=stdin_payload,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        if proc.returncode != 0:
+            return "failed", 0, False, "", "reset script failed (rc=%d): %s" % (
+                proc.returncode, proc.stderr.decode("utf-8", "replace")[:500])
+        os.replace(staged_roles, ROLES_FILE)
+        staged_roles = None
+        return "confirmed", 0, False, json.dumps({"columns": [], "rows": []}), ""
     except Exception as error:
-        return "failed", 0, False, "", "reset script did not run: %s" % str(error)[:500]
-    if proc.returncode != 0:
-        return "failed", 0, False, "", "reset script failed (rc=%d): %s" % (
-            proc.returncode, proc.stderr.decode("utf-8", "replace")[:500])
-    return "confirmed", 0, False, json.dumps({"columns": [], "rows": []}), ""
+        return "failed", 0, False, "", "password reset could not complete: %s" % str(error)[:500]
+    finally:
+        if staged_roles is not None:
+            os.unlink(staged_roles)
+
 
 
 JOB_HANDLERS = {
@@ -653,7 +690,11 @@ def execute(conf, job, role):
     handler = JOB_HANDLERS.get(job_type)
     if handler is None:
         return "failed", 0, False, "", "job type %s is not implemented on this engine" % job_type
-    return handler(conf, job, role)
+    # Each job may target a different database on the same instance.
+    # Never mutate the persisted default while dispatching a scoped job.
+    target_conf = dict(conf)
+    target_conf["database"] = role.get("database") or conf.get("database", "")
+    return handler(target_conf, job, role)
 
 
 def resolve_role(roles, conf, job):
@@ -727,6 +768,14 @@ def main():
         job_uuid = job.get("jobid", "")
         job_type = job.get("type", "")
         log("job %s (%s) dispatched as %s" % (job_uuid, job_type, job.get("db_role")))
+        # Password resets and provisioning replace roles.json atomically.
+        # Re-read it for every job rather than holding credentials from boot.
+        try:
+            with open(ROLES_FILE) as handle:
+                roles = json.load(handle)
+        except (OSError, ValueError) as error:
+            report(conf, job_uuid, "failed", 0, False, "", "cannot load database credentials: %s" % error)
+            continue
         role, target_db, role_error = resolve_role(roles, conf, job)
         if role_error:
             report(conf, job_uuid, "failed", 0, False, "", role_error)

@@ -40,12 +40,13 @@ export const DBAAS_PASSWORD_PATTERN = /^[A-Za-z0-9_.-]{8,64}$/
 // password) into a single copy-paste connect command. Passwords are generated
 // alphanumeric-only by the provisioning scripts, so shell quoting is a
 // non-issue; keep that constraint in mind if the generator ever changes.
-export function buildConnectCommand (credentials) {
+export function buildConnectCommand (credentials, connectionHosts = {}) {
   if (!credentials || !credentials.host || !credentials.username || !credentials.password) {
     return ''
   }
   const engine = (credentials.engine || '').toLowerCase()
-  const { host, port, username, password, database } = credentials
+  const { port, username, password, database } = credentials
+  const host = connectionHosts[credentials.host] || credentials.host
   if (engine.includes('postgres')) {
     // resetDatabasePassword/getDatabasePassword responses carry no database
     // field, so fall back to the server's own default database.

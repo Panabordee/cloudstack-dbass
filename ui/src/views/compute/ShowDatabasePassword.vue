@@ -183,7 +183,7 @@ export default {
   },
   computed: {
     connectCommand () {
-      return buildConnectCommand(this.credentials)
+      return buildConnectCommand(this.credentials, this.$config?.dbaas?.connectionHosts)
     },
     // Machine-readable miss (backend responds 200 with found=false while the
     // database is still being provisioned); anything else that failed to load
@@ -298,7 +298,7 @@ export default {
           password: c.password,
           status: c.status || db.status,
           statusmessage: c.statusmessage,
-          connectCommand: buildConnectCommand({ ...c, database: db.database })
+          connectCommand: buildConnectCommand({ ...c, database: db.database }, this.$config?.dbaas?.connectionHosts)
         }
       }).catch(() => ({
         key: db.database || db.username || 'default',

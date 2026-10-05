@@ -21,6 +21,7 @@
         </a-select-option>
       </a-select>
     </div>
+    <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
     <a-tabs v-model:activeKey="activeTab" destroyInactiveTabPane>
       <a-tab-pane key="tables" :tab="$t('label.dbaas.console.tables.tab')">
         <div class="console-toolbar">
@@ -122,7 +123,6 @@
             {{ $t('label.dbaas.console.run') }}
           </a-button>
         </a-form>
-        <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
         <a-alert
           v-if="truncated"
           type="warning"
@@ -160,6 +160,7 @@ show-icon
       width="720px"
       @ok="submitCreateTable"
       @cancel="closeCreateTable">
+      <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
       <a-form layout="vertical">
         <a-form-item :label="$t('label.name')" required>
           <a-input v-model:value="newTable.name" :placeholder="$t('label.name')" />
@@ -179,6 +180,15 @@ show-icon
             <a-select v-model:value="record.type" size="small" style="width: 100%">
               <a-select-option v-for="t in columnTypes" :key="t" :value="t">{{ t }}</a-select-option>
             </a-select>
+            <a-input-number
+              v-if="/\(n\)$/i.test(record.type || '')"
+              v-model:value="record.size"
+              :min="1"
+              :max="65535"
+              :precision="0"
+              aria-label="Length or precision"
+              placeholder="Length or precision"
+              style="width: 100%; margin-top: 4px" />
           </template>
           <template v-else-if="column.key === 'primary'">
             <a-checkbox v-model:checked="record.primary" />
@@ -244,13 +254,14 @@ export default {
     resource: { type: Object, required: true },
     // Set by the Database Query page, which has already asked which database
     // to open. Empty elsewhere, where the picker chooses for itself.
-    initialDatabase: { type: String, default: '' }
+    initialDatabase: { type: String, default: '' },
+    initialTab: { type: String, default: 'tables' }
   },
   data () {
     return {
       loading: false,
       submitting: false,
-      activeTab: 'tables',
+      activeTab: this.initialTab,
       tables: [],
       tablesFetched: false,
       describedTable: null,
@@ -306,7 +317,7 @@ export default {
       const idOk = v => /^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(v || '')
       return idOk(this.newTable.name) &&
         this.newTable.columns.length > 0 &&
-        this.newTable.columns.every(c => idOk(c.name) && !!c.type)
+        this.newTable.columns.every(c => idOk(c.name) && !!this.columnType(c))
     },
     // Same detection quoteIdent already uses: the template name is the only
     // place the engine is known client-side, there is no separate field for it.
@@ -359,6 +370,9 @@ export default {
           return new Promise(resolve => setTimeout(resolve, 2000))
             .then(() => this.pollResult(jobId, attempt + 1))
         }
+        if (state === 'failed') {
+          throw new Error(body.error || 'The database operation failed')
+        }
         if (state === 'expired') {
           throw new Error(this.$t('message.dbaas.console.job.expired'))
         }
@@ -382,10 +396,10 @@ export default {
       // panel, and horizontal scrolling alone still leaves the first
       // columns unreadable. The full value stays available on hover and
       // through the row expander below.
-      const columns = (payload.columns || []).map(name => ({
+      const columns = (payload.columns || []).map((name, index) => ({
         title: name,
-        dataIndex: name,
-        key: name,
+        dataIndex: 'column_' + index,
+        key: 'column_' + index,
         ellipsis: { showTitle: true },
         width: Math.min(320, Math.max(120, String(name).length * 9 + 32))
       }))
@@ -444,10 +458,19 @@ export default {
         }
       }).catch(() => {})
     },
+    columnType (column) {
+      if (!/\(n\)$/i.test(column.type || '')) {
+        return column.type || ''
+      }
+      const size = Number(column.size)
+      return Number.isInteger(size) && size >= 1 && size <= 65535
+        ? column.type.replace(/\(n\)$/i, '(' + size + ')')
+        : ''
+    },
     openCreateTable () {
       this.newTable = {
         name: '',
-        columns: [{ name: 'id', type: this.columnTypes[0] || '', primary: true, nullable: false }]
+        columns: [{ name: 'id', type: this.columnTypes[0] || '', size: 255, primary: true, nullable: false }]
       }
       this.createTableOpen = true
     },
@@ -458,6 +481,7 @@ export default {
       this.newTable.columns.push({
         name: '',
         type: this.columnTypes[0] || '',
+        size: 255,
         primary: false,
         nullable: true
       })
@@ -473,7 +497,7 @@ export default {
       // itself -- the UI never assembles SQL.
       const columns = this.newTable.columns.map(c => ({
         name: c.name,
-        type: c.type,
+        type: this.columnType(c),
         primary: !!c.primary,
         nullable: !!c.nullable
       }))
@@ -575,12 +599,17 @@ export default {
     },
     runQuery () {
       this.describedTable = null
+      this.resultRows = []
+      this.resultColumns = []
       this.resultShown = false
       this.submitJob('runDbaasQuery', { sql: this.sqlText, write: this.writeMode }).then(body => {
         this.parseResult(body)
       }).catch(error => this.fail(error))
     },
     fail (error) {
+      this.resultRows = []
+      this.resultColumns = []
+      this.resultShown = false
       this.jobError = error.message || String(error)
     }
   }

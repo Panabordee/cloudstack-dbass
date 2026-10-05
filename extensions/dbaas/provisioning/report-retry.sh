@@ -14,6 +14,10 @@
 # does nothing at all once /var/lib/dbaas/request.json is gone.
 set -euo pipefail
 
+# Serialize provisioning and reporting so a retry cannot delete a live request.
+exec 9>/run/dbaas-provision.lock
+flock 9
+
 DBAAS_DIR="${DBAAS_DIR:-/opt/dbaas}"
 STATE_DIR="${DBAAS_STATE_DIR:-/var/lib/dbaas}"
 REQUEST_FILE="${STATE_DIR}/request.json"

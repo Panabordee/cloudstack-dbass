@@ -471,7 +471,7 @@ export default {
       return 2
     },
     connectCommand () {
-      return buildConnectCommand(this.credentials)
+      return buildConnectCommand(this.credentials, this.$config?.dbaas?.connectionHosts)
     },
     showKeyPairs () {
       return 'listSSHKeyPairs' in this.$store.getters.apis

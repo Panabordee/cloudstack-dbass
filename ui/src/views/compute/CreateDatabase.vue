@@ -125,7 +125,7 @@ export default {
   },
   computed: {
     connectCommand () {
-      return buildConnectCommand(this.credentials)
+      return buildConnectCommand(this.credentials, this.$config?.dbaas?.connectionHosts)
     }
   },
   created () {
