@@ -46,11 +46,6 @@
     <div class="row-element">
       <!-- Connection form -->
       <a-card v-if="!connected" class="connect-card">
-        <a-alert
-          type="info"
-          show-icon
-          class="connect-note"
-          :message="$t('message.dbaas.query.intro')" />
         <a-spin :spinning="loading">
           <a-form layout="vertical" :model="form">
             <a-form-item :label="$t('label.dbaas.query.instance')" required>
@@ -65,7 +60,7 @@
                   :key="vm.id"
                   :value="vm.id"
                   :label="vm.displayname || vm.name">
-                  {{ vm.displayname || vm.name }} ({{ vm.ipaddress }})
+                  {{ vm.displayname || vm.name }}
                 </a-select-option>
               </a-select>
             </a-form-item>

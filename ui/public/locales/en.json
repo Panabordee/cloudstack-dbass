@@ -887,7 +887,7 @@
   "label.dbaas.query": "Database Query",
   "label.dbaas.query.connect": "Connect",
   "label.dbaas.query.disconnect": "Disconnect",
-  "label.dbaas.query.instance": "Database instance",
+  "label.dbaas.query.instance": "Database service",
   "label.dbaas.query.type": "Database type",
   "label.dbaas.vm.password": "Instance login password",
   "label.dbaas.vm.password.placeholder": "Leave empty to have one generated",
