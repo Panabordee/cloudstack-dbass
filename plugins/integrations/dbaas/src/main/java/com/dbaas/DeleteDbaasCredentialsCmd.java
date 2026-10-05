@@ -19,6 +19,7 @@ package com.dbaas;
 import org.apache.cloudstack.context.CallContext;
 import javax.inject.Inject;
 
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.api.BaseCmd;
@@ -34,7 +35,7 @@ import com.cloud.vm.VirtualMachine;
 // instances itself) calls this once the destroy job succeeds. Wiping the
 // stored credentials server-side keeps the retention promise the cleanup SQL
 // in the schema resource documents, without touching the database by hand.
-@APICommand(name = "deleteDbaasCredentials",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "deleteDbaasCredentials",
         description = "Deletes the stored database credentials of a DBaaS instance",
         responseObject = SuccessResponse.class,
         responseHasSensitiveInfo = false)
@@ -68,10 +69,8 @@ public class DeleteDbaasCredentialsCmd extends BaseCmd {
         return s_name;
     }
 
-    // ACL is best-effort by design: the target is usually a destroyed or
-    // already-expunged instance whose row may be gone, in which case the
-    // caller's own account is the strongest available check -- deleting
-    // stale rows for an instance that no longer exists is exactly the point.
+    // Removed VM rows still identify their owner. If the row is gone entirely,
+    // only a root administrator can clean up the remaining credentials.
     @Override
     public long getEntityOwnerId() {
         final VirtualMachine vm = _entityMgr.findByUuidIncludingRemoved(VirtualMachine.class, getVirtualMachineId());
@@ -83,6 +82,9 @@ public class DeleteDbaasCredentialsCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
+        final VirtualMachine vm = _entityMgr.findByUuidIncludingRemoved(VirtualMachine.class, getVirtualMachineId());
+        DbaasAccountAccess.requireOwner(CallContext.current().getCallingAccount(),
+                vm == null ? -1L : vm.getAccountId());
         final int deleted = _dbaasManager.deleteCredentialsForVm(getVirtualMachineId());
         logger.info("deleteDbaasCredentials removed {} stored credential row(s)", deleted);
         SuccessResponse response = new SuccessResponse();

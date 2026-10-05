@@ -18,6 +18,7 @@ package com.dbaas;
 
 import javax.inject.Inject;
 
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.api.BaseListCmd;
@@ -34,7 +35,7 @@ import com.cloud.vm.VirtualMachine;
  *  choice: createDatabase can be called on the same instance repeatedly, so
  *  one instance commonly holds more than one database, and until this existed
  *  the console silently acted on whichever one the guest had configured last. */
-@APICommand(name = "listDbaasDatabases",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "listDbaasDatabases",
         description = "Lists the databases provisioned on a DBaaS instance",
         responseObject = DbaasDatabaseResponse.class,
         responseHasSensitiveInfo = false)

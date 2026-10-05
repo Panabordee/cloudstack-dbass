@@ -1,8 +1,9 @@
 package com.dbaas;
 
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 
-@APICommand(name = "listDbaasTables",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "listDbaasTables",
         description = "Queues a DBaaS console job listing the tables of the instance's database",
         responseObject = DbaasJobResponse.class,
         responseHasSensitiveInfo = false)

@@ -4,13 +4,14 @@ package com.dbaas;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import com.cloud.exception.InvalidParameterValueException;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.response.UserVmResponse;
 import com.google.gson.JsonObject;
 
-@APICommand(name = "createDbaasIndex",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "createDbaasIndex",
         description = "Queues a DBaaS console job creating an index on one table",
         responseObject = DbaasJobResponse.class,
         responseHasSensitiveInfo = false)

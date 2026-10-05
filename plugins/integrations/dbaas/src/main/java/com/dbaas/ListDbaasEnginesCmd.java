@@ -18,6 +18,7 @@ package com.dbaas;
 
 import javax.inject.Inject;
 
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.BaseListCmd;
 import org.apache.cloudstack.api.response.ListResponse;
@@ -26,7 +27,7 @@ import org.apache.cloudstack.api.ServerApiException;
 // The engines map in the extension's config.json is the source of truth for
 // which templates are DBaaS engines; this exposes it to the UI so the engine
 // pickers and section filters stop guessing from the template name prefix.
-@APICommand(name = "listDbaasEngines",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "listDbaasEngines",
         description = "Lists the database engines configured for the DBaaS extension",
         responseObject = DbaasEngineResponse.class,
         responseHasSensitiveInfo = false)
