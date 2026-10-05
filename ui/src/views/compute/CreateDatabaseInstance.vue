@@ -968,7 +968,7 @@ export default {
   color: inherit;
 }
 :deep(.ant-descriptions-item-label) {
-  background: transparent;
+  background: transparent !important;
 }
   .step-content {
     margin-top: 15px;
