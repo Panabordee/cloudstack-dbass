@@ -163,7 +163,7 @@ export default {
 <style scoped>
 :deep(.ant-descriptions-item-label),
 :deep(.ant-descriptions-item-content) {
-  color: inherit;
+  color: inherit !important;
   background: transparent !important;
 }
 </style>
