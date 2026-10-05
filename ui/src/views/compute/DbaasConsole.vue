@@ -4,258 +4,260 @@
      render the result once it arrives. Results are delivered exactly once per
      fetch -- this component owns the single fetch. -->
 <template>
-  <a-spin :spinning="loading || submitting" class="database-console" :class="{ 'database-console-dark': $store.getters.darkMode }">
-    <!-- An instance can hold several databases (createDatabase may be called
-         on it repeatedly). Every console command below runs against whichever
-         one is selected here; with one database this is just a label. -->
-    <div v-if="databases.length > 0" class="database-picker">
-      <span class="database-picker-label">{{ $t('label.dbaas.console.database') }}</span>
-      <a-select
-        v-model:value="selectedDatabase"
-        size="small"
-        style="min-width: 220px"
-        :disabled="databases.length < 2"
-        @change="onDatabaseChange">
-        <a-select-option v-for="d in databases" :key="d.database" :value="d.database">
-          {{ d.database }}<span v-if="d.status !== 'confirmed'"> ({{ d.status }})</span>
-        </a-select-option>
-      </a-select>
-    </div>
-    <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
-    <a-tabs v-model:activeKey="activeTab" destroyInactiveTabPane>
-      <a-tab-pane key="tables" :tab="isMongo ? 'Collections' : $t('label.dbaas.console.tables.tab')">
-        <div class="console-toolbar">
-          <a-button :loading="submitting" @click="listTables">
-            {{ $t('label.dbaas.console.refresh') }}
-          </a-button>
-          <a-button
-            type="primary"
-            style="margin-left: 8px"
-            :disabled="columnTypes.length === 0"
-            :title="columnTypes.length === 0 ? $t('message.dbaas.console.ddl.unsupported') : ''"
-            @click="openCreateTable">
-            {{ $t('label.dbaas.console.create.table') }}
-          </a-button>
-        </div>
-        <a-table
-          v-if="tables.length > 0"
-          :columns="tableListColumns"
-          :data-source="tables"
-          :row-key="record => record.name"
+  <div class="database-console" :class="{ 'database-console-dark': $store.getters.darkMode }">
+    <a-spin :spinning="loading || submitting">
+      <!-- An instance can hold several databases (createDatabase may be called
+           on it repeatedly). Every console command below runs against whichever
+           one is selected here; with one database this is just a label. -->
+      <div v-if="databases.length > 0" class="database-picker">
+        <span class="database-picker-label">{{ $t('label.dbaas.console.database') }}</span>
+        <a-select
+          v-model:value="selectedDatabase"
           size="small"
-          :scroll="{ x: 'max-content' }"
-          :pagination="{ pageSize: 20 }">
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'actions'">
-              <a-button
-                size="small"
-                style="margin-right: 6px"
-                @click="describeTable(record.name)">
-                {{ $t('label.dbaas.console.describe') }}
-              </a-button>
-              <a-button
-                size="small"
-                style="margin-right: 6px"
-                @click="previewTable(record.name)">
-                {{ $t('label.dbaas.console.preview') }}
-              </a-button>
-              <a-button
-                size="small"
-                style="margin-right: 6px"
-                @click="queryTable(record.name)">
-                {{ $t('label.dbaas.console.query') }}
-              </a-button>
+          style="min-width: 220px"
+          :disabled="databases.length < 2"
+          @change="onDatabaseChange">
+          <a-select-option v-for="d in databases" :key="d.database" :value="d.database">
+            {{ d.database }}<span v-if="d.status !== 'confirmed'"> ({{ d.status }})</span>
+          </a-select-option>
+        </a-select>
+      </div>
+      <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
+      <a-tabs v-model:activeKey="activeTab" destroyInactiveTabPane>
+        <a-tab-pane key="tables" :tab="isMongo ? 'Collections' : $t('label.dbaas.console.tables.tab')">
+          <div class="console-toolbar">
+            <a-button :loading="submitting" @click="listTables">
+              {{ $t('label.dbaas.console.refresh') }}
+            </a-button>
+            <a-button
+              type="primary"
+              style="margin-left: 8px"
+              :disabled="columnTypes.length === 0"
+              :title="columnTypes.length === 0 ? $t('message.dbaas.console.ddl.unsupported') : ''"
+              @click="openCreateTable">
+              {{ $t('label.dbaas.console.create.table') }}
+            </a-button>
+          </div>
+          <a-table
+            v-if="tables.length > 0"
+            :columns="tableListColumns"
+            :data-source="tables"
+            :row-key="record => record.name"
+            size="small"
+            :scroll="{ x: 'max-content' }"
+            :pagination="{ pageSize: 20 }">
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'actions'">
+                <a-button
+                  size="small"
+                  style="margin-right: 6px"
+                  @click="describeTable(record.name)">
+                  {{ $t('label.dbaas.console.describe') }}
+                </a-button>
+                <a-button
+                  size="small"
+                  style="margin-right: 6px"
+                  @click="previewTable(record.name)">
+                  {{ $t('label.dbaas.console.preview') }}
+                </a-button>
+                <a-button
+                  size="small"
+                  style="margin-right: 6px"
+                  @click="queryTable(record.name)">
+                  {{ $t('label.dbaas.console.query') }}
+                </a-button>
+                <a-button
+                  size="small"
+                  danger
+                  :disabled="!dropEnabled"
+                  :title="dropEnabled ? '' : $t('message.dbaas.console.drop.disabled')"
+                  @click="askDrop(record.name)">
+                  {{ $t('label.dbaas.console.drop') }}
+                </a-button>
+              </template>
+            </template>
+          </a-table>
+          <a-empty v-else-if="!submitting && tablesFetched" :description="$t('label.dbaas.console.no.tables')" />
+          <a-card
+            v-if="describedTable"
+            size="small"
+            class="console-card"
+            :title="$t('label.dbaas.console.describe') + ': ' + describedTable.name">
+            <a-table
+              :columns="describeColumns"
+              :data-source="describedTable.columns"
+              :row-key="record => record.name"
+              size="small"
+              :pagination="false"
+              :scroll="{ x: 'max-content' }" />
+            <a-table
+              v-if="describedTable.indexes && describedTable.indexes.length > 0"
+              :columns="describeColumns"
+              :data-source="describedTable.indexes"
+              :row-key="record => record.name"
+              size="small"
+              :pagination="false"
+              class="console-card" />
+          </a-card>
+        </a-tab-pane>
+        <a-tab-pane key="sql" :tab="isMongo ? 'Query' : $t('label.dbaas.console.sql.tab')">
+          <a-alert
+            v-if="isMongo"
+            type="info"
+            show-icon
+            :message="$t('message.dbaas.console.sql.mongo.hint')"
+            class="console-note" />
+          <div class="query-workspace">
+            <div class="query-toolbar">
+              <strong>{{ isMongo ? 'Query editor' : 'SQL editor' }}</strong>
+              <div class="query-controls">
+                <span class="query-shortcut">Ctrl / ⌘ + Enter</span>
+                <a-button type="primary" :loading="submitting" :disabled="!sqlText.trim() || submitting" @click="runQuery">
+                  <template #icon><play-circle-outlined /></template>
+                  {{ $t('label.dbaas.console.run') }}
+                </a-button>
+              </div>
+            </div>
+            <a-textarea
+              v-model:value="sqlText"
+              :rows="sqlRows"
+              class="sql-editor"
+              :aria-label="$t(sqlEditorLabel)"
+              :placeholder="isMongo ? '{ &quot;collection&quot;: &quot;name&quot;, &quot;op&quot;: &quot;find&quot;, &quot;filter&quot;: {}, &quot;limit&quot;: 100 }' : 'SELECT * FROM your_table LIMIT 100;'"
+              spellcheck="false"
+              @keydown="onQueryKeydown" />
+            <div class="query-options">
+              <a-checkbox v-model:checked="writeMode">
+                Allow writes
+              </a-checkbox>
+              <a-tag :color="writeMode ? 'orange' : 'blue'">{{ writeMode ? 'Write enabled' : 'Read only' }}</a-tag>
+            </div>
+          </div>
+          <div v-if="resultShown" class="query-results-heading">
+            <strong>Results</strong>
+            <span>{{ resultRows.length }} rows</span>
+          </div>
+          <a-alert
+            v-if="truncated"
+            type="warning"
+            show-icon
+            :message="$t('label.dbaas.console.truncated')"
+            class="console-note" />
+          <a-table
+            v-if="resultRows.length > 0"
+            :columns="resultColumns"
+            :data-source="resultRows"
+            :row-key="(record, index) => String(index)"
+            size="small"
+            :pagination="{ pageSize: 50 }"
+            :scroll="{ x: 'max-content' }"
+            class="console-card" />
+          <a-alert
+            v-else-if="resultShown"
+            type="success"
+            show-icon
+            :message="$t('label.dbaas.console.sql.no.rows')"
+            class="console-note" />
+        </a-tab-pane>
+      </a-tabs>
+  
+      <!-- Column types come from listDbaasEngines, which reads them from the
+           config's types allowlist -- the same list createDbaasTable validates
+           against server-side, so the form cannot offer a type the server will
+           reject, and a config change reaches the UI without a rebuild. -->
+      <a-modal
+        :visible="createTableOpen"
+        :title="$t('label.dbaas.console.create.table')"
+        :confirm-loading="submitting"
+        :ok-button-props="{ disabled: !createTableValid }"
+        :ok-text="$t('label.dbaas.console.create.table')"
+        width="720px"
+        @ok="submitCreateTable"
+        @cancel="closeCreateTable">
+        <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
+        <a-form layout="vertical">
+          <a-form-item :label="$t('label.name')" required>
+            <a-input v-model:value="newTable.name" :placeholder="$t('label.name')" />
+          </a-form-item>
+        </a-form>
+        <a-table
+          :columns="newColumnColumns"
+          :data-source="newTable.columns"
+          :row-key="(record, index) => String(index)"
+          size="small"
+          :pagination="false">
+          <template #bodyCell="{ column, record, index }">
+            <template v-if="column.key === 'name'">
+              <a-input v-model:value="record.name" size="small" />
+            </template>
+            <template v-else-if="column.key === 'type'">
+              <a-select v-model:value="record.type" size="small" style="width: 100%">
+                <a-select-option v-for="t in columnTypes" :key="t" :value="t">{{ t }}</a-select-option>
+              </a-select>
+              <a-input-number
+                v-if="/\(n\)$/i.test(record.type || '')"
+                v-model:value="record.size"
+                :min="1"
+                :max="65535"
+                :precision="0"
+                aria-label="Length or precision"
+                placeholder="Length or precision"
+                style="width: 100%; margin-top: 4px" />
+            </template>
+            <template v-else-if="column.key === 'primary'">
+              <a-checkbox v-model:checked="record.primary" />
+            </template>
+            <template v-else-if="column.key === 'nullable'">
+              <a-checkbox v-model:checked="record.nullable" />
+            </template>
+            <template v-else-if="column.key === 'remove'">
               <a-button
                 size="small"
                 danger
-                :disabled="!dropEnabled"
-                :title="dropEnabled ? '' : $t('message.dbaas.console.drop.disabled')"
-                @click="askDrop(record.name)">
-                {{ $t('label.dbaas.console.drop') }}
+                :disabled="newTable.columns.length <= 1"
+                @click="removeColumn(index)">
+                &times;
               </a-button>
             </template>
           </template>
         </a-table>
-        <a-empty v-else-if="!submitting && tablesFetched" :description="$t('label.dbaas.console.no.tables')" />
-        <a-card
-          v-if="describedTable"
-          size="small"
-          class="console-card"
-          :title="$t('label.dbaas.console.describe') + ': ' + describedTable.name">
-          <a-table
-            :columns="describeColumns"
-            :data-source="describedTable.columns"
-            :row-key="record => record.name"
-            size="small"
-            :pagination="false"
-            :scroll="{ x: 'max-content' }" />
-          <a-table
-            v-if="describedTable.indexes && describedTable.indexes.length > 0"
-            :columns="describeColumns"
-            :data-source="describedTable.indexes"
-            :row-key="record => record.name"
-            size="small"
-            :pagination="false"
-            class="console-card" />
-        </a-card>
-      </a-tab-pane>
-      <a-tab-pane key="sql" :tab="isMongo ? 'Query' : $t('label.dbaas.console.sql.tab')">
+        <a-button size="small" style="margin-top: 8px" @click="addColumn">
+          {{ $t('label.dbaas.console.add.column') }}
+        </a-button>
         <a-alert
-          v-if="isMongo"
+          v-if="!writeEnabled"
           type="info"
           show-icon
-          :message="$t('message.dbaas.console.sql.mongo.hint')"
-          class="console-note" />
-        <div class="query-workspace">
-          <div class="query-toolbar">
-            <strong>{{ isMongo ? 'Query editor' : 'SQL editor' }}</strong>
-            <div class="query-controls">
-              <span class="query-shortcut">Ctrl / ⌘ + Enter</span>
-              <a-button type="primary" :loading="submitting" :disabled="!sqlText.trim() || submitting" @click="runQuery">
-                <template #icon><play-circle-outlined /></template>
-                {{ $t('label.dbaas.console.run') }}
-              </a-button>
-            </div>
-          </div>
-          <a-textarea
-            v-model:value="sqlText"
-            :rows="sqlRows"
-            class="sql-editor"
-            :aria-label="$t(sqlEditorLabel)"
-            :placeholder="isMongo ? '{ &quot;collection&quot;: &quot;name&quot;, &quot;op&quot;: &quot;find&quot;, &quot;filter&quot;: {}, &quot;limit&quot;: 100 }' : 'SELECT * FROM your_table LIMIT 100;'"
-            spellcheck="false"
-            @keydown="onQueryKeydown" />
-          <div class="query-options">
-            <a-checkbox v-model:checked="writeMode">
-              Allow writes
-            </a-checkbox>
-            <a-tag :color="writeMode ? 'orange' : 'blue'">{{ writeMode ? 'Write enabled' : 'Read only' }}</a-tag>
-          </div>
-        </div>
-        <div v-if="resultShown" class="query-results-heading">
-          <strong>Results</strong>
-          <span>{{ resultRows.length }} rows</span>
-        </div>
+          class="console-note"
+          :message="$t('message.dbaas.console.ddl.needs.owner')" />
+      </a-modal>
+  
+      <!-- The API already requires `confirm` to repeat the table name exactly;
+           this dialog is that requirement made visible rather than a second,
+           softer one. The warning states what actually protects the tenant:
+           the agent dumps the table to the instance's own disk first and
+           refuses the drop outright if that dump fails. -->
+      <a-modal
+        :visible="dropTarget !== ''"
+        :title="$t('label.dbaas.console.drop') + ': ' + dropTarget"
+        :confirm-loading="submitting"
+        :ok-button-props="{ danger: true, disabled: dropConfirm !== dropTarget }"
+        :ok-text="$t('label.dbaas.console.drop')"
+        @ok="confirmDrop"
+        @cancel="cancelDrop">
         <a-alert
-          v-if="truncated"
           type="warning"
           show-icon
-          :message="$t('label.dbaas.console.truncated')"
-          class="console-note" />
-        <a-table
-          v-if="resultRows.length > 0"
-          :columns="resultColumns"
-          :data-source="resultRows"
-          :row-key="(record, index) => String(index)"
-          size="small"
-          :pagination="{ pageSize: 50 }"
-          :scroll="{ x: 'max-content' }"
-          class="console-card" />
-        <a-alert
-          v-else-if="resultShown"
-          type="success"
-          show-icon
-          :message="$t('label.dbaas.console.sql.no.rows')"
-          class="console-note" />
-      </a-tab-pane>
-    </a-tabs>
-
-    <!-- Column types come from listDbaasEngines, which reads them from the
-         config's types allowlist -- the same list createDbaasTable validates
-         against server-side, so the form cannot offer a type the server will
-         reject, and a config change reaches the UI without a rebuild. -->
-    <a-modal
-      :visible="createTableOpen"
-      :title="$t('label.dbaas.console.create.table')"
-      :confirm-loading="submitting"
-      :ok-button-props="{ disabled: !createTableValid }"
-      :ok-text="$t('label.dbaas.console.create.table')"
-      width="720px"
-      @ok="submitCreateTable"
-      @cancel="closeCreateTable">
-      <a-alert v-if="jobError" type="error" show-icon :message="jobError" class="console-note" />
-      <a-form layout="vertical">
-        <a-form-item :label="$t('label.name')" required>
-          <a-input v-model:value="newTable.name" :placeholder="$t('label.name')" />
-        </a-form-item>
-      </a-form>
-      <a-table
-        :columns="newColumnColumns"
-        :data-source="newTable.columns"
-        :row-key="(record, index) => String(index)"
-        size="small"
-        :pagination="false">
-        <template #bodyCell="{ column, record, index }">
-          <template v-if="column.key === 'name'">
-            <a-input v-model:value="record.name" size="small" />
-          </template>
-          <template v-else-if="column.key === 'type'">
-            <a-select v-model:value="record.type" size="small" style="width: 100%">
-              <a-select-option v-for="t in columnTypes" :key="t" :value="t">{{ t }}</a-select-option>
-            </a-select>
-            <a-input-number
-              v-if="/\(n\)$/i.test(record.type || '')"
-              v-model:value="record.size"
-              :min="1"
-              :max="65535"
-              :precision="0"
-              aria-label="Length or precision"
-              placeholder="Length or precision"
-              style="width: 100%; margin-top: 4px" />
-          </template>
-          <template v-else-if="column.key === 'primary'">
-            <a-checkbox v-model:checked="record.primary" />
-          </template>
-          <template v-else-if="column.key === 'nullable'">
-            <a-checkbox v-model:checked="record.nullable" />
-          </template>
-          <template v-else-if="column.key === 'remove'">
-            <a-button
-              size="small"
-              danger
-              :disabled="newTable.columns.length <= 1"
-              @click="removeColumn(index)">
-              &times;
-            </a-button>
-          </template>
-        </template>
-      </a-table>
-      <a-button size="small" style="margin-top: 8px" @click="addColumn">
-        {{ $t('label.dbaas.console.add.column') }}
-      </a-button>
-      <a-alert
-        v-if="!writeEnabled"
-        type="info"
-        show-icon
-        class="console-note"
-        :message="$t('message.dbaas.console.ddl.needs.owner')" />
-    </a-modal>
-
-    <!-- The API already requires `confirm` to repeat the table name exactly;
-         this dialog is that requirement made visible rather than a second,
-         softer one. The warning states what actually protects the tenant:
-         the agent dumps the table to the instance's own disk first and
-         refuses the drop outright if that dump fails. -->
-    <a-modal
-      :visible="dropTarget !== ''"
-      :title="$t('label.dbaas.console.drop') + ': ' + dropTarget"
-      :confirm-loading="submitting"
-      :ok-button-props="{ danger: true, disabled: dropConfirm !== dropTarget }"
-      :ok-text="$t('label.dbaas.console.drop')"
-      @ok="confirmDrop"
-      @cancel="cancelDrop">
-      <a-alert
-        type="warning"
-        show-icon
-        class="console-note"
-        :message="$t('message.dbaas.console.drop.warning')" />
-      <a-form layout="vertical">
-        <a-form-item :label="$t('label.dbaas.console.drop.confirm')">
-          <a-input v-model:value="dropConfirm" :placeholder="dropTarget" />
-        </a-form-item>
-      </a-form>
-    </a-modal>
-  </a-spin>
+          class="console-note"
+          :message="$t('message.dbaas.console.drop.warning')" />
+        <a-form layout="vertical">
+          <a-form-item :label="$t('label.dbaas.console.drop.confirm')">
+            <a-input v-model:value="dropConfirm" :placeholder="dropTarget" />
+          </a-form-item>
+        </a-form>
+      </a-modal>
+    </a-spin>
+  </div>
 </template>
 
 <script>
