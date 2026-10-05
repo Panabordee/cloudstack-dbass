@@ -340,12 +340,13 @@ def dump_table_before_drop(engine, role, database, table):
     # Best-effort has no place here: a failed dump must refuse the drop, so
     # every failure path below removes whatever partial file it left and
     # returns None -- the caller treats None as "do not drop".
-    os.makedirs(PREDROP_DIR, exist_ok=True)
-    os.chmod(PREDROP_DIR, 0o700)
-    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-    dump_path = os.path.join(PREDROP_DIR, "%s.%s.sql" % (table, stamp))
+    dump_path = None
     env = dict(os.environ)
     try:
+        os.makedirs(PREDROP_DIR, exist_ok=True)
+        os.chmod(PREDROP_DIR, 0o700)
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+        dump_path = os.path.join(PREDROP_DIR, "%s.%s.sql" % (table, stamp))
         if engine in ("mysql", "mariadb"):
             env["MYSQL_PWD"] = role["password"]
             cmd = ["mysqldump", "--single-transaction", "--no-tablespaces",
@@ -372,7 +373,8 @@ def dump_table_before_drop(engine, role, database, table):
         _prune_old_dumps()
         return dump_path, ""
     except Exception as error:
-        _remove_quietly(dump_path)
+        if dump_path is not None:
+            _remove_quietly(dump_path)
         return None, str(error)[:500]
 
 
