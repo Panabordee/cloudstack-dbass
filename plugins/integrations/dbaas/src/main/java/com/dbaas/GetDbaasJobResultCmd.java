@@ -1,18 +1,20 @@
 package com.dbaas;
 
 
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import javax.inject.Inject;
 import org.apache.cloudstack.api.BaseCmd;
 import com.cloud.exception.InvalidParameterValueException;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.ServerApiException;
+import org.apache.cloudstack.context.CallContext;
 
 
 // The result is delivered exactly once: this execute() reads and deletes the
 // result row in the same transaction, so a second fetch answers "already
 // collected" and the tenant data is gone from the management server.
-@APICommand(name = "getDbaasJobResult",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "getDbaasJobResult",
         description = "Fetches the result of a DBaaS console job; delivered once, then removed",
         responseObject = DbaasJobResultResponse.class,
         responseHasSensitiveInfo = true)
@@ -31,8 +33,7 @@ public class GetDbaasJobResultCmd extends BaseCmd {
         return jobUuid;
     }
 
-    // ACL by the job's own account: the caller must control the account the
-    // job was created under, or CloudStack refuses before execute() runs.
+    // The owner identifies the resource; execute() explicitly checks the caller.
     @Override
     public long getEntityOwnerId() {
         long accountId = _dbaasManager.getJobAccountId(jobUuid);
@@ -44,7 +45,9 @@ public class GetDbaasJobResultCmd extends BaseCmd {
 
     @Override
     public void execute() throws ServerApiException {
-        String result = _dbaasManager.getUserJobResult(jobUuid, getEntityOwnerId());
+        long ownerId = getEntityOwnerId();
+        DbaasAccountAccess.requireOwner(CallContext.current().getCallingAccount(), ownerId);
+        String result = _dbaasManager.getUserJobResult(jobUuid, ownerId);
         if (result == null) {
             throw new InvalidParameterValueException("no such console job: " + jobUuid);
         }

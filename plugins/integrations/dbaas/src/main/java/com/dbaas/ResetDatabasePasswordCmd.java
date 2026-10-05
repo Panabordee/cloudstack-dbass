@@ -2,6 +2,7 @@ package com.dbaas;
 
 import javax.inject.Inject;
 
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.api.BaseCmd;
@@ -13,7 +14,7 @@ import com.cloud.exception.InvalidParameterValueException;
 import com.cloud.utils.db.EntityManager;
 import com.cloud.vm.VirtualMachine;
 
-@APICommand(name = "resetDatabasePassword",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "resetDatabasePassword",
         description = "Resets the password of an existing database user on the specified DBaaS VM",
         responseObject = DbaasResponse.class,
         requestHasSensitiveInfo = false,

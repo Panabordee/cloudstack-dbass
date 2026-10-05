@@ -4,6 +4,7 @@ package com.dbaas;
 import java.util.ArrayList;
 import java.util.List;
 import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import com.cloud.exception.InvalidParameterValueException;
 import org.apache.cloudstack.api.Parameter;
@@ -13,7 +14,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-@APICommand(name = "createDbaasTable",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "createDbaasTable",
         description = "Queues a DBaaS console job creating a table from a validated column list",
         responseObject = DbaasJobResponse.class,
         responseHasSensitiveInfo = false)

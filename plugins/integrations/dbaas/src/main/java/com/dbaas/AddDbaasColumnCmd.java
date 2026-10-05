@@ -1,12 +1,13 @@
 package com.dbaas;
 
 import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.response.UserVmResponse;
 import com.google.gson.JsonObject;
 
-@APICommand(name = "addDbaasColumn",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "addDbaasColumn",
         description = "Queues a DBaaS console job adding one column to a table",
         responseObject = DbaasJobResponse.class,
         responseHasSensitiveInfo = false)

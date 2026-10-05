@@ -1,13 +1,14 @@
 package com.dbaas;
 
 import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import com.cloud.exception.InvalidParameterValueException;
 import org.apache.cloudstack.api.Parameter;
 import org.apache.cloudstack.api.response.UserVmResponse;
 import com.google.gson.JsonObject;
 
-@APICommand(name = "dropDbaasTable",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "dropDbaasTable",
         description = "Queues a DBaaS console job dropping one table. Requires the table name as confirm;"
                 + " disabled unless dbaas.console.drop.enabled is true.",
         responseObject = DbaasJobResponse.class,

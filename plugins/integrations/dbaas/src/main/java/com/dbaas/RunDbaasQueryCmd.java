@@ -1,6 +1,7 @@
 package com.dbaas;
 
 import org.apache.cloudstack.api.ApiConstants;
+import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
 import com.cloud.exception.InvalidParameterValueException;
 import org.apache.cloudstack.api.Parameter;
@@ -11,7 +12,7 @@ import com.google.gson.JsonObject;
 // flagged sensitive and the payload is encrypted at rest, and the SQL text
 // never reaches management-server.log (the job log line carries the uuid,
 // type, account and row count only).
-@APICommand(name = "runDbaasQuery",
+@APICommand(authorized = {RoleType.Admin, RoleType.ResourceAdmin, RoleType.DomainAdmin, RoleType.User}, name = "runDbaasQuery",
         description = "Queues a DBaaS console job running one SQL statement against the instance's database."
                 + " Read-only by default; write mode needs dbaas.console.write.enabled.",
         responseObject = DbaasJobResponse.class,
