@@ -565,9 +565,9 @@ export default {
       // plugin build without that API.
       const hasEnginesApi = 'listDbaasEngines' in this.$store.getters.apis
       const templateParams = hasEnginesApi
-        ? { templatefilter: 'executable' }
-        : { templatefilter: 'executable', keyword: DBAAS_TEMPLATE_PREFIX }
-      Promise.all([
+        ? { templatefilter: 'sharedexecutable' }
+        : { templatefilter: 'sharedexecutable', keyword: DBAAS_TEMPLATE_PREFIX }
+      return Promise.all([
         getAPI('listTemplates', templateParams),
         hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
       ]).then(([tplResponse, engines]) => {
@@ -585,16 +585,14 @@ export default {
           return acc
         }, {})
         const templateIds = new Set(templates.map(t => t.id))
-        if (templateIds.size === 0) {
-          this.instances = []
-          return
-        }
         // pagesize: -1 -- without it the response is capped at the default
         // page size and every DBaaS VM beyond it silently vanishes from this
         // list even though the instance exists and is reachable.
         return getAPI('listVirtualMachines', { listall: true, details: 'tmpl,nics,servoff', pagesize: -1 }).then(vmResponse => {
           this.instances = (vmResponse.listvirtualmachinesresponse.virtualmachine || [])
-            .filter(vm => templateIds.has(vm.templateid))
+            .filter(vm => templateIds.has(vm.templateid) || (engineNames
+              ? engineNames.has(vm.templatename)
+              : (vm.templatename || '').startsWith(DBAAS_TEMPLATE_PREFIX)))
         })
       }).catch(error => {
         this.$notifyError(error)
