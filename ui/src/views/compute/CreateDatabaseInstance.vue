@@ -19,10 +19,9 @@
   <div>
     <a-row :gutter="12">
       <a-col :md="24" :lg="step === 'form' ? 17 : 24">
-        <a-card :bordered="true" :title="$t('label.create.database.instance')">
+        <a-card :bordered="true" :title="$t('label.create.database')">
           <!-- step 1: the form -->
           <a-spin :spinning="loading" v-if="step === 'form'">
-            <p v-html="$t('message.desc.create.database.instance')"></p>
             <a-alert
               type="info"
               show-icon
@@ -55,7 +54,7 @@
                 </a-step>
 
                 <a-step
-                  :title="$t('label.image')"
+                  :title="$t('label.engine')"
                   :status="form.zoneid ? 'process' : 'wait'">
                   <template #description>
                     <div v-if="form.zoneid" class="step-content">
@@ -251,7 +250,7 @@
               <div class="card-footer" v-if="isMobile()">
                 <deploy-buttons
                   :loading="loading"
-                  :deployButtonText="$t('label.create.database.instance')"
+                  :deployButtonText="$t('label.create.database')"
                   @handle-cancel="closeAction"
                   @handle-deploy="handleSubmit" />
               </div>
@@ -347,7 +346,7 @@
             <template #footer-content>
               <deploy-buttons
                 :loading="loading"
-                :deployButtonText="$t('label.create.database.instance')"
+                :deployButtonText="$t('label.create.database')"
                 @handle-cancel="closeAction"
                 @handle-deploy="handleSubmit" />
             </template>

@@ -220,7 +220,7 @@ export default {
       createActions: [{
         api: 'createDatabase',
         icon: 'plus-outlined',
-        label: 'label.create.database.instance',
+        label: 'label.create.database',
         listView: true,
         show: isZoneCreated
       }],
@@ -451,7 +451,8 @@ export default {
       this.fetchData()
     },
     engineLabel (templatename) {
-      return this.engineLabels[templatename] || templatename
+      const type = (templatename || '').replace(/^dbaas-/, '').replace(/-v\d+$/, '')
+      return ({ mysql: 'MySQL', mariadb: 'MariaDB', postgresql: 'PostgreSQL', mongodb: 'MongoDB' })[type] || this.engineLabels[templatename] || templatename
     },
     confirmDestroy (record) {
       const expungeRef = ref(false)
