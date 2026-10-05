@@ -41,3 +41,11 @@ it('opens a selected database in the query tab', () => {
   expect(vm.openedDatabase).toBe('two')
   expect(vm.tab).toBe('query')
 })
+
+it('keeps the query workspace when closing connection details', () => {
+  const vm = { action: 'password', tab: 'query', openedDatabase: 'two', fetchData: jest.fn() }
+  DatabaseDetails.methods.closeAction.call(vm)
+  expect(vm.action).toBe('')
+  expect(vm.openedDatabase).toBe('two')
+  expect(vm.fetchData).not.toHaveBeenCalled()
+})
