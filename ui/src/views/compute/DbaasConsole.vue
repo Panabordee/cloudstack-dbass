@@ -160,7 +160,7 @@
             class="console-note" />
         </a-tab-pane>
       </a-tabs>
-  
+
       <!-- Column types come from listDbaasEngines, which reads them from the
            config's types allowlist -- the same list createDbaasTable validates
            against server-side, so the form cannot offer a type the server will
@@ -231,7 +231,7 @@
           class="console-note"
           :message="$t('message.dbaas.console.ddl.needs.owner')" />
       </a-modal>
-  
+
       <!-- The API already requires `confirm` to repeat the table name exactly;
            this dialog is that requirement made visible rather than a second,
            softer one. The warning states what actually protects the tenant:
