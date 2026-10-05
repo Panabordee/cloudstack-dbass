@@ -4,6 +4,9 @@ import javax.inject.Inject;
 
 import org.apache.cloudstack.acl.RoleType;
 import org.apache.cloudstack.api.APICommand;
+import org.apache.cloudstack.api.ApiErrorCode;
+import com.cloud.exception.InsufficientCapacityException;
+import com.cloud.utils.exception.CloudRuntimeException;
 import org.apache.cloudstack.api.ApiConstants;
 import org.apache.cloudstack.api.BaseCmd;
 import org.apache.cloudstack.api.Parameter;
@@ -97,8 +100,27 @@ public class CreateDatabaseCmd extends BaseCmd {
     @Override
     public void execute() throws ServerApiException {
         _dbaasManager.checkCallerOwnsVm(getVirtualMachineId());
-        DbaasResponse response = _dbaasManager.createDatabase(this);
+        DbaasResponse response;
+        try {
+            response = _dbaasManager.createDatabase(this);
+        } catch (CloudRuntimeException error) {
+            if (causedByInsufficientCapacity(error)) {
+                throw new ServerApiException(ApiErrorCode.INSUFFICIENT_CAPACITY_ERROR,
+                        "Not enough compute or network capacity to start this database. Free resources and retry.");
+            }
+            throw error;
+        }
         response.setResponseName(getCommandName());
         setResponseObject(response);
+    }
+
+    static boolean causedByInsufficientCapacity(Throwable error) {
+        // Wrapped VM-start errors otherwise become an unhelpful generic 500.
+        for (int depth = 0; error != null && depth < 32; depth++, error = error.getCause()) {
+            if (error instanceof InsufficientCapacityException) {
+                return true;
+            }
+        }
+        return false;
     }
 }

@@ -655,9 +655,11 @@ export default {
       // templates are engines; the dbaas- keyword/prefix below is only the
       // fallback for management servers running an older plugin build.
       const hasEnginesApi = 'listDbaasEngines' in this.$store.getters.apis
+      // Include private templates shared with this tenant, as well as owned
+      // and public templates. "executable" omits the shared ones.
       const templateParams = hasEnginesApi
-        ? { templatefilter: 'executable', pagesize: -1, showicon: true }
-        : { templatefilter: 'executable', keyword: DBAAS_TEMPLATE_PREFIX, pagesize: -1, showicon: true }
+        ? { templatefilter: 'sharedexecutable', pagesize: -1, showicon: true }
+        : { templatefilter: 'sharedexecutable', keyword: DBAAS_TEMPLATE_PREFIX, pagesize: -1, showicon: true }
       Promise.all([
         getAPI('listTemplates', templateParams),
         getAPI('listZones', { available: true }),
