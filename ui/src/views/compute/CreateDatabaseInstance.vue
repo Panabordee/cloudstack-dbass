@@ -16,18 +16,12 @@
 // under the License.
 
 <template>
-  <div>
+  <div class="database-wizard">
     <a-row :gutter="12">
       <a-col :md="24" :lg="step === 'form' ? 17 : 24">
         <a-card :bordered="true" :title="$t('label.create.database')">
           <!-- step 1: the form -->
           <a-spin :spinning="loading" v-if="step === 'form'">
-            <a-alert
-              type="info"
-              show-icon
-              banner
-              :message="$t('message.dbaas.username.default')"
-              class="form-banner" />
             <a-form
               v-ctrl-enter="handleSubmit"
               :ref="formRef"
@@ -37,11 +31,10 @@
               layout="vertical">
               <a-steps direction="vertical" size="small">
                 <a-step
-                  :title="$t('label.select.deployment.infrastructure')"
+                  :title="$t('label.zoneid')"
                   status="process">
                   <template #description>
                     <div class="step-content">
-                      <span>{{ $t('message.select.a.zone') }}</span><br/>
                       <a-form-item name="zoneid" ref="zoneid" :label="$t('label.zoneid')">
                         <zone-block-radio-group-select
                           :items="zones"
@@ -210,7 +203,6 @@
                         <a-checkbox v-model:checked="form.setvmpassword" @change="onSetVmPasswordChange">
                           {{ $t('label.dbaas.vm.password.set') }}
                         </a-checkbox>
-                        <span class="hint">{{ $t('message.dbaas.vm.password.hint') }}</span>
                       </a-form-item>
                       <a-form-item
                         v-if="form.setvmpassword"
@@ -294,7 +286,6 @@
                 <span class="connect-command">{{ connectCommand }}</span>
               </a-descriptions-item>
             </a-descriptions>
-            <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
             <div :span="24" class="action-button">
               <a-button @click="markCopied" v-clipboard:copy="connectCommand" type="primary">
                 {{ $t('label.copy.connect.command') }}
@@ -655,20 +646,21 @@ export default {
       // templates are engines; the dbaas- keyword/prefix below is only the
       // fallback for management servers running an older plugin build.
       const hasEnginesApi = 'listDbaasEngines' in this.$store.getters.apis
-      // Include private templates shared with this tenant, as well as owned
-      // and public templates. "executable" omits the shared ones.
+      // Combine both scopes: executable includes owned/public images while
+      // sharedexecutable includes images granted by another account.
       const templateParams = hasEnginesApi
         ? { templatefilter: 'sharedexecutable', pagesize: -1, showicon: true }
         : { templatefilter: 'sharedexecutable', keyword: DBAAS_TEMPLATE_PREFIX, pagesize: -1, showicon: true }
       Promise.all([
         getAPI('listTemplates', templateParams),
+        getAPI('listTemplates', { ...templateParams, templatefilter: 'executable' }),
         getAPI('listZones', { available: true }),
         getAPI('listServiceOfferings', { pagesize: -1 }),
         // Data disk is entirely optional, so this is never in the required
         // rules -- it only ever adds an extra volume when actually picked.
         getAPI('listDiskOfferings', { pagesize: -1 }),
         hasEnginesApi ? getAPI('listDbaasEngines') : Promise.resolve(null)
-      ]).then(([tpl, zone, off, diskOff, engines]) => {
+      ]).then(([tpl, ownTpl, zone, off, diskOff, engines]) => {
         const engineList = engines ? (engines.listdbaasenginesresponse?.dbaasengine || []) : []
         const engineNames = engines ? new Set(engineList.map(e => e.template)) : null
         // Keyed by template name here (matching the engines response); the
@@ -676,7 +668,11 @@ export default {
         // since the wizard tracks the selected engine by template id.
         const minMemoryByEngineName = {}
         engineList.forEach(e => { minMemoryByEngineName[e.template] = e.minmemorymb || 0 })
-        this.templates = (tpl.listtemplatesresponse.template || [])
+        const templatesById = new Map([
+          ...(tpl.listtemplatesresponse.template || []),
+          ...(ownTpl.listtemplatesresponse.template || [])
+        ].map(template => [template.id, template]))
+        this.templates = [...templatesById.values()]
           .filter(t => t.name && t.isready && (engineNames ? engineNames.has(t.name) : t.name.startsWith(DBAAS_TEMPLATE_PREFIX)))
           // A template only provisions over the config drive when it carries
           // the marker detail; without it the backend refuses createDatabase
@@ -966,6 +962,14 @@ export default {
 </script>
 
 <style scoped lang="less">
+:deep(.ant-steps-item-title),
+:deep(.ant-descriptions-item-label),
+:deep(.ant-descriptions-item-content) {
+  color: inherit;
+}
+:deep(.ant-descriptions-item-label) {
+  background: transparent;
+}
   .step-content {
     margin-top: 15px;
   }

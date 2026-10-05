@@ -18,7 +18,6 @@
 <template>
   <div class="form-layout">
     <a-spin :spinning="loading" v-if="!isSubmitted">
-      <p v-html="$t('message.desc.create.database')"></p>
       <a-alert
         type="warning"
         show-icon
@@ -74,7 +73,6 @@
         <a-descriptions-item :label="$t('label.username')">{{ credentials.username }}</a-descriptions-item>
         <a-descriptions-item :label="$t('label.password')">{{ credentials.password }}</a-descriptions-item>
       </a-descriptions>
-      <p class="connect-hint">{{ $t('message.dbaas.connect.command') }}</p>
       <div :span="24" class="action-button">
         <a-button @click="markCopied" v-clipboard:copy="connectCommand" type="primary">
           {{ $t('label.copy.connect.command') }}
@@ -220,6 +218,11 @@ export default {
 </script>
 
 <style scoped lang="less">
+:deep(.ant-descriptions-item-label),
+:deep(.ant-descriptions-item-content) {
+  color: inherit;
+  background: transparent;
+}
   .form-layout {
     width: 80vw;
     // Never wider than whatever is hosting this dialog: the Database page

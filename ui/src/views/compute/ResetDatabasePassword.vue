@@ -170,6 +170,11 @@ export default {
 </script>
 
 <style scoped lang="less">
+:deep(.ant-descriptions-item-label),
+:deep(.ant-descriptions-item-content) {
+  color: inherit;
+  background: transparent;
+}
   .form-layout {
     width: 80vw;
     // Never wider than whatever is hosting this dialog: the Database page
