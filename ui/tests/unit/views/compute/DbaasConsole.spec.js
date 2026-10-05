@@ -8,6 +8,30 @@ const context = () => ({
   $t: key => key
 })
 
+it.each([
+  ['mysql', 'SELECT * FROM `order` LIMIT 100'],
+  ['mariadb', 'SELECT * FROM `order` LIMIT 100'],
+  ['postgresql', 'SELECT * FROM "order" LIMIT 100']
+])('opens a runnable preview for a reserved table name on %s', (engine, query) => {
+  const vm = { resource: { templatename: `dbaas-${engine}-v2` }, activeTab: 'tables', submitJob: jest.fn() }
+  vm.isMongo = DbaasConsole.computed.isMongo.call(vm)
+  vm.quoteIdent = name => DbaasConsole.methods.quoteIdent.call(vm, name)
+  DbaasConsole.methods.queryTable.call(vm, 'order')
+  expect(vm.sqlText).toBe(query)
+  expect(vm.activeTab).toBe('sql')
+  expect(vm.submitJob).not.toHaveBeenCalled()
+})
+
+it('opens a MongoDB collection with a JSON command instead of SQL', () => {
+  const vm = { resource: { templatename: 'dbaas-mongodb-v2' }, activeTab: 'tables', submitJob: jest.fn() }
+  vm.isMongo = DbaasConsole.computed.isMongo.call(vm)
+  DbaasConsole.methods.queryTable.call(vm, 'orders')
+  expect(JSON.parse(vm.sqlText)).toEqual({ collection: 'orders', op: 'find', filter: {}, limit: 100 })
+  expect(DbaasConsole.computed.sqlEditorLabel.call(vm)).toBe('label.dbaas.console.sql.editor.mongo')
+  expect(vm.activeTab).toBe('sql')
+  expect(vm.submitJob).not.toHaveBeenCalled()
+})
+
 describe('DBaaS console result handling', () => {
   beforeEach(() => jest.resetAllMocks())
 
