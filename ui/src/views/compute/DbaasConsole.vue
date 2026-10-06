@@ -77,7 +77,7 @@
               </template>
             </template>
           </a-table>
-          <a-empty v-else-if="!submitting && tablesFetched" :description="$t('label.dbaas.console.no.tables')" />
+          <a-empty v-else-if="!submitting && tablesFetched" :description="isMongo ? 'No collections found' : $t('label.dbaas.console.no.tables')" />
           <a-card
             v-if="describedTable"
             size="small"
