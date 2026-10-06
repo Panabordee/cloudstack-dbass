@@ -39,6 +39,10 @@ SQL
 # database is the only one its owner grants CONNECT on.
 db_user_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_user_ro",""))')
 db_password_ro=$(echo "$payload" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("db_password_ro",""))')
+if [[ -n "$db_user_ro" && ! "$db_user_ro" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]]; then
+  echo "invalid database role" >&2
+  exit 1
+fi
 if [[ -n "$db_user_ro" && -n "$db_password_ro" ]]; then
   sudo -u postgres psql -v ON_ERROR_STOP=1 <<SQL
 CREATE ROLE "${db_user_ro}" LOGIN PASSWORD '${db_password_ro}';
@@ -46,6 +50,25 @@ GRANT pg_read_all_data TO "${db_user_ro}";
 GRANT CONNECT ON DATABASE "${db_name}" TO "${db_user_ro}";
 SQL
 fi
+
+# Allow native clients for this database's roles only. Network reachability is
+# still controlled by the VM's security group; never add a trust/all-users rule.
+hba_file=$(sudo -u postgres psql -tAc 'SHOW hba_file')
+python3 - "$hba_file" "$db_name" "$db_user" "$db_user_ro" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+existing = path.read_text()
+lines = set(existing.splitlines())
+rules = [f'host "{sys.argv[2]}" "{role}" {address} scram-sha-256'
+         for role in sys.argv[3:] if role
+         for address in ('0.0.0.0/0', '::/0')]
+missing = [rule for rule in rules if rule not in lines]
+if missing:
+    with path.open('a') as stream:
+        stream.write('\n# DBaaS database-specific password authentication\n')
+        stream.write('\n'.join(missing) + '\n')
+PY
+sudo -u postgres psql -v ON_ERROR_STOP=1 -tAc 'SELECT pg_reload_conf()' >/dev/null
 
 # Don't trust exit code alone — verify the new credential actually authenticates,
 # same discipline as mongodb.sh after its equivalent bug.
