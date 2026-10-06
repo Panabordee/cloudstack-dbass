@@ -50,8 +50,11 @@ public class DropDbaasIndexCmd extends DbaasConsoleJobCmdBase {
         DbaasManagerImpl.validateIdentifier(table, "table");
         DbaasManagerImpl.validateIdentifier(name, "name");
         JsonObject payload = new JsonObject();
-        payload.addProperty("statement", "DROP INDEX " + quoteIdentifier(engineType, name)
-                + " ON " + quoteIdentifier(engineType, table));
+        String statement = "DROP INDEX " + quoteIdentifier(engineType, name);
+        if (!"postgresql".equals(engineType)) {
+            statement += " ON " + quoteIdentifier(engineType, table);
+        }
+        payload.addProperty("statement", statement);
         return payload.toString();
     }
 
