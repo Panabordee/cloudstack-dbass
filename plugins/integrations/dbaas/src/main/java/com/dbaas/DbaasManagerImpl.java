@@ -337,6 +337,17 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         }
     }
 
+    static String readOnlyUsername(String owner) {
+        validateIdentifier(owner, "dbusername");
+        if (owner.length() <= 29) {
+            return owner + "_ro";
+        }
+        // MySQL limits account names to 32 characters. A hash preserves the
+        // distinction between owners with the same prefix without truncating
+        // or rejecting the user's valid 32-character name.
+        return owner.substring(0, 4) + "_" + sha256Hex(owner).substring(0, 24) + "_ro";
+    }
+
     static String generatePassword() {
         StringBuilder sb = new StringBuilder(PASSWORD_LENGTH);
         for (int i = 0; i < PASSWORD_LENGTH; i++) {
@@ -1306,7 +1317,7 @@ public class DbaasManagerImpl extends ManagerBase implements DbaasManager, Plugg
         // The console's read-only role: same charset rules, name derived from
         // the owner. Created by the engine script from the request; stored as
         // a second credential row with db_role='readonly'.
-        final String dbUserRo = dbUsername + "_ro";
+        final String dbUserRo = readOnlyUsername(dbUsername);
         final String dbPasswordRo = generatePassword();
 
         VirtualMachineTemplate template = _entityMgr.findById(VirtualMachineTemplate.class, vm.getTemplateId());
