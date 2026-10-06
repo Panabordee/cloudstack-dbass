@@ -261,6 +261,12 @@ above cannot install packages, so this one has to boot.
 2. Install the engine and its python client (§1), configure it to listen on
    `0.0.0.0` and to start at boot
 3. Copy in every file from §1 and enable the units
+   For PostgreSQL, `postgresql.sh` also installs database/role-specific IPv4
+   and IPv6 `pg_hba.conf` rules with `scram-sha-256`, then reloads the config.
+   Listening on all interfaces alone does not permit native client access.
+   Restrict reachable client addresses with the VM security group; do not add
+   a blanket `trust` rule. Verify a connection from outside the guest as well
+   as the console's local connection.
 4. Set `/opt/dbaas/engine` to the script *name* (§1)
 5. Clean up: `cloud-init clean --logs`, remove `/var/lib/dbaas/*`,
    truncate logs, remove SSH host keys and `~/.ssh/authorized_keys`, clear
