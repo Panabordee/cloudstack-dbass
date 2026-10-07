@@ -30,6 +30,7 @@
               {{ $t('label.dbaas.console.refresh') }}
             </a-button>
             <a-button
+              v-if="!isMongo"
               type="primary"
               style="margin-left: 8px"
               :disabled="columnTypes.length === 0"
@@ -415,6 +416,7 @@ export default {
         title: name,
         dataIndex: 'column_' + index,
         key: 'column_' + index,
+        customRender: ({ text }) => text === null ? 'NULL' : text,
         ellipsis: { showTitle: true },
         width: Math.min(320, Math.max(120, String(name).length * 9 + 32))
       }))

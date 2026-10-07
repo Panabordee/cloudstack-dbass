@@ -63,6 +63,17 @@ describe('DBaaS console result handling', () => {
     expect(vm.resultShown).toBe(false)
     expect(vm.jobError).toBe('query rejected')
   })
+
+  it('shows database null separately from empty strings, zero and false without changing result data', () => {
+    const vm = context()
+    DbaasConsole.methods.parseResult.call(vm, {
+      result: JSON.stringify({ columns: ['value'], rows: [[null], [''], [0], [false]] })
+    })
+    const column = vm.resultColumns[0]
+    const values = vm.resultRows.map(row => row[column.dataIndex])
+    expect(values).toEqual([null, '', 0, false])
+    expect(values.map(text => column.customRender({ text }))).toEqual(['NULL', '', 0, false])
+  })
 })
 
 it('converts a parameterised type to an SQL type with the requested length', () => {
