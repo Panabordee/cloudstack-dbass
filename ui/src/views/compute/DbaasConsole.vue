@@ -68,6 +68,7 @@
                   {{ $t('label.dbaas.console.query') }}
                 </a-button>
                 <a-button
+                  v-if="!isMongo"
                   size="small"
                   danger
                   :disabled="!dropEnabled"
@@ -78,7 +79,9 @@
               </template>
             </template>
           </a-table>
-          <a-empty v-else-if="!submitting && tablesFetched" :description="isMongo ? 'No collections found' : $t('label.dbaas.console.no.tables')" />
+          <div v-else-if="!submitting && tablesFetched" class="console-empty">
+            {{ isMongo ? 'No collections found' : $t('label.dbaas.console.no.tables') }}
+          </div>
           <a-card
             v-if="describedTable"
             size="small"
@@ -661,6 +664,11 @@ export default {
 }
 .console-note {
   margin: 8px 0;
+}
+.console-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--query-muted);
 }
 .console-card {
   margin-top: 12px;

@@ -1,11 +1,27 @@
 import { getAPI } from '@/api'
 import DbaasConsole from '@/views/compute/DbaasConsole.vue'
+import { shallowMount } from '@vue/test-utils'
 
 jest.mock('@/api', () => ({ getAPI: jest.fn(), postAPI: jest.fn() }))
 
 const context = () => ({
   ...DbaasConsole.data.call({ $t: key => key }),
   $t: key => key
+})
+
+it('renders the MongoDB empty collection message instead of a blank panel', () => {
+  const slot = { template: '<div><slot /></div>' }
+  const wrapper = shallowMount({ ...DbaasConsole, created () {} }, {
+    props: { resource: { id: 'empty-db', templatename: 'dbaas-mongodb-v2' } },
+    data: () => ({ tablesFetched: true }),
+    global: {
+      mocks: { $t: key => key, $store: { getters: { darkMode: false } } },
+      stubs: { 'a-spin': slot, 'a-tabs': slot, 'a-tab-pane': slot }
+    }
+  })
+  expect(wrapper.text()).toContain('No collections found')
+  expect(wrapper.find('a-empty').exists()).toBe(false)
+  wrapper.unmount()
 })
 
 it.each([
