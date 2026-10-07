@@ -4561,6 +4561,7 @@
   "label.dbusername": "Database username",
   "label.engine": "Engine",
   "label.go.to.instance": "Go to instance",
+  "label.dbaas.view.database": "View database",
   "label.nullable": "Nullable",
   "label.reset.database.password": "Reset Database Password",
   "label.retry": "Retry",

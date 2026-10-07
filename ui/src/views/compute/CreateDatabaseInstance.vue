@@ -293,7 +293,7 @@
               <a-button @click="markCopied" v-clipboard:copy="credentials.password">
                 {{ $t('label.copy.password') }}
               </a-button>
-              <a-button @click="confirmClose(goToInstance)">{{ $t('label.go.to.instance') }}</a-button>
+              <a-button @click="confirmClose(goToInstance)">{{ $t('label.dbaas.view.database') }}</a-button>
               <a-button @click="confirmClose(closeAction)">{{ $t('label.close') }}</a-button>
             </div>
           </div>
@@ -307,7 +307,7 @@
               </template>
             </a-alert>
             <div :span="24" class="action-button">
-              <a-button type="primary" @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
+              <a-button type="primary" @click="goToInstance">{{ $t('label.dbaas.view.database') }}</a-button>
               <a-button @click="notifyCopied" v-clipboard:copy="failureMessage">{{ $t('label.copy.error') }}</a-button>
               <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
             </div>
@@ -321,7 +321,7 @@
               </template>
             </a-alert>
             <div :span="24" class="action-button">
-              <a-button type="primary" @click="goToInstance">{{ $t('label.go.to.instance') }}</a-button>
+              <a-button type="primary" @click="goToInstance">{{ $t('label.dbaas.view.database') }}</a-button>
               <a-button @click="closeAction">{{ $t('label.close') }}</a-button>
             </div>
           </div>
@@ -917,7 +917,7 @@ export default {
     },
     goToInstance () {
       if (this.deployedVmId) {
-        this.$router.push({ path: '/vm/' + this.deployedVmId })
+        this.$router.push({ path: '/database/' + this.deployedVmId })
       }
       // The push above already navigates; closeAction() would $router.back()
       // on top of it and land on the wrong page.

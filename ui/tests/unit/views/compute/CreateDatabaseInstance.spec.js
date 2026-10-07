@@ -14,6 +14,14 @@ jest.mock('@/views/compute/wizard/ZoneBlockRadioGroupSelect', () => ({}))
 
 beforeEach(() => jest.resetAllMocks())
 
+it('opens database details after creation without navigating back', () => {
+  const vm = { deployedVmId: 'new-database', $router: { push: jest.fn(), back: jest.fn() }, closed: false }
+  CreateDatabaseInstance.methods.goToInstance.call(vm)
+  expect(vm.$router.push).toHaveBeenCalledWith({ path: '/database/new-database' })
+  expect(vm.$router.back).not.toHaveBeenCalled()
+  expect(vm.closed).toBe(true)
+})
+
 it.each([true, false])('offers shared DB templates with engine API available=%s', async hasEngineApi => {
   const shared = { id: 'shared-db', name: 'dbaas-mysql-v2', displaytext: 'MySQL', isready: true, details: { 'dbaas.configdrive': 'true' } }
   const owned = { ...shared, id: 'owned-db' }
