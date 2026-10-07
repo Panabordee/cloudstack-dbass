@@ -48,6 +48,29 @@ it('opens a MongoDB collection with a JSON command instead of SQL', () => {
   expect(vm.submitJob).not.toHaveBeenCalled()
 })
 
+it.each(['mysql', 'mariadb', 'postgresql', 'mongodb'])('replaces the previous editor command with the collection or table actually previewed on %s', async engine => {
+  const vm = {
+    ...context(),
+    resource: { templatename: `dbaas-${engine}-v2` },
+    sqlText: 'SELECT unrelated_result',
+    submitJob: jest.fn().mockResolvedValue({ result: JSON.stringify({ columns: ['label'], rows: [['preview row']] }) })
+  }
+  vm.isMongo = DbaasConsole.computed.isMongo.call(vm)
+  vm.quoteIdent = name => DbaasConsole.methods.quoteIdent.call(vm, name)
+  vm.queryTable = name => DbaasConsole.methods.queryTable.call(vm, name)
+  vm.parseResult = body => DbaasConsole.methods.parseResult.call(vm, body)
+  DbaasConsole.methods.previewTable.call(vm, 'orders')
+  await Promise.resolve()
+  expect(vm.resultRows[0][vm.resultColumns[0].dataIndex]).toBe('preview row')
+  expect(vm.activeTab).toBe('sql')
+  expect(vm.sqlText).not.toContain('unrelated_result')
+  if (engine === 'mongodb') {
+    expect(JSON.parse(vm.sqlText).collection).toBe('orders')
+  } else {
+    expect(vm.sqlText).toContain('orders')
+  }
+})
+
 describe('DBaaS console result handling', () => {
   beforeEach(() => jest.resetAllMocks())
 
