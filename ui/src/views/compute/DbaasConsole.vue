@@ -615,7 +615,7 @@ export default {
       this.submitJob('previewDbaasTable', { table: name, limit: 100, offset: 0 }).then(body => {
         this.describedTable = null
         this.parseResult(body)
-        this.activeTab = 'sql'
+        this.queryTable(name)
       }).catch(error => this.fail(error))
     },
     onQueryKeydown (event) {
