@@ -16,7 +16,7 @@
 // under the License.
 
 <template>
-  <div class="database-details">
+  <div class="database-details" :class="{ 'database-dark-tables': $store.getters.darkMode }">
     <a-card class="breadcrumb-card">
       <router-link to="/database"><arrow-left-outlined /> {{ $t('label.database') }}</router-link>
       <a-button style="float: right" :loading="loading" @click="fetchData">{{ $t('label.refresh') }}</a-button>
@@ -77,6 +77,7 @@
 
 <script>
 import { getAPI } from '@/api'
+import './databaseTheme.css'
 import Status from '@/components/widgets/Status.vue'
 import DbaasConsole from './DbaasConsole.vue'
 import CreateDatabase from './CreateDatabase.vue'

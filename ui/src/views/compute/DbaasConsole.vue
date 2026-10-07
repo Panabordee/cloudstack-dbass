@@ -4,7 +4,7 @@
      render the result once it arrives. Results are delivered exactly once per
      fetch -- this component owns the single fetch. -->
 <template>
-  <div class="database-console" :class="{ 'database-console-dark': $store.getters.darkMode }">
+  <div class="database-console" :class="{ 'database-console-dark': $store.getters.darkMode, 'database-dark-tables': $store.getters.darkMode }">
     <a-spin :spinning="loading || submitting">
       <!-- An instance can hold several databases (createDatabase may be called
            on it repeatedly). Every console command below runs against whichever
@@ -266,6 +266,7 @@
 
 <script>
 import { getAPI, postAPI } from '@/api'
+import './databaseTheme.css'
 
 export default {
   name: 'DbaasConsole',
