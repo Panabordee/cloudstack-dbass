@@ -17,7 +17,7 @@
 
 <template>
   <database-details v-if="$route.params.id" />
-  <div v-else>
+  <div v-else :class="{ 'database-dark-tables': $store.getters.darkMode }">
     <a-affix
       :offsetTop="$store.getters.maintenanceInitiated || $store.getters.shutdownTriggered ? 103 : 78">
       <a-card class="breadcrumb-card" style="z-index: 10">
@@ -185,6 +185,7 @@
 </template>
 
 <script>
+import './databaseTheme.css'
 import { h, ref } from 'vue'
 import { Checkbox, Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'

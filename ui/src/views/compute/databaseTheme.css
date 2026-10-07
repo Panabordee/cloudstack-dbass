@@ -1,0 +1,7 @@
+/* Keep DBaaS table headings readable when the standard dark theme is active. */
+.database-dark-tables .ant-table-thead,
+.database-dark-tables .ant-table-thead > tr,
+.database-dark-tables .ant-table-thead > tr > th {
+  background: #1f1f1f !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}

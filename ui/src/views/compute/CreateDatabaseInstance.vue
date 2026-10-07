@@ -16,7 +16,7 @@
 // under the License.
 
 <template>
-  <div class="database-wizard" :class="{ 'database-wizard-dark': $store.getters.darkMode }">
+  <div class="database-wizard" :class="{ 'database-wizard-dark': $store.getters.darkMode, 'database-dark-tables': $store.getters.darkMode }">
     <a-row :gutter="12">
       <a-col :md="24" :lg="step === 'form' ? 17 : 24">
         <a-card :bordered="true" :title="$t('label.create.database')">
@@ -349,6 +349,7 @@
 </template>
 
 <script>
+import './databaseTheme.css'
 import { ref, reactive, toRaw } from 'vue'
 import { Modal } from 'ant-design-vue'
 import { getAPI, postAPI } from '@/api'
