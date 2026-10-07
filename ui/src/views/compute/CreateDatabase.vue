@@ -141,7 +141,7 @@ export default {
       }
       this.rules = reactive({
         dbname: [{ required: true, message: this.$t('message.error.required.input') }, identifier],
-        dbusername: [{ required: true, message: this.$t('message.error.required.input') }, identifier],
+        dbusername: [identifier],
         // Optional: an empty field means the backend generates one.
         dbpassword: [{ pattern: DBAAS_PASSWORD_PATTERN, message: this.$t('message.error.database.password') }]
       })

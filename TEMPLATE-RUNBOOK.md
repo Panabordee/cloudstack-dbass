@@ -49,6 +49,12 @@ Engine client library, which the agent imports:
 Use MongoDB's official 8.0 repository for Noble. Allocate an 8 GB root disk
 for the builder; the small Ubuntu base image can run out of space unpacking
 MongoDB and mongosh. Check free space again before capturing the template.
+Set `dbaas-mongodb-v2.minmemorymb` to `1024` in the deployed engines config.
+On this Ubuntu 24.04 / MongoDB 8.0 image, a 512 MB tenant VM OOM-killed
+`mongosh` inside `dbaas-provision.service`; the 1024 MB tenant VM completed
+provisioning and CRUD without an OOM kill (2026-10-07). The console wizard
+and backend both use this per-engine minimum. The older 512 MB MongoDB
+measurement was for a different image and must not override this result.
 
 MongoDB requires AVX on x86_64 ([MongoDB platform requirements](https://www.mongodb.com/docs/v8.0/administration/production-notes/#platform-support-notes)).
 For a KVM host whose default guest CPU is `qemu64`, add the admin-only detail

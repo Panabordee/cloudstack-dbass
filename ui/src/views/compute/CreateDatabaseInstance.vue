@@ -679,10 +679,11 @@ export default {
           // anyway, so do not offer what would fail. When the list response
           // carries no details at all, let the backend be the judge.
           .filter(t => !t.details || t.details['dbaas.configdrive'] === 'true')
-          // Same label source DatabaseInstances uses: the template's own
-          // displaytext ("MySQL Community 8.0 on Debian 12 x86_64"), so a new
-          // engine added to the backend config shows up without UI changes.
-          .map(t => ({ ...t, engineLabel: t.displaytext || t.name }))
+          .map(t => {
+            const type = t.name.replace(/^dbaas-/, '').replace(/-v\d+$/, '')
+            const label = ({ mysql: 'MySQL', mariadb: 'MariaDB', postgresql: 'PostgreSQL', mongodb: 'MongoDB' })[type] || t.displaytext || t.name
+            return { ...t, displaytext: label, engineLabel: label }
+          })
         this.engineMinMemoryByTemplate = {}
         this.templates.forEach(t => {
           this.engineMinMemoryByTemplate[t.id] = minMemoryByEngineName[t.name] || 0
